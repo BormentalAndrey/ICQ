@@ -31,28 +31,68 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;25.2.9519653"
       
-      - name: Install Boost and dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libboost-all-dev \
             cmake \
             ninja-build \
-            build-essential
+            build-essential \
+            wget \
+            tar
       
-      - name: Download Boost source (for Android)
+      - name: Download and setup Boost for Android
         run: |
+          # Скачиваем Boost
           wget -q https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.bz2
           tar -xjf boost_1_85_0.tar.bz2
-          echo "BOOST_ROOT=$(pwd)/boost_1_85_0" >> $GITHUB_ENV
+          
+          # Устанавливаем переменные окружения
+          BOOST_ROOT="$(pwd)/boost_1_85_0"
+          echo "BOOST_ROOT=$BOOST_ROOT" >> $GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$BOOST_ROOT" >> $GITHUB_ENV
+          echo "CPLUS_INCLUDE_PATH=$BOOST_ROOT:$CPLUS_INCLUDE_PATH" >> $GITHUB_ENV
+          
+          # Создаем симлинк для stacktrace.hpp (если нужно)
+          mkdir -p $BOOST_ROOT/boost/stacktrace
+          echo "✅ Boost setup complete at $BOOST_ROOT"
       
       - name: Fix C++ headers (add im_assert)
         run: |
-          # Добавляем im_assert в core/tools/scope.h
-          SCOPE_FILE="core/tools/scope.h"
-          if [ -f "$SCOPE_FILE" ]; then
-            if ! grep -q "#define im_assert" "$SCOPE_FILE"; then
-              cat >> "$SCOPE_FILE" << 'EOF'
+          # Ищем scope.h в разных местах
+          SCOPE_FILES=$(find . -name "scope.h" -type f)
+          
+          if [ -n "$SCOPE_FILES" ]; then
+            for SCOPE_FILE in $SCOPE_FILES; do
+              if ! grep -q "#define im_assert" "$SCOPE_FILE"; then
+                cat >> "$SCOPE_FILE" << 'EOF'
+
+// Android fix for missing im_assert
+#ifndef im_assert
+#include <android/log.h>
+#include <cstdlib>
+#define im_assert(condition) do { \
+    if (!(condition)) { \
+        __android_log_print(ANDROID_LOG_ERROR, "ICQCore", \
+            "Assertion failed: %s:%d: %s", __FILE__, __LINE__, #condition); \
+        abort(); \
+    } \
+} while(0)
+#endif
+EOF
+                echo "✅ Added im_assert to $SCOPE_FILE"
+              else
+                echo "✅ im_assert already defined in $SCOPE_FILE"
+              fi
+            done
+          else
+            echo "⚠️ No scope.h files found"
+            # Создаем временный scope.h если нужно
+            mkdir -p core/tools
+            cat > core/tools/scope.h << 'EOF'
+#ifndef SCOPE_H
+#define SCOPE_H
 
 // Android fix
 #ifndef im_assert
@@ -66,37 +106,105 @@ jobs:
     } \
 } while(0)
 #endif
+
+#endif // SCOPE_H
 EOF
-              echo "✅ Added im_assert to scope.h"
-            fi
-          else
-            echo "⚠️ scope.h not found"
+            echo "✅ Created scope.h"
           fi
+      
+      - name: Create required Android resource files
+        run: |
+          # Создаем все необходимые ресурсы для Android
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/values
+          
+          # XML для backup
+          cat > app/src/main/res/xml/data_extraction_rules.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <data-extraction-rules>
+              <cloud-backup>
+                  <include domain="file" path=".*\.db"/>
+                  <exclude domain="file" path="cache/"/>
+              </cloud-backup>
+          </data-extraction-rules>
+          EOF
+          
+          cat > app/src/main/res/xml/backup_rules.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <full-backup-content>
+              <include domain="file" path="."/>
+              <exclude domain="file" path="cache/"/>
+          </full-backup-content>
+          EOF
+          
+          # bools.xml
+          cat > app/src/main/res/values/bools.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <bool name="use_light_status_bar">false</bool>
+              <bool name="use_light_navigation_bar">false</bool>
+          </resources>
+          EOF
+          
+          echo "✅ Android resource files created"
       
       - name: Create Boost user config for Android
         run: |
-          cat > ~/user-config.jam << 'EOF'
+          mkdir -p ~/user-config.jam
+          cat > ~/user-config.jam << EOF
           using clang : android : 
             /usr/local/lib/android/sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ ;
           EOF
+          
+          # Создаем toolchain file для CMake
+          cat > android.toolchain.cmake << 'EOF'
+          set(CMAKE_SYSTEM_NAME Android)
+          set(CMAKE_SYSTEM_VERSION 24)
+          set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
+          set(CMAKE_ANDROID_NDK /usr/local/lib/android/sdk/ndk/25.2.9519653)
+          set(CMAKE_ANDROID_STL_TYPE c++_shared)
+          EOF
+          
+          echo "✅ Boost user config created"
       
       - name: Fix permissions
-        run: chmod +x gradlew
+        run: |
+          chmod +x gradlew
+          find . -name "*.sh" -exec chmod +x {} \;
       
-      - name: Build with Boost
+      - name: Clean previous builds
+        run: |
+          rm -rf app/.cxx
+          rm -rf app/build
+          ./gradlew clean
+      
+      - name: Build with Boost and CMake
         run: |
           ./gradlew :app:assembleDebug --stacktrace
         env:
           BOOST_ROOT: ${{ env.BOOST_ROOT }}
           BOOST_INCLUDEDIR: ${{ env.BOOST_ROOT }}
           CPLUS_INCLUDE_PATH: ${{ env.BOOST_ROOT }}:$CPLUS_INCLUDE_PATH
+          ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.2.9519653
+          CMAKE_TOOLCHAIN_FILE: /usr/local/lib/android/sdk/ndk/25.2.9519653/build/cmake/android.toolchain.cmake
       
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/debug/*.aab
+      
+      - name: Upload native symbols
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-symbols
+          path: |
+            app/build/intermediates/merged_native_libs/debug/**/*.so
+            app/.cxx/Debug/**/*.so
       
       - name: Upload logs if failed
         if: failure()
@@ -106,3 +214,17 @@ EOF
           path: |
             app/build/reports/
             app/.cxx/**/*.log
+            .gradle/daemon/**/daemon-*.log
+            **/CMakeFiles/**/*.log
+      
+      - name: Run tests
+        if: success()
+        run: |
+          ./gradlew testDebugUnitTest --stacktrace
+      
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
