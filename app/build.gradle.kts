@@ -12,13 +12,23 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         externalNativeBuild {
             cmake {
-                cppFlags += "-std=c++17 -fexceptions -frtti -D__linux__"
-                // Указываем архитектуры, например arm64
-                abiFilters.add("arm64-v8a")
+                // Production-флаги для C++ ядра
+                cppFlags += listOf(
+                    "-std=c++17", 
+                    "-fexceptions", 
+                    "-frtti", 
+                    "-D__linux__", 
+                    "-DNDEBUG",
+                    "-O3", // Максимальная оптимизация
+                    "-flto" // Link-Time Optimization
+                ).joinToString(" ")
+                
+                // Оставляем только актуальные архитектуры для уменьшения размера APK
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
             }
         }
     }
@@ -33,9 +43,27 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            // Разрешаем конфликты, если WebRTC и Core используют разные версии libc++
+            pickFirsts.add("lib/**/libc++_shared.so") 
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -47,6 +75,9 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
-    // WebRTC для реализации P2P видеозвонков (подключается к VoipManager)
-    implementation("org.webrtc:google-webrtc:1.0.32006") 
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
+    // Библиотека WebRTC для отрисовки видеокадров и P2P
+    implementation("org.webrtc:google-webrtc:1.0.32006")
 }
