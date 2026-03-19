@@ -5,43 +5,40 @@ project("icq_mobile_core")
 set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 
 # --- Секция компиляции и дефайнов ---
-# Использование современного метода установки макросов.
-# Добавлены заглушки для im_assert и фикс для boost::filesystem::wpath
-add_compile_definitions(
-    LINUX
-    __linux__
-    ANDROID
-    STRIP_CRASH_HANDLER
-    SUPPORT_EXTERNAL_CONFIG
-    HAVE_SECURE_GETENV=1
-    "im_assert(x)=((void)0)"
-    "boost::filesystem::wpath=boost::filesystem::path"
+# Используем add_definitions с префиксом -D.
+# Это заставит CMake передать функцию-макрос im_assert напрямую в компилятор
+add_definitions(
+    -DLINUX
+    -D__linux__
+    -DANDROID
+    -DSTRIP_CRASH_HANDLER
+    -DSUPPORT_EXTERNAL_CONFIG
+    -DHAVE_SECURE_GETENV=1
+    "-Dim_assert(x)=((void)0)"
 )
 
 # --- Поиск путей заголовков ---
-# ВАЖНО: CMake использует $ENV{VAR} для доступа к переменным окружения GitHub Actions
 include_directories(
     ${ICQ_ROOT}
     ${ICQ_ROOT}/core
     ${ICQ_ROOT}/core/Voip
-    ${ICQ_ROOT}/core/voip        # Путь для симлинка (регистрозависимость)
+    ${ICQ_ROOT}/core/voip
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/common.shared/config
     ${ICQ_ROOT}/gui.shared
-    $ENV{BOOST_ROOT}             # Переменная окружения Boost
-    $ENV{RAPIDJSON_ROOT}         # Переменная окружения RapidJSON
+    $ENV{BOOST_ROOT}
+    $ENV{RAPIDJSON_ROOT}
 )
 
 # --- Сбор исходных файлов ---
-# Собираем ключевые модули ядра, необходимые для работы core_dispatcher
 file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
     "${ICQ_ROOT}/corelib/*.cpp"
 )
 
-# Исключаем специфичный код других платформ, чтобы не было конфликтов при сборке
+# Исключаем специфичный код других платформ
 list(FILTER CORE_SOURCES EXCLUDE REGEX ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*_mac.*|.*_ios.*")
 
 # --- Сборка библиотеки ---
@@ -53,7 +50,7 @@ add_library(icq_core SHARED
 # --- Линковка зависимостей ---
 find_library(log-lib log)
 find_library(android-lib android)
-find_library(z-lib z) # Часто требуется для работы базовых компонентов
+find_library(z-lib z)
 
 target_link_libraries(icq_core
     ${log-lib}
