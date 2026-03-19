@@ -16,21 +16,32 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Добавляем пути к заголовочным файлам из репозитория
+                // Получаем путь к Boost из переменной окружения
+                val boostRoot = System.getenv("BOOST_ROOT") ?: ""
+
+                // Аргументы для CMake
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DBOOST_ROOT=$boostRoot",
+                    "-DBoost_INCLUDE_DIR=$boostRoot"
+                )
+
+                // Флаги C++
                 cppFlags += listOf(
-                    "-std=c++17", 
-                    "-fexceptions", 
-                    "-frtti", 
-                    "-D__linux__", 
+                    "-std=c++17",
+                    "-fexceptions",
+                    "-frtti",
+                    "-D__linux__",
                     "-DNDEBUG",
                     "-O3",
                     "-flto",
-                    // Пути к заголовочным файлам в репозитории
+                    // Пути к заголовочным файлам
                     "-I${project.projectDir}/../core",
                     "-I${project.projectDir}/../corelib",
-                    "-I${project.projectDir}/../common.shared"
+                    "-I${project.projectDir}/../common.shared",
+                    "-I$boostRoot" // Путь к Boost
                 ).joinToString(" ")
-                
+
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
             }
         }
@@ -62,7 +73,7 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            pickFirsts.add("lib/**/libc++_shared.so") 
+            pickFirsts.add("lib/**/libc++_shared.so")
         }
     }
 
@@ -70,11 +81,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    
+
     kotlinOptions {
         jvmTarget = "17"
     }
-    
+
     buildFeatures {
         viewBinding = true
     }
