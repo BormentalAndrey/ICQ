@@ -16,6 +16,11 @@ android {
 
         externalNativeBuild {
             cmake {
+                // Добавляем аргументы с путями к заголовочным файлам
+                arguments += listOf(
+                    "-DCMAKE_CXX_FLAGS=-I${project.projectDir}/../../im-desktop-master/core -I${project.projectDir}/../../im-desktop-master/common.shared"
+                ).joinToString(" ")
+                
                 cppFlags += listOf(
                     "-std=c++17", 
                     "-fexceptions", 
@@ -23,7 +28,10 @@ android {
                     "-D__linux__", 
                     "-DNDEBUG",
                     "-O3",
-                    "-flto"
+                    "-flto",
+                    // Явно указываем пути к заголовочным файлам
+                    "-I${project.projectDir}/../../im-desktop-master/core",
+                    "-I${project.projectDir}/../../im-desktop-master/common.shared"
                 ).joinToString(" ")
                 
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
@@ -80,7 +88,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     
-    // Material Design 3 - необходимо для стилей
+    // Material Design 3
     implementation("com.google.android.material:material:1.11.0")
     
     // Coroutines
