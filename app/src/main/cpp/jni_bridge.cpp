@@ -6,19 +6,7 @@
 #include <map>
 #include <android/log.h>
 
-// Определяем im_assert
-#ifndef im_assert
-#include <cstdlib>
-#define im_assert(condition) do { \
-    if (!(condition)) { \
-        __android_log_print(ANDROID_LOG_ERROR, "ICQCore", \
-            "Assertion failed: %s:%d: %s", __FILE__, __LINE__, #condition); \
-        abort(); \
-    } \
-} while(0)
-#endif
-
-// Определяем типы для stats (ДО включения im_stats.h)
+// Определяем типы для stats (ДО включения заголовков ядра)
 #include <map>
 namespace core { namespace stats {
     using event_props_type = std::map<std::string, std::string>;
@@ -44,7 +32,7 @@ namespace core { namespace stats {
 
 // Теперь включаем заголовки ядра с правильными путями
 #include "core.h"
-#include "gui/core_dispatcher.h"  // Исправленный путь - файл в папке gui/
+#include "gui/core_dispatcher.h"  // Файл в папке gui/
 #include "gui_interface.h"
 
 JavaVM* g_jvm = nullptr;
@@ -93,6 +81,9 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring data_path, jstring cache_path, jobject callback) {
     const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
     
+    if (g_event_callback_obj) {
+        env->DeleteGlobalRef(g_event_callback_obj);
+    }
     g_event_callback_obj = env->NewGlobalRef(callback);
     g_gui_callback = std::make_shared<AndroidGuiCallback>();
 
