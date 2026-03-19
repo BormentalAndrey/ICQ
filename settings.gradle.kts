@@ -1,64 +1,65 @@
+// settings.gradle.kts
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        google()
         mavenCentral()
         gradlePluginPortal()
+        maven { url = uri("https://jitpack.io") }
+    }
+    plugins {
+        id("com.android.application") version "8.6.0"
+        id("com.android.library") version "8.6.0"
+        id("org.jetbrains.kotlin.android") version "1.9.23"
+        id("com.google.gms.google-services") version "4.4.2"
+        id("com.google.devtools.ksp") version "1.9.23-1.0.20"
+        id("com.google.firebase.crashlytics") version "2.9.9"
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.namespace == "com.android" || requested.id.id.startsWith("androidx.")) {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+        }
     }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
-
+        google()
         mavenCentral()
-
+        maven { url = uri("https://jitpack.io") }
+        maven { url = uri("https://maven.google.com") }
+        // Зеркала для ускорения
         maven {
-            url = uri("https://getstream.io/maven")
-        }
-
-        maven {
-            url = uri("https://jitpack.io")
-        }
-
-        maven {
+            name = "Aliyun Mirror"
             url = uri("https://maven.aliyun.com/repository/public")
+        }
+    }
+    versionCatalogs {
+        create("libs") {
+            from(files("gradle/libs.versions.toml"))
         }
     }
 }
 
-rootProject.name = "MessengerP2P"
+rootProject.name = "ICQ"
 
-/* =========================
-   MAIN APPLICATION
-   ========================= */
+// Включение всех модулей
 include(":app")
+include(":core")
+include(":corelib")
+include(":gui")
+include(":gui.shared")
+include(":common.shared")
+include(":libomicron")
+include(":unittests")
 
-/* =========================
-   TERMUX MODULES
-   ========================= */
-include(":terminal-emulator")
-include(":terminal-view")
-include(":termux-shared")
-include(":termux-app")
-
-/* =========================
-   TERMUX MODULE PATHS
-   ========================= */
-project(":terminal-emulator").projectDir = file("terminal-emulator")
-project(":terminal-view").projectDir = file("terminal-view")
-project(":termux-shared").projectDir = file("termux-shared")
-project(":termux-app").projectDir = file("termux-app")
+// Настройка build directories
+buildCache {
+    local {
+        isEnabled = true
+        directory = File(rootDir, "build-cache")
+        removeUnusedEntriesAfterDays = 30
+    }
+}
