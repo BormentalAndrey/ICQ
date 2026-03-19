@@ -1,117 +1,59 @@
-name: Build ICQ for Android
+name: Prepare ICQ Android Environment
 
 on:
   push:
     branches: [ main, master ]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Build type'
-        required: true
-        default: 'release'
-        type: choice
-        options:
-          - debug
-          - release
-      arch:
-        description: 'Architecture'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-          - arm64-v8a
-          - armeabi-v7a
-          - x86_64
-          - all
 
 env:
   QT_VERSION: '5.15.2'
   ANDROID_API_LEVEL: '33'
-  NDK_VERSION: '21.3.6528147' # Оптимальная версия для Qt 5.15.2
+  NDK_VERSION: '21.3.6528147'
 
 jobs:
-  prepare:
+  prepare-files:
     runs-on: ubuntu-22.04
-    outputs:
-      version: ${{ steps.get-version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - id: get-version
-        run: |
-          VERSION=$(grep -oP '(?<=VERSION ).*' VERSION 2>/dev/null || echo "1.0.0")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-  build:
-    needs: prepare
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: ${{ fromJSON(github.event.inputs.arch == 'all' && '["arm64-v8a", "armeabi-v7a", "x86_64"]' || format('["{0}"]', github.event.inputs.arch || 'arm64-v8a')) }}
-    
-    steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Map Architecture
-        id: map
+      - name: 1. Create Android Directory Structure
         run: |
-          case "${{ matrix.arch }}" in
-            arm64-v8a) echo "qt_arch=android_arm64_v8a" >> $GITHUB_OUTPUT ;;
-            armeabi-v7a) echo "qt_arch=android_armv7" >> $GITHUB_OUTPUT ;;
-            x86_64) echo "qt_arch=android_x86_64" >> $GITHUB_OUTPUT ;;
-          esac
+          mkdir -p android/res/values
+          mkdir -p android/res/drawable
+          mkdir -p android/res/mipmap-hdpi
+          mkdir -p android/libs
+          echo "✅ Directory structure created."
 
-      - name: Install JDK 11
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
-      - name: Install Qt & Android Tools
+      - name: 2. Generate Production AndroidManifest.xml
         run: |
-          pip3 install aqtinstall
-          # Установка Qt со всеми необходимыми модулями для ICQ
-          python3 -m aqt install-qt linux android $QT_VERSION ${{ steps.map.outputs.qt_arch }} \
-            --outputdir ${{ github.workspace }}/Qt \
-            -m qtcharts qtgraphicaleffects qtmultimedia qtquickcontrols qtquickcontrols2 qtsvg qtxmlpatterns
-          
-          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
-          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
-
-      - name: Download OpenSSL for Android (Required for Production)
-        run: |
-          # Qt 5.15 на Android требует OpenSSL 1.1.1
-          mkdir -p ${{ github.workspace }}/openssl
-          cd ${{ github.workspace }}/openssl
-          curl -L https://github.com/KDAB/android_openssl/archive/refs/heads/master.tar.gz | tar xz --strip-components=1
-
-      - name: Set Env
-        run: |
-          echo "QT_ROOT=${{ github.workspace }}/Qt/$QT_VERSION/${{ steps.map.outputs.qt_arch }}" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=${{ github.workspace }}/Qt/Tools/ndk/$NDK_VERSION" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=${{ github.workspace }}/Qt/Tools/android-sdk" >> $GITHUB_ENV
-          echo "OPENSSL_PATH=${{ github.workspace }}/openssl" >> $GITHUB_ENV
-
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libgl1-mesa-dev
-
-      - name: Prepare Android Filesystem
-        run: |
-          mkdir -p android/res/values android/res/drawable
-          # Создаем базовый манифест, если его нет
-          if [ ! -f android/AndroidManifest.xml ]; then
-            cat > android/AndroidManifest.xml << 'EOF'
+          cat > android/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.icq.desktop" android:versionCode="1" android:versionName="1.0">
-              <application android:label="ICQ" android:name="org.qtproject.qt5.android.bindings.QtApplication" android:icon="@drawable/ic_launcher">
-                  <activity android:name="org.qtproject.qt5.android.bindings.QtActivity" android:configChanges="orientation|uiMode|screenLayout|screenSize" android:launchMode="singleTop">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.icq.desktop"
+              android:versionCode="1"
+              android:versionName="1.0.0">
+
+              <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
+              
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+              <application
+                  android:label="ICQ"
+                  android:name="org.qtproject.qt5.android.bindings.QtApplication"
+                  android:icon="@drawable/ic_launcher"
+                  android:allowBackup="true">
+                  
+                  <activity
+                      android:name="org.qtproject.qt5.android.bindings.QtActivity"
+                      android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation"
+                      android:launchMode="singleTop"
+                      android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -119,76 +61,96 @@ jobs:
                       <meta-data android:name="android.app.lib_name" android:value="ICQ" />
                   </activity>
               </application>
-              <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
           </manifest>
           EOF
+          echo "✅ AndroidManifest.xml generated."
+
+      - name: 3. Generate Resource Files (strings, styles, colors)
+        run: |
+          # strings.xml
+          cat > android/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">ICQ</string>
+          </resources>
+          EOF
+
+          # colors.xml
+          cat > android/res/values/colors.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="primary">#00B4FF</color>
+              <color name="white">#FFFFFF</color>
+          </resources>
+          EOF
+
+          # styles.xml
+          cat > android/res/values/styles.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <item name="android:windowBackground">@color/white</item>
+              </style>
+          </resources>
+          EOF
+          echo "✅ Values resources generated."
+
+      - name: 4. Create Placeholder Icon
+        run: |
+          cat > android/res/drawable/ic_launcher.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#00B4FF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
+          </vector>
+          EOF
+          echo "✅ Placeholder icon created."
+
+      - name: 5. Download OpenSSL for Android
+        run: |
+          mkdir -p openssl
+          cd openssl
+          curl -L https://github.com/KDAB/android_openssl/archive/refs/heads/master.tar.gz | tar xz --strip-components=1
+          echo "✅ OpenSSL sources prepared."
+
+      - name: 6. Inject Android Logic into CMakeLists.txt
+        run: |
+          if ! grep -q "ANDROID" CMakeLists.txt; then
+            cat >> CMakeLists.txt << 'EOF'
+
+          # --- Automatic Android Configuration ---
+          if(ANDROID)
+              message(STATUS "Configuring for Android...")
+              add_definitions(-DANDROID -DQT_ANDROID)
+              find_package(Qt5 REQUIRED COMPONENTS Core AndroidExtras Multimedia Network Quick Svg)
+              
+              # Link essential Android system libraries
+              link_libraries(log android EGL GLESv2 OpenSLES)
+          endif()
+          EOF
+            echo "✅ CMakeLists.txt patched."
+          else
+            echo "ℹ️ CMakeLists.txt already contains ANDROID logic."
           fi
 
-      - name: Configure and Build
+      - name: 7. Install Qt & Build Tools (AQTIinstall)
         run: |
-          mkdir build && cd build
-          cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=${{ matrix.arch }} \
-            -DANDROID_PLATFORM=android-21 \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} \
-            -DQt5_DIR=$QT_ROOT/lib/cmake/Qt5 \
-            -G Ninja
-          ninja
-
-      - name: Find Binary
-        id: find_bin
-        run: |
-          BIN_PATH=$(find build -name "lib*.so" -type f | head -n 1)
-          echo "path=$BIN_PATH" >> $GITHUB_OUTPUT
-
-      - name: Deploy APK
-        run: |
-          # Создание файла настроек деплоя
-          cat > build/deploy_settings.json << EOF
-          {
-             "qt": "$QT_ROOT",
-             "sdk": "$ANDROID_SDK_ROOT",
-             "ndk": "$ANDROID_NDK_ROOT",
-             "target-architecture": "${{ matrix.arch }}",
-             "android-package-source": "${{ github.workspace }}/android",
-             "android-package-name": "com.icq.desktop",
-             "application-binary": "${{ github.workspace }}/${{ steps.find_bin.outputs.path }}",
-             "openssl-libs-path": "$OPENSSL_PATH/${{ matrix.arch }}",
-             "deployment-dependencies": "plugins/platforms/android/libqtforandroid.so"
-          }
-          EOF
+          pip3 install aqtinstall
+          # Установка только для arm64 для проверки инструментов
+          python3 -m aqt install-qt linux android $QT_VERSION android_arm64_v8a \
+            --outputdir ${{ github.workspace }}/Qt \
+            -m qtgraphicaleffects qtmultimedia qtquickcontrols2 qtsvg
           
-          $QT_ROOT/bin/androiddeployqt \
-            --input build/deploy_settings.json \
-            --output build/android-build \
-            --android-platform android-33 \
-            --jdk $JAVA_HOME \
-            --gradle \
-            ${{ github.event.inputs.build_type == 'release' && '--release' || '' }}
+          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
+          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
+          echo "✅ Build tools installed."
 
-      - name: Upload Artifact
+      - name: 8. Archive Prepared Files
         uses: actions/upload-artifact@v4
         with:
-          name: ICQ-${{ matrix.arch }}-${{ github.event.inputs.build_type }}
-          path: build/android-build/build/outputs/apk/**/*.apk
-
-  release:
-    needs: [prepare, build]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-      - name: GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-artifacts/**/*.apk
-          name: ICQ Android ${{ needs.prepare.outputs.version }}
-          body: "Автоматическая сборка ICQ для Android. Архитектуры: ARM64, ARMv7, x86_64."
+          name: prepared-android-project
+          path: |
+            android/
+            openssl/
+            CMakeLists.txt
+          retention-days: 1
+          
