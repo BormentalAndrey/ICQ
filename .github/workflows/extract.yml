@@ -1,35 +1,37 @@
-name: Build ICQ Android
+name: Check Project Structure
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  check-structure:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+      - name: List all files
+        run: |
+          echo "=== Current directory structure ==="
+          ls -la
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-        
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug
-        
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-android-debug
-          path: app/build/outputs/apk/debug/*.apk
+          echo -e "\n=== Checking for Android project files ==="
+          if [ -f "gradlew" ]; then echo "✅ gradlew found"; else echo "❌ gradlew not found"; fi
+          if [ -d "app" ]; then echo "✅ app directory found"; else echo "❌ app directory not found"; fi
+          if [ -f "build.gradle" ]; then echo "✅ build.gradle found"; else echo "❌ build.gradle not found"; fi
+          if [ -f "settings.gradle" ]; then echo "✅ settings.gradle found"; else echo "❌ settings.gradle not found"; fi
+          
+          echo -e "\n=== Looking for package.json (Node.js project) ==="
+          if [ -f "package.json" ]; then 
+            echo "✅ package.json found - this is likely a Node.js/Electron project"
+            cat package.json | grep -A 5 "\"name\""
+          else
+            echo "❌ package.json not found"
+          fi
+          
+          echo -e "\n=== Looking for AndroidManifest.xml ==="
+          find . -name "AndroidManifest.xml" -type f 2>/dev/null || echo "No AndroidManifest.xml found"
+          
+          echo -e "\n=== Looking for .java or .kt files ==="
+          find . -name "*.java" -o -name "*.kt" 2>/dev/null | head -10 || echo "No Java/Kotlin files found"
