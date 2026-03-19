@@ -1,3 +1,9 @@
+// В начало файла добавьте:
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
+#include "tools/binary_stream.h"
+#include "tools/tlv.h"
 #pragma once
 
 #include "proxy_settings.h"
