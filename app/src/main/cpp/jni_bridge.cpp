@@ -42,9 +42,9 @@ namespace core { namespace stats {
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Теперь включаем заголовки ядра
+// Теперь включаем заголовки ядра с правильными путями
 #include "core.h"
-#include "core_dispatcher.h"
+#include "gui/core_dispatcher.h"  // Исправленный путь - файл в папке gui/
 #include "gui_interface.h"
 
 JavaVM* g_jvm = nullptr;
