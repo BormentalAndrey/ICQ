@@ -16,11 +16,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Добавляем аргументы с путями к заголовочным файлам
-                arguments += listOf(
-                    "-DCMAKE_CXX_FLAGS=-I${project.projectDir}/../../im-desktop-master/core -I${project.projectDir}/../../im-desktop-master/common.shared"
-                ).joinToString(" ")
-                
+                // Добавляем пути к заголовочным файлам из репозитория
                 cppFlags += listOf(
                     "-std=c++17", 
                     "-fexceptions", 
@@ -29,9 +25,10 @@ android {
                     "-DNDEBUG",
                     "-O3",
                     "-flto",
-                    // Явно указываем пути к заголовочным файлам
-                    "-I${project.projectDir}/../../im-desktop-master/core",
-                    "-I${project.projectDir}/../../im-desktop-master/common.shared"
+                    // Пути к заголовочным файлам в репозитории
+                    "-I${project.projectDir}/../core",
+                    "-I${project.projectDir}/../corelib",
+                    "-I${project.projectDir}/../common.shared"
                 ).joinToString(" ")
                 
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
@@ -84,29 +81,14 @@ android {
 }
 
 dependencies {
-    // AndroidX Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
-    
-    // Material Design 3
     implementation("com.google.android.material:material:1.11.0")
-    
-    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    
-    // WebRTC
     implementation("io.github.webrtc-sdk:android:137.7151.05")
-    
-    // ConstraintLayout
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    
-    // Lifecycle
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    
-    // Fragment
     implementation("androidx.fragment:fragment-ktx:1.6.2")
-    
-    // Activity
     implementation("androidx.activity:activity-ktx:1.8.2")
 }
