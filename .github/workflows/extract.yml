@@ -1,15 +1,13 @@
-# .github/workflows/build.yml
-name: Build ICQ Mobile
+# .github/workflows/debug-build.yml
+name: Debug Build ICQ Mobile
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build:
+  debug-build:
     runs-on: ubuntu-latest
     
     steps:
@@ -31,26 +29,121 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;25.2.9519653"
       
-      - name: Create Gradle wrapper
+      - name: Full diagnostics - find all gradle files
         run: |
+          echo "========================================="
+          echo "STEP 1: Finding all .gradle files"
+          echo "========================================="
+          find . -name "*.gradle*" -type f | sort -f
+          
+          echo "\n========================================="
+          echo "STEP 2: Finding repositories in all files"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "repositories" {} \;
+          
+          echo "\n========================================="
+          echo "STEP 3: Finding google() in all files"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "google()" {} \;
+          
+          echo "\n========================================="
+          echo "STEP 4: Finding mavenCentral() in all files"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "mavenCentral()" {} \;
+          
+          echo "\n========================================="
+          echo "STEP 5: Finding buildscript blocks"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "buildscript" {} \;
+          
+          echo "\n========================================="
+          echo "STEP 6: Finding allprojects blocks"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "allprojects" {} \;
+          
+          echo "\n========================================="
+          echo "STEP 7: Finding subprojects blocks"
+          echo "========================================="
+          find . -name "*.gradle*" -type f -exec grep -l "subprojects" {} \;
+      
+      - name: Show content of settings.gradle.kts
+        run: |
+          echo "========================================="
+          echo "settings.gradle.kts content:"
+          echo "========================================="
+          cat settings.gradle.kts
+      
+      - name: Show content of build.gradle.kts
+        run: |
+          echo "========================================="
+          echo "build.gradle.kts content:"
+          echo "========================================="
+          cat build.gradle.kts
+      
+      - name: Show content of gradle.properties
+        run: |
+          echo "========================================="
+          echo "gradle.properties content:"
+          echo "========================================="
+          cat gradle.properties
+      
+      - name: Show content of gradle wrapper properties
+        run: |
+          echo "========================================="
+          echo "gradle-wrapper.properties content:"
+          echo "========================================="
+          cat gradle/wrapper/gradle-wrapper.properties
+      
+      - name: Show all module build.gradle.kts files
+        run: |
+          echo "========================================="
+          echo "All module build.gradle.kts files:"
+          echo "========================================="
+          find . -path "*/build.gradle.kts" -not -path "./build.gradle.kts" | while read file; do
+            echo "\n--- $file ---"
+            head -20 "$file"
+          done
+      
+      - name: Check for any build.gradle files (without .kts)
+        run: |
+          echo "========================================="
+          echo "Checking for build.gradle (without .kts):"
+          echo "========================================="
+          find . -name "build.gradle" -not -name "*.kts"
+      
+      - name: Check for init scripts
+        run: |
+          echo "========================================="
+          echo "Checking for init scripts:"
+          echo "========================================="
+          find . -name "init.gradle*"
+          ls -la ~/.gradle/init.d/ 2>/dev/null || echo "No init.d folder"
+      
+      - name: Clear Gradle cache
+        run: |
+          rm -rf ~/.gradle/caches/
+          rm -rf .gradle
+          rm -rf */build
+      
+      - name: Create fresh gradle wrapper
+        run: |
+          rm -rf gradle/wrapper
           mkdir -p gradle/wrapper
           
-          # gradle-wrapper.properties
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
           
-          # Download wrapper jar
           curl -L -o gradle/wrapper/gradle-wrapper.jar \
-            https://github.com/gradle/gradle/raw/v8.7.0/gradle/wrapper/gradle-wrapper.jar
+            https://github.com/gradle/gradle/raw/v8.6.0/gradle/wrapper/gradle-wrapper.jar
           
           chmod +x gradlew
       
-      - name: Create settings.gradle.kts
+      - name: Create minimal settings.gradle.kts
         run: |
           cat > settings.gradle.kts << 'EOF'
           pluginManagement {
@@ -60,91 +153,31 @@ jobs:
                   gradlePluginPortal()
               }
           }
+          
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()
                   mavenCentral()
-                  maven { url = uri("https://jitpack.io") }
               }
           }
+          
           rootProject.name = "ICQ"
           include(":app")
-          include(":core")
-          include(":corelib")
-          include(":gui")
-          include(":gui.shared")
-          include(":common.shared")
-          include(":libomicron")
           EOF
       
-      - name: Create root build.gradle.kts
+      - name: Create minimal build.gradle.kts
         run: |
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application") version "8.6.0" apply false
-              id("com.android.library") version "8.6.0" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.23" apply false
-              id("com.google.gms.google-services") version "4.4.2" apply false
-              id("com.google.devtools.ksp") version "1.9.23-1.0.20" apply false
-          }
-          
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven { url = uri("https://jitpack.io") }
-              }
-          }
-          
-          tasks.register("cleanAll") {
-              delete(rootProject.buildDir)
           }
           EOF
       
-      - name: Create gradle.properties
+      - name: Try minimal build
         run: |
-          cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          android.useAndroidX=true
-          android.enableJetifier=true
-          kotlin.code.style=official
-          EOF
+          ./gradlew projects --stacktrace
       
-      - name: Create products/project_settings.cmake
-        run: |
-          mkdir -p products
-          cat > products/project_settings.cmake << 'EOF'
-          set(PROJECT_NAME "ICQ")
-          set(PROJECT_VERSION "10.0.0")
-          
-          if(NOT CMAKE_BUILD_TYPE)
-              set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
-          endif()
-          
-          option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-          option(ENABLE_TESTS "Enable tests" OFF)
-          
-          if(ANDROID)
-              set(PLATFORM_ANDROID TRUE)
-              add_definitions(-DANDROID)
-          endif()
-          
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          EOF
-      
-      - name: Build debug APK
+      - name: Now try full build with FAIL_ON_PROJECT_REPOS
         run: |
           ./gradlew :app:assembleDebug --stacktrace
-        env:
-          GRADLE_OPTS: -Dorg.gradle.daemon=false
-      
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
