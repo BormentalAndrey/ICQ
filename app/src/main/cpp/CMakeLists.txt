@@ -50,12 +50,12 @@ add_library(icq_core SHARED
     ${CORE_SOURCES}
 )
 
-# --- Настройка путей инклудов (все поддиректории) ---
+# --- Настройка путей инклудов ---
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
     
-    # Core основные директории
+    # Core директории
     ${ICQ_ROOT}/core
     ${ICQ_ROOT}/core/voip
     ${ICQ_ROOT}/core/Voip
@@ -127,15 +127,13 @@ target_compile_options(icq_core PRIVATE
     -Wno-missing-field-initializers
 )
 
-# --- Линковка системных библиотек ---
+# --- Линковка системных библиотек (без atomic) ---
 find_library(log-lib log)
 find_library(z-lib z)
-find_library(atomic-lib atomic)
 
 target_link_libraries(icq_core
     ${log-lib}
     ${z-lib}
-    ${atomic-lib}
 )
 
 # Условная линковка curl
@@ -156,5 +154,4 @@ message(STATUS "CURL_INCLUDE_DIR: ${CURL_INCLUDE_DIR}")
 message(STATUS "ANDROID_ABI: ${ANDROID_ABI}")
 message(STATUS "ANDROID_NDK: ${ANDROID_NDK}")
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
-message(STATUS "CORE_SOURCES count: ${CORE_SOURCES_COUNT}")
 message(STATUS "==================================================================")
