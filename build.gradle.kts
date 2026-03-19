@@ -1,5 +1,4 @@
 // Root build.gradle.kts for ICQ Mobile
-import java.io.ByteArrayOutputStream
 import java.util.Properties
 
 // Load local properties
@@ -57,8 +56,7 @@ subprojects {
             freeCompilerArgs = freeCompilerArgs + listOf(
                 "-Xjsr305=strict",
                 "-Xjvm-default=all",
-                "-Xopt-in=kotlin.RequiresOptIn",
-                "-Xskip-prerelease-check"
+                "-Xopt-in=kotlin.RequiresOptIn"
             )
             allWarningsAsErrors = false
         }
@@ -85,8 +83,6 @@ subprojects {
             showCauses = true
             showStackTraces = true
         }
-        maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
-        timeout = java.time.Duration.ofMinutes(10)
     }
 }
 
@@ -97,11 +93,7 @@ tasks.register("cleanAll") {
     doLast {
         delete(
             rootProject.layout.buildDirectory,
-            *subprojects.map { it.layout.buildDirectory }.toTypedArray(),
-            rootProject.layout.projectDirectory.dir(".gradle"),
-            rootProject.layout.projectDirectory.dir("build-native"),
-            rootProject.layout.projectDirectory.dir("captures"),
-            rootProject.layout.projectDirectory.dir("cxx")
+            *subprojects.map { it.layout.buildDirectory }.toTypedArray()
         )
     }
 }
@@ -116,52 +108,11 @@ tasks.register("printBuildInfo") {
         println("Version: $versionName ($versionCode)")
         println("Gradle: ${gradle.gradleVersion}")
         println("Java: ${System.getProperty("java.version")}")
-        println("JVM: ${System.getProperty("java.vm.name")}")
-        println("OS: ${System.getProperty("os.name")} ${System.getProperty("os.version")}")
-        println("Max memory: ${Runtime.getRuntime().maxMemory() / 1024 / 1024} MB")
-        println("Cores: ${Runtime.getRuntime().availableProcessors()}")
+        println("OS: ${System.getProperty("os.name")}")
         println("========================================")
         println("Modules:")
         subprojects.forEach { println("  - ${it.name}") }
         println("========================================")
-    }
-}
-
-tasks.register("checkDependencies") {
-    description = "Check for dependency updates"
-    group = "verification"
-    doLast {
-        configurations.all {
-            resolutionStrategy.eachDependency {
-                println("${requested.group}:${requested.name}:${requested.version}")
-            }
-        }
-    }
-}
-
-tasks.register("buildNative") {
-    description = "Build native libraries with CMake"
-    group = "build"
-    doLast {
-        val ndkPath = System.getenv("ANDROID_NDK") ?: localProperties.getProperty("ndk.path")
-        if (ndkPath != null) {
-            exec {
-                commandLine = listOf(
-                    "cmake",
-                    "-DCMAKE_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
-                    "-DANDROID_ABI=arm64-v8a",
-                    "-DANDROID_PLATFORM=android-24",
-                    "-DANDROID_STL=c++_shared",
-                    "-DCMAKE_BUILD_TYPE=Release",
-                    "-DPRODUCT_NAME=icq",
-                    "-B", "build-native",
-                    "-S", "."
-                )
-            }
-            exec {
-                commandLine = listOf("cmake", "--build", "build-native", "-j", "4")
-            }
-        }
     }
 }
 
