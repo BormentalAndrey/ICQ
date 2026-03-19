@@ -50,24 +50,6 @@ plugins {
 
 // Common configuration for all subprojects
 subprojects {
-    // Common repositories (if needed, though we use settings repositories)
-    configurations.all {
-        resolutionStrategy {
-            // Force specific versions to avoid conflicts
-            force(
-                "org.jetbrains.kotlin:kotlin-stdlib:1.9.23",
-                "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.23",
-                "org.jetbrains.kotlin:kotlin-reflect:1.9.23",
-                "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3",
-                "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
-            )
-            
-            // Cache dynamic versions
-            cacheDynamicVersionsFor(1, "hours")
-            cacheChangingModulesFor(4, "hours")
-        }
-    }
-    
     // Common Kotlin compilation options
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         kotlinOptions {
@@ -114,8 +96,8 @@ tasks.register("cleanAll") {
     group = "build"
     doLast {
         delete(
-            rootProject.buildDir,
-            *subprojects.map { it.buildDir }.toTypedArray(),
+            rootProject.layout.buildDirectory,
+            *subprojects.map { it.layout.buildDirectory }.toTypedArray(),
             rootProject.layout.projectDirectory.dir(".gradle"),
             rootProject.layout.projectDirectory.dir("build-native"),
             rootProject.layout.projectDirectory.dir("captures"),
@@ -140,7 +122,7 @@ tasks.register("printBuildInfo") {
         println("Cores: ${Runtime.getRuntime().availableProcessors()}")
         println("========================================")
         println("Modules:")
-        subprojects.forEach { println("  - ${it.name} (${it.path})") }
+        subprojects.forEach { println("  - ${it.name}") }
         println("========================================")
     }
 }
@@ -152,6 +134,32 @@ tasks.register("checkDependencies") {
         configurations.all {
             resolutionStrategy.eachDependency {
                 println("${requested.group}:${requested.name}:${requested.version}")
+            }
+        }
+    }
+}
+
+tasks.register("buildNative") {
+    description = "Build native libraries with CMake"
+    group = "build"
+    doLast {
+        val ndkPath = System.getenv("ANDROID_NDK") ?: localProperties.getProperty("ndk.path")
+        if (ndkPath != null) {
+            exec {
+                commandLine = listOf(
+                    "cmake",
+                    "-DCMAKE_TOOLCHAIN_FILE=$ndkPath/build/cmake/android.toolchain.cmake",
+                    "-DANDROID_ABI=arm64-v8a",
+                    "-DANDROID_PLATFORM=android-24",
+                    "-DANDROID_STL=c++_shared",
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DPRODUCT_NAME=icq",
+                    "-B", "build-native",
+                    "-S", "."
+                )
+            }
+            exec {
+                commandLine = listOf("cmake", "--build", "build-native", "-j", "4")
             }
         }
     }
