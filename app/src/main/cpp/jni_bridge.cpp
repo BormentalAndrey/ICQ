@@ -3,7 +3,40 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <map>
 #include <android/log.h>
+
+// Добавляем определение im_assert
+#ifndef im_assert
+#include <cstdlib>
+#define im_assert(condition) do { \
+    if (!(condition)) { \
+        __android_log_print(ANDROID_LOG_ERROR, "ICQCore", \
+            "Assertion failed: %s:%d: %s", __FILE__, __LINE__, #condition); \
+        abort(); \
+    } \
+} while(0)
+#endif
+
+// Добавляем определение для stats
+#include <map>
+namespace core { namespace stats {
+    using event_props_type = std::map<std::string, std::string>;
+    enum class stats_event_names {};
+    enum class im_stat_event_names {};
+    class statistics {
+    public:
+        void insert_event(stats_event_names, const event_props_type&) {}
+        void insert_event(stats_event_names, event_props_type&&) {}
+        bool is_enabled() const { return false; }
+    };
+    class im_stats {
+    public:
+        void insert_event(im_stat_event_names, const event_props_type&) {}
+        void insert_event(im_stat_event_names, event_props_type&&) {}
+        bool is_enabled() const { return false; }
+    };
+}}
 
 // Логирование для отладки в Logcat
 #define LOG_TAG "IcqCoreJNI"
