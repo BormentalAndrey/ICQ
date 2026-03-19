@@ -33,9 +33,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libboost-all-dev
       
+      - name: Find Boost path
+        run: |
+          BOOST_PATH=$(dpkg -L libboost-all-dev | grep -m1 "boost/stacktrace.hpp" | xargs dirname | xargs dirname)
+          echo "BOOST_PATH=$BOOST_PATH" >> $GITHUB_ENV
+          echo "Boost found at: $BOOST_PATH"
+      
       - name: Fix permissions
         run: chmod +x gradlew
       
-      - name: Build
+      - name: Build with Boost path
         run: |
-          ./gradlew :app:assembleDebug
+          ./gradlew :app:assembleDebug -PboostPath=${{ env.BOOST_PATH }}
