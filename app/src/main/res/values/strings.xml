@@ -1,3 +1,25 @@
 <resources>
     <string name="app_name">ICQ Mobile</string>
+    <string name="app_name_full">ICQ Messenger</string>
+    
+    <!-- Общие строки -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="close">Close</string>
+    <string name="retry">Retry</string>
+    
+    <!-- Строки для звонков -->
+    <string name="call_incoming">Incoming call...</string>
+    <string name="call_outgoing">Calling...</string>
+    <string name="call_connecting">Connecting...</string>
+    <string name="call_in_progress">Call in progress</string>
+    <string name="call_ended">Call ended</string>
+    <string name="call_missed">Missed call</string>
+    <string name="call_rejected">Call rejected</string>
+    
+    <!-- Строки для разрешений -->
+    <string name="permission_camera_required">Camera permission is required for video calls</string>
+    <string name="permission_microphone_required">Microphone permission is required for calls</string>
 </resources>
