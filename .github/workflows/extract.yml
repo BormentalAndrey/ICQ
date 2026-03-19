@@ -28,9 +28,14 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;25.2.9519653"
       
+      - name: Install Boost
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev
+      
       - name: Fix permissions
         run: chmod +x gradlew
       
-      - name: Try to build
+      - name: Build
         run: |
           ./gradlew :app:assembleDebug
