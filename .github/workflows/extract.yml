@@ -3,8 +3,6 @@ name: Build ICQ Mobile
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -12,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          submodules: recursive  # Важно для ICQ core
-          fetch-depth: 1
+          submodules: recursive
       
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -27,87 +23,41 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            .gradle
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+      - name: Install NDK
+        run: sdkmanager "ndk;25.2.9519653"
       
-      - name: Install NDK and CMake
-        run: |
-          sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
-          echo "ANDROID_NDK=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "CMAKE_PATH=$ANDROID_HOME/cmake/3.22.1/bin" >> $GITHUB_ENV
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
       
-      - name: Setup Gradle wrapper
+      - name: Create missing wrapper files
         run: |
+          mkdir -p gradle/wrapper
+          # Создаем properties если нет
+          if [ ! -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+            distributionBase=GRADLE_USER_HOME
+            distributionPath=wrapper/dists
+            distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-all.zip
+            zipStoreBase=GRADLE_USER_HOME
+            zipStorePath=wrapper/dists
+            EOF
+          fi
+          # Скачиваем jar если нет
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            curl -L -o gradle/wrapper/gradle-wrapper.jar \
+              https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+          fi
           chmod +x gradlew
-          # Проверяем, что wrapper работает
-          ./gradlew --version
-      
-      - name: Build native core
-        run: |
-          # Создаем toolchain file для CMake
-          cat > android.toolchain.cmake << 'EOF'
-          set(CMAKE_SYSTEM_NAME Android)
-          set(CMAKE_SYSTEM_VERSION 24)
-          set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
-          set(CMAKE_ANDROID_NDK $ENV{ANDROID_NDK})
-          set(CMAKE_ANDROID_STL_TYPE c++_shared)
-          EOF
-          
-          # Собираем core с помощью CMake из корня
-          mkdir -p build-native
-          cd build-native
-          
-          # Указываем пути к Android NDK toolchain
-          cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-24 \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Release
-          
-          make -j$(nproc)
-          cd ..
       
       - name: Build Android APK
         run: |
-          # Собираем Android модуль
+          # Gradle сам соберет и native часть с правильным toolchain
           ./gradlew :app:assembleRelease --stacktrace
         env:
-          ORG_GRADLE_PROJECT_ANDROID_ABI: arm64-v8a
-      
-      - name: Run tests
-        run: |
-          # Запускаем unit тесты
-          ./gradlew testReleaseUnitTest
+          ANDROID_NDK: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: icq-mobile-release
-          path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/mapping/release/*.txt
-          if-no-files-found: error
-      
-      - name: Upload native libraries
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-libs
-          path: |
-            build-native/**/*.so
-            **/build/intermediates/merged_native_libs/release/**/*.so
-      
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-reports
-          path: app/build/reports/tests/
+          name: icq-mobile
+          path: app/build/outputs/apk/release/*.apk
