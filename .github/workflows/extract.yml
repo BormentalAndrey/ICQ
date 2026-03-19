@@ -1,101 +1,97 @@
-name: Prepare ICQ Android Environment
+# .github/workflows/build.yml
+name: Build ICQ Mobile
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-env:
-  QT_VERSION: '5.15.2'
-  # Для 5.15.2 под Linux используем эту архитектуру как основную для тестов
-  QT_ARCH: 'android_arm64_v8a' 
-  ANDROID_API_LEVEL: '33'
-  NDK_VERSION: '21.3.6528147'
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Ручной запуск
 
 jobs:
-  prepare-files:
-    runs-on: ubuntu-22.04
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive # Если есть сабмодули (ядро ICQ)
 
-      - name: 1. Create Android File Structure
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build CMake dependencies (Core)
         run: |
-          mkdir -p android/res/values
-          mkdir -p android/res/drawable
-          mkdir -p android/res/xml
-          mkdir -p android/libs/arm64-v8a
-          echo "✅ Структура папок создана."
+          # Если ядро ICQ требует предварительной сборки
+          cd src/main/cpp
+          mkdir -p build
+          cd build
+          cmake ..
+          make -j4
 
-      - name: 2. Generate Manifest & Resources
-        run: |
-          # AndroidManifest.xml
-          cat > android/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.icq.desktop" android:versionCode="1" android:versionName="1.0.0">
-              <application android:label="ICQ" android:name="org.qtproject.qt5.android.bindings.QtApplication" android:icon="@drawable/ic_launcher">
-                  <activity android:name="org.qtproject.qt5.android.bindings.QtActivity" android:configChanges="orientation|uiMode|screenLayout|screenSize" android:launchMode="singleTop" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                      <meta-data android:name="android.app.lib_name" android:value="ICQ" />
-                  </activity>
-              </application>
-              <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
-              <uses-permission android:name="android.permission.INTERNET" />
-          </manifest>
-          EOF
-          
-          # Базовые ресурсы
-          echo '<?xml version="1.0" encoding="utf-8"?><resources><string name="app_name">ICQ</string></resources>' > android/res/values/strings.xml
-          echo "✅ Ресурсы и Манифест созданы."
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: 3. Install Qt (Fixing AQT Error)
-        run: |
-          pip3 install aqtinstall
-          
-          # Фикс: используем проверенное зеркало и убираем проблемный 'qt_base' 
-          # (aqt сам его скачает как зависимость). 
-          # В 5.15.2 модули часто указываются без префикса 'qt'.
-          
-          python3 -m aqt install-qt linux android $QT_VERSION $QT_ARCH \
-            --outputdir ${{ github.workspace }}/Qt \
-            --base https://mirrors.dotsrc.org/qtproject/ \
-            --modules charts graphicaleffects multimedia quickcontrols quickcontrols2 svg xmlpatterns
-          
-          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
-          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
-          echo "✅ Qt и инструменты установлены."
+      - name: Run tests
+        run: ./gradlew testReleaseUnitTest
 
-      - name: 4. Prepare OpenSSL Sources
-        run: |
-          mkdir -p openssl
-          curl -L https://github.com/KDAB/android_openssl/archive/refs/heads/master.tar.gz | tar xz -C openssl --strip-components=1
-          echo "✅ OpenSSL подготовлен."
-
-      - name: 5. Patch CMakeLists.txt (Android Block)
-        run: |
-          if ! grep -q "ANDROID" CMakeLists.txt; then
-            cat >> CMakeLists.txt << 'EOF'
-
-          if(ANDROID)
-              find_package(Qt5 REQUIRED COMPONENTS Core AndroidExtras Multimedia Network Quick QuickControls2 Svg)
-              add_definitions(-DANDROID -DQT_ANDROID)
-              link_libraries(log android EGL GLESv2 OpenSLES)
-          endif()
-          EOF
-            echo "✅ CMakeLists.txt обновлен."
-          fi
-
-      - name: 6. Archive Prepared Project
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: icq-ready-to-build
-          path: |
-            android/
-            openssl/
-            Qt/
-            CMakeLists.txt
-          retention-days: 1
+          name: icq-mobile-release
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload mapping files (для крашлетики)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapping
+          path: app/build/outputs/mapping/release/
+
+  # Опционально: сборка для разных архитектур отдельно
+  build-matrix:
+    name: Build for ${{ matrix.abi }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
           
+      - name: Build for ${{ matrix.abi }}
+        run: |
+          echo "android.defaultConfig.ndk.abiFilters='${{ matrix.abi }}'" >> gradle.properties
+          ./gradlew assembleRelease
+          
+      - name: Upload ${{ matrix.abi }} APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: icq-${{ matrix.abi }}
+          path: app/build/outputs/apk/release/app-release.apk
