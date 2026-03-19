@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <thread>  // Добавлено для std::thread
 #include <android/log.h>
 
 // Добавляем определение im_assert перед включением заголовков ICQ
@@ -16,10 +17,20 @@
 } while(0)
 #endif
 
-// Предполагаемые заголовки из ICQ Desktop core
-#include "core.h"
-#include "core_dispatcher.h"
-#include "gui_interface.h" // Оригинальный интерфейс связи Core -> GUI
+// Временное определение для stats, пока не создан реальный файл
+#include <map>
+namespace core { namespace stats {
+    using event_props_type = std::map<std::string, std::string>;
+    enum class stats_event_names {};
+    enum class im_stat_event_names {};
+    class statistics {};
+    class im_stats {};
+}}
+
+// Предполагаемые заголовки из ICQ Desktop core - исправленные пути
+#include "../../../core/core.h"
+#include "../../../core/core_dispatcher.h"
+#include "../../../core/gui_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
