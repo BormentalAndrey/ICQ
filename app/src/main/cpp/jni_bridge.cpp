@@ -2,10 +2,11 @@
 #include <string>
 #include <memory>
 #include <mutex>
-#include <thread>  // Добавлено для std::thread
+#include <thread>
+#include <map>
 #include <android/log.h>
 
-// Добавляем определение im_assert перед включением заголовков ICQ
+// Добавляем определение im_assert
 #ifndef im_assert
 #include <cstdlib>
 #define im_assert(condition) do { \
@@ -17,8 +18,7 @@
 } while(0)
 #endif
 
-// Временное определение для stats, пока не создан реальный файл
-#include <map>
+// Временное определение для stats
 namespace core { namespace stats {
     using event_props_type = std::map<std::string, std::string>;
     enum class stats_event_names {};
@@ -27,10 +27,10 @@ namespace core { namespace stats {
     class im_stats {};
 }}
 
-// Предполагаемые заголовки из ICQ Desktop core - исправленные пути
-#include "../../../core/core.h"
-#include "../../../core/core_dispatcher.h"
-#include "../../../core/gui_interface.h"
+// Пути как в CMakeLists.txt
+#include "../../../../im-desktop-master/core/core.h"
+#include "../../../../im-desktop-master/core/core_dispatcher.h"
+#include "../../../../im-desktop-master/core/gui_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -56,7 +56,6 @@ public:
         JNIEnv* env = nullptr;
         bool attached = false;
         
-        // Подключаем фоновый поток (network/voip) к JVM
         if (g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
             g_jvm->AttachCurrentThread(&env, nullptr);
             attached = true;
@@ -84,19 +83,15 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
     const char *cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
     
-    // Создаем глобальную ссылку на Kotlin-объект коллбэка
     g_event_callback_obj = env->NewGlobalRef(callback);
     g_gui_callback = std::make_shared<AndroidGuiCallback>();
 
     common::core_gui_settings settings;
     settings.os_version_ = "Android";
     settings.locale_ = "ru_RU";
-    // Устанавливаем пути для БД и кэша
     settings.profile_path_ = std::wstring(data_path_cstr, data_path_cstr + strlen(data_path_cstr));
     
     g_core = std::make_unique<core::core_dispatcher>();
-    
-    // Линкуем ядро с нашим Android JNI интерфейсом
     g_core->link_gui(g_gui_callback, settings);
     
     LOGI("Ядро ICQ запущено. Путь БД: %s", data_path_cstr);
