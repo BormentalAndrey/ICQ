@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path=".*\.db"/>
+        <include domain="file" path=".*\.xml"/>
+        <include domain="sharedpref" path=".*\.xml"/>
+        <exclude domain="file" path="cache/"/>
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path=".*\.db"/>
+        <include domain="file" path=".*\.xml"/>
+        <exclude domain="file" path="cache/"/>
+    </device-transfer>
+</data-extraction-rules>
