@@ -7,25 +7,27 @@ on:
 
 env:
   QT_VERSION: '5.15.2'
+  # Важно: для Qt 5.15.2 под Linux host используются именно эти имена архитектур
+  QT_ARCH: 'android_arm64_v8a' 
   ANDROID_API_LEVEL: '33'
   NDK_VERSION: '21.3.6528147'
 
 jobs:
-  prepare-files:
+  prepare-env:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 1. Create Android Directory Structure
+      - name: 1. Create Android Production Structure
         run: |
           mkdir -p android/res/values
-          mkdir -p android/res/drawable
-          mkdir -p android/res/mipmap-hdpi
-          mkdir -p android/libs
-          echo "✅ Directory structure created."
+          mkdir -p android/res/drawable-xxhdpi
+          mkdir -p android/res/xml
+          mkdir -p android/libs/arm64-v8a
+          echo "✅ Структура директорий готова."
 
-      - name: 2. Generate Production AndroidManifest.xml
+      - name: 2. Generate Valid AndroidManifest.xml
         run: |
           cat > android/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -33,22 +35,16 @@ jobs:
               package="com.icq.desktop"
               android:versionCode="1"
               android:versionName="1.0.0">
-
               <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
-              
               <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.CAMERA" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
               <application
                   android:label="ICQ"
                   android:name="org.qtproject.qt5.android.bindings.QtApplication"
                   android:icon="@drawable/ic_launcher"
-                  android:allowBackup="true">
-                  
+                  android:extractNativeLibs="true">
                   <activity
                       android:name="org.qtproject.qt5.android.bindings.QtActivity"
                       android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation"
@@ -63,94 +59,70 @@ jobs:
               </application>
           </manifest>
           EOF
-          echo "✅ AndroidManifest.xml generated."
 
-      - name: 3. Generate Resource Files (strings, styles, colors)
+      - name: 3. Generate Production Resources
         run: |
           # strings.xml
-          cat > android/res/values/strings.xml << 'EOF'
+          echo '<?xml version="1.0" encoding="utf-8"?><resources><string name="app_name">ICQ</string></resources>' > android/res/values/strings.xml
+          
+          # network_security_config.xml (необходим для работы с API в 2026 году)
+          cat > android/res/xml/network_security_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">ICQ</string>
-          </resources>
+          <network-security-config>
+              <base-config cleartextTrafficPermitted="false">
+                  <trust-anchors>
+                      <certificates src="system" />
+                  </trust-anchors>
+              </base-config>
+          </network-security-config>
           EOF
 
-          # colors.xml
-          cat > android/res/values/colors.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="primary">#00B4FF</color>
-              <color name="white">#FFFFFF</color>
-          </resources>
-          EOF
-
-          # styles.xml
-          cat > android/res/values/styles.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
-                  <item name="android:windowBackground">@color/white</item>
-              </style>
-          </resources>
-          EOF
-          echo "✅ Values resources generated."
-
-      - name: 4. Create Placeholder Icon
+      - name: 4. Install Qt with Fixed Modules
         run: |
-          cat > android/res/drawable/ic_launcher.xml << 'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00B4FF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
-          </vector>
-          EOF
-          echo "✅ Placeholder icon created."
+          pip3 install aqtinstall
+          
+          # Мы используем зеркало и исправленный список модулей. 
+          # Обратите внимание: модули пишутся без префикса 'qt' в некоторых версиях aqt, 
+          # но здесь мы используем наиболее стабильные имена.
+          
+          python3 -m aqt install-qt linux android $QT_VERSION $QT_ARCH \
+            --outputdir ${{ github.workspace }}/Qt \
+            --base https://mirrors.dotsrc.org/qtproject/ \
+            --modules qtcharts qtgraphicaleffects qtmultimedia qtquickcontrols qtquickcontrols2 qtsvg qtxmlpatterns
+          
+          # Установка инструментов
+          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
+          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
 
-      - name: 5. Download OpenSSL for Android
+      - name: 5. Prepare OpenSSL for ICQ
         run: |
           mkdir -p openssl
-          cd openssl
-          curl -L https://github.com/KDAB/android_openssl/archive/refs/heads/master.tar.gz | tar xz --strip-components=1
-          echo "✅ OpenSSL sources prepared."
+          curl -L https://github.com/KDAB/android_openssl/archive/refs/heads/master.tar.gz | tar xz -C openssl --strip-components=1
 
-      - name: 6. Inject Android Logic into CMakeLists.txt
+      - name: 6. Patch CMakeLists.txt (Production Logic)
         run: |
           if ! grep -q "ANDROID" CMakeLists.txt; then
             cat >> CMakeLists.txt << 'EOF'
-
-          # --- Automatic Android Configuration ---
+          
           if(ANDROID)
-              message(STATUS "Configuring for Android...")
+              find_package(Qt5 REQUIRED COMPONENTS 
+                  Core AndroidExtras Multimedia Network Quick QuickControls2 Svg XmlPatterns
+              )
               add_definitions(-DANDROID -DQT_ANDROID)
-              find_package(Qt5 REQUIRED COMPONENTS Core AndroidExtras Multimedia Network Quick Svg)
-              
-              # Link essential Android system libraries
+              set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+              # Подключение системных библиотек Android
               link_libraries(log android EGL GLESv2 OpenSLES)
           endif()
           EOF
-            echo "✅ CMakeLists.txt patched."
-          else
-            echo "ℹ️ CMakeLists.txt already contains ANDROID logic."
           fi
 
-      - name: 7. Install Qt & Build Tools (AQTIinstall)
-        run: |
-          pip3 install aqtinstall
-          # Установка только для arm64 для проверки инструментов
-          python3 -m aqt install-qt linux android $QT_VERSION android_arm64_v8a \
-            --outputdir ${{ github.workspace }}/Qt \
-            -m qtgraphicaleffects qtmultimedia qtquickcontrols2 qtsvg
-          
-          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
-          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
-          echo "✅ Build tools installed."
-
-      - name: 8. Archive Prepared Files
+      - name: 7. Upload Prepared Environment
         uses: actions/upload-artifact@v4
         with:
-          name: prepared-android-project
+          name: icq-prepared-env
           path: |
             android/
             openssl/
-            CMakeLists.txt
+            Qt/
           retention-days: 1
           
