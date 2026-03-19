@@ -1,95 +1,109 @@
 #pragma once
+
 #include <string>
 #include <vector>
+#include <map>
+#include <functional>
 
 #define PREVIEW_RENDER_NAME "@camera_stream_id"
 #define DEFAULT_DEVICE_UID "default_device"
 
-enum DeviceType
+// Оборачиваем базовые типы в namespace voip, 
+// чтобы компилятор находил voip::CallId и voip::TerminateReason
+namespace voip
 {
-    AudioRecording = 0,
-    AudioPlayback,
-    VideoCapturing,
-};
+    using CallId = std::string;
+    using PeerId = std::string;
 
-enum DeviceClass
-{
-    Audio = 0,
-    Video
-};
+    enum DeviceType
+    {
+        AudioRecording = 0,
+        AudioPlayback,
+        VideoCapturing,
+    };
 
-enum VideoCaptureType
-{
-    VC_DeviceCamera,
-    VC_DeviceVirtualCamera,
-    VC_DeviceDesktop
-};
+    enum DeviceClass
+    {
+        Audio = 0,
+        Video
+    };
 
-enum StaticImageIdEnum {
-    Img_Logo = 0,
-    Img_Avatar,
-    Img_Username,
-    Img_UserBackground,
-    Img_UserForeground,
-    Img_Max
-};
+    enum VideoCaptureType
+    {
+        VC_DeviceCamera,
+        VC_DeviceVirtualCamera,
+        VC_DeviceDesktop
+    };
 
-enum TerminateReason {
-    TR_HANGUP = 0,          // Use Call_Terminate(TR_HANGUP) to hangup active call (after it was accepted).
-                            // OnCallTerminated(TR_HANGUP) signaled when remote/local side hang up the call.
+    enum StaticImageIdEnum {
+        Img_Logo = 0,
+        Img_Avatar,
+        Img_Username,
+        Img_UserBackground,
+        Img_UserForeground,
+        Img_Max
+    };
 
-    TR_REJECT,              // Use Call_Terminate(TR_REJECT) to reject incoming call.
-                            // OnCallTerminated(TR_REJECT) signaled when remote/local side rejects the call.
+    enum TerminateReason {
+        TR_HANGUP = 0,          // Use Call_Terminate(TR_HANGUP) to hangup active call (after it was accepted).
+                                // OnCallTerminated(TR_HANGUP) signaled when remote/local side hang up the call.
 
-    TR_BUSY,                // Use Call_Terminate(TR_BUSY) to terminate call by BUSY reason (e.g. GSM call is active)
-                            // OnCallTerminated(TR_BUSY) signaled when local/remote side terminated the call using BUSY
-    TR_HANDLED_BY_ANOTHER_INSTANCE, // Call was handled by another device of logged-in user.
-                                    // OnCallTerminated(TR_HANDLED_BY_ANOTHER_INSTANCE) is signaled when another device accepts the call.
-                                    // Note: this status requires signaling server's support.
+        TR_REJECT,              // Use Call_Terminate(TR_REJECT) to reject incoming call.
+                                // OnCallTerminated(TR_REJECT) signaled when remote/local side rejects the call.
 
-    TR_UNAUTHORIZED,        // Call was rejected due to security errors
+        TR_BUSY,                // Use Call_Terminate(TR_BUSY) to terminate call by BUSY reason (e.g. GSM call is active)
+                                // OnCallTerminated(TR_BUSY) signaled when local/remote side terminated the call using BUSY
+        TR_HANDLED_BY_ANOTHER_INSTANCE, // Call was handled by another device of logged-in user.
+                                        // OnCallTerminated(TR_HANDLED_BY_ANOTHER_INSTANCE) is signaled when another device accepts the call.
+                                        // Note: this status requires signaling server's support.
 
-    TR_ALLOCATE_FAILED,     // OnCallTerminated(TR_ALLOCATE_FAILED) signaled if app didn't provide ALLOCATE data or it is invalid.
+        TR_UNAUTHORIZED,        // Call was rejected due to security errors
 
-    TR_ANSWER_TIMEOUT,      // OnCallTerminated(TR_ANSWER_TIMEOUT) signaled when:
-                            //      - remote side hasn't answered (accepted or rejected) for outgoing call
-                            //      - local user hasn't answered (so neither AcceptIncomingCall nor TerminateCall were called)
+        TR_ALLOCATE_FAILED,     // OnCallTerminated(TR_ALLOCATE_FAILED) signaled if app didn't provide ALLOCATE data or it is invalid.
 
-    TR_CONNECT_TIMEOUT,     // OnCallTerminated(TR_CONNECT_TIMEOUT) signaled when connection cannot be established or lost
+        TR_ANSWER_TIMEOUT,      // OnCallTerminated(TR_ANSWER_TIMEOUT) signaled when:
+                                //      - remote side hasn't answered (accepted or rejected) for outgoing call
+                                //      - local user hasn't answered (so neither AcceptIncomingCall nor TerminateCall were called)
 
-    TR_NOT_FOUND,
-    TR_BLOCKED_BY_CALLER_IS_STRANGER,
-    TR_BLOCKED_BY_CALLEE_PRIVACY,
-    TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA,
+        TR_CONNECT_TIMEOUT,     // OnCallTerminated(TR_CONNECT_TIMEOUT) signaled when connection cannot be established or lost
 
-    // VCS reasons
-    TR_BAD_URI,
-    TR_NOT_AVAILABLE_NOW,
-    TR_PARTICIPANTS_LIMIT_EXCEEDED,
-    TR_DURATION_LIMIT_EXCEEDED,
+        TR_NOT_FOUND,
+        TR_BLOCKED_BY_CALLER_IS_STRANGER,
+        TR_BLOCKED_BY_CALLEE_PRIVACY,
+        TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA,
 
-    TR_INTERNAL_ERROR       // OnCallTerminated(TR_INTERNAL_ERROR) signaled on internal error (todo: more info about that)
-};
+        // VCS reasons
+        TR_BAD_URI,
+        TR_NOT_AVAILABLE_NOW,
+        TR_PARTICIPANTS_LIMIT_EXCEEDED,
+        TR_DURATION_LIMIT_EXCEEDED,
 
-struct VoipDesc
-{
-    bool first_notify_send = false;
-    bool local_cam_en = false;
-    bool local_aud_en = true;
-    bool local_cam_allowed = true;
-    bool local_aud_allowed = true;
-    bool local_desktop_allowed = true;
-    bool mute_en = false;
-    bool incomingSoundsMuted = false;
-    float volume = 1.0f;
+        TR_INTERNAL_ERROR       // OnCallTerminated(TR_INTERNAL_ERROR) signaled on internal error (todo: more info about that)
+    };
 
-    std::string aPlaybackDevice;
-    std::string aRecordingDevice;
-    std::string vCaptureDevice;
-};
+    struct VoipDesc
+    {
+        bool first_notify_send = false;
+        bool local_cam_en = false;
+        bool local_aud_en = true;
+        bool local_cam_allowed = true;
+        bool local_aud_allowed = true;
+        bool local_desktop_allowed = true;
+        bool mute_en = false;
+        bool incomingSoundsMuted = false;
+        float volume = 1.0f;
+
+        std::string aPlaybackDevice;
+        std::string aRecordingDevice;
+        std::string vCaptureDevice;
+    };
+}
 
 namespace voip_manager
 {
+    // Позволяет прозрачно использовать типы из voip:: внутри voip_manager
+    using namespace voip;
+
     enum eNotificationTypes
     {
         kNotificationType_Undefined = 0,
@@ -154,18 +168,6 @@ namespace voip_manager
         bool       mute;
     };
 
-    /*struct CipherState
-    {
-        enum State
-        {
-            kCipherStateUnknown,
-            kCipherStateEnabled,
-            kCipherStateFailed,
-            kCipherStateNotSupportedByPeer
-        } state;
-        std::string secureCode;
-    };*/
-
     struct DeviceVol
     {
         DeviceType type;
@@ -188,7 +190,7 @@ namespace voip_manager
 
     struct Contact
     {
-        std::string call_id;
+        voip::CallId call_id;
         std::string contact;
         bool remote_cam_enabled = false;
         bool remote_mic_enabled = false;
@@ -199,7 +201,7 @@ namespace voip_manager
         {
         }
 
-        Contact(const std::string& call_id_, const std::string& contact_) : call_id(call_id_), contact(contact_)
+        Contact(const voip::CallId& call_id_, const std::string& contact_) : call_id(call_id_), contact(contact_)
         {
         }
 
@@ -242,7 +244,7 @@ namespace voip_manager
     struct device_list
     {
         DeviceType type;
-        std::vector<voip_manager::device_description> devices;
+        std::vector<device_description> devices;
     };
 
     struct VideoEnable
@@ -272,7 +274,7 @@ namespace voip_manager
 
     struct BitmapDescription
     {
-        void*    data;
+        void* data;
         unsigned size;
 
         unsigned w;
@@ -322,7 +324,7 @@ namespace voip_manager
     struct WindowParams
     {
         void* hwnd;
-        std::string call_id;
+        voip::CallId call_id;
         WindowBitmap watermark;
         WindowBitmap cameraStatus;
         WindowBitmap calling;
@@ -447,7 +449,7 @@ namespace voip_manager
         virtual void call_create (const std::vector<std::string> &contacts, std::string &account, const CallStartParams &params) = 0;
         virtual void call_stop () = 0;
         virtual void call_stop_smart (const std::function<void()>&) = 0;
-        virtual void call_accept (const std::string &call_id, const std::string &account, bool video) = 0;
+        virtual void call_accept (const voip::CallId &call_id, const std::string &account, bool video) = 0;
         virtual void call_decline (const Contact& contact, bool busy, bool conference) = 0;
         virtual unsigned call_get_count () = 0;
 
@@ -472,13 +474,13 @@ namespace voip_manager
         virtual void update() = 0;
 
         // WindowManager
-        virtual void window_add (voip_manager::WindowParams& windowParams) = 0;
+        virtual void window_add (WindowParams& windowParams) = 0;
         virtual void window_remove (void* hwnd) = 0;
         virtual void window_set_bitmap (const UserBitmap& bmp) = 0;
 
         // ConnectionManager
         virtual void ProcessVoipMsg(const std::string& account_uid, int voipIncomingMsg, const char *data, unsigned len) = 0;
-        virtual void ProcessVoipAck(const voip_manager::VoipProtoMsg& msg, bool success) = 0;
+        virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
 
         // MediaManager
         virtual void media_video_en (bool enable) = 0;
