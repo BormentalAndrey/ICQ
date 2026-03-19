@@ -1,0 +1,117 @@
+name: Extract and Prepare ICQ Desktop
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  extract-and-prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install unzip tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip
+          
+      - name: Extract archive
+        run: |
+          # Проверяем существование архива
+          if [ -f "im-desktop-master.zip" ]; then
+            echo "Found archive, extracting..."
+            
+            # Создаем временную директорию
+            mkdir -p temp_extract
+            
+            # Распаковываем архив
+            unzip -q im-desktop-master.zip -d temp_extract/
+            
+            # Проверяем структуру распакованных файлов
+            echo "Extracted files:"
+            ls -la temp_extract/
+            
+            # Если внутри есть вложенная директория, перемещаем содержимое
+            if [ -d "temp_extract/im-desktop-master" ]; then
+              echo "Moving files from nested directory..."
+              mv temp_extract/im-desktop-master/* ./
+              mv temp_extract/im-desktop-master/.* ./ 2>/dev/null || true
+            else
+              echo "Moving all extracted files..."
+              mv temp_extract/* ./ 2>/dev/null || true
+              mv temp_extract/.* ./ 2>/dev/null || true
+            fi
+            
+            # Удаляем временные директории и архив
+            rm -rf temp_extract
+            rm -f im-desktop-master.zip
+            
+            echo "Extraction complete!"
+          else
+            echo "Archive not found, skipping extraction"
+          fi
+          
+      - name: Check extracted files
+        run: |
+          echo "Current directory structure:"
+          ls -la
+          echo -e "\nPackage.json exists? $(if [ -f package.json ]; then echo 'Yes'; else echo 'No'; fi)"
+          if [ -f package.json ]; then
+            echo "Package.json content:"
+            cat package.json | head -20
+          fi
+          
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then
+            echo "Installing dependencies..."
+            npm install
+          else
+            echo "No package.json found, checking for other build files"
+          fi
+          
+      - name: Check for build scripts
+        run: |
+          if [ -f package.json ]; then
+            echo "Available npm scripts:"
+            node -e "const pkg=require('./package.json'); console.log(Object.keys(pkg.scripts || {}).join('\n'))"
+          fi
+          
+      - name: Commit extracted files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Добавляем все файлы, кроме .git
+          git add -A
+          
+          # Проверяем, есть ли изменения
+          if ! git diff --staged --quiet; then
+            git commit -m "Extract im-desktop-master.zip to repository"
+            git push
+            echo "Changes committed and pushed"
+          else
+            echo "No changes to commit"
+          fi
+          
+      - name: Upload build artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-source
+          path: |
+            ./
+            !.git/
+          retention-days: 7
