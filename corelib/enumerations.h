@@ -1,3 +1,5 @@
+// Добавьте в начало файла:
+#include <iostream>
 #pragma once
 
 #include "../common.shared/im_statistics.h"
