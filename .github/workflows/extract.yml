@@ -31,7 +31,8 @@ on:
 env:
   QT_VERSION: '5.15.2'
   ANDROID_API_LEVEL: '33'
-  NDK_VERSION: '25.2.9519653'
+  # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Qt 5.15.2 требует NDK r21. NDK 25+ приведет к ошибкам линковки и отсутствию stdcpp.
+  NDK_VERSION: '21.3.6528147'
 
 jobs:
   prepare-android:
@@ -98,7 +99,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '11'
-          distribution: 'temurin'  # ИСПРАВЛЕНО: temulin -> temurin
+          distribution: 'temulin'
           
       - name: Install Qt for Android
         run: |
@@ -130,123 +131,15 @@ jobs:
             cmake ninja-build build-essential libgl1-mesa-dev libglu1-mesa-dev \
             libxkbcommon-x11-0 libpulse-dev libasound2-dev libssl-dev libxcb-util1 \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xinerama0 \
-            libxcb-xfixes0 libxcb-sync1 libxcb-shm0 libxcb-xv0
-          
-      - name: Ensure Android resource directories exist
-        run: |
-          mkdir -p android/res/values
-          mkdir -p android/res/drawable
-          
-      - name: Generate AndroidManifest.xml (Fallback)
-        run: |
-          if [ ! -f "android/AndroidManifest.xml" ]; then
-            echo "⚠️ AndroidManifest.xml not found. Generating default..."
-            cat > android/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.icq.desktop"
-              android:versionCode="${{ github.run_number }}"
-              android:versionName="${{ needs.prepare-android.outputs.version }}">
-
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
-              <uses-permission android:name="android.permission.VIBRATE" />
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.CAMERA" />
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-              <uses-feature android:name="android.hardware.camera" android:required="false" />
-              <uses-feature android:name="android.hardware.microphone" android:required="false" />
-              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
-
-              <application
-                  android:allowBackup="true"
-                  android:icon="@drawable/ic_launcher"
-                  android:label="ICQ"
-                  android:name="org.qtproject.qt5.android.bindings.QtApplication"
-                  android:supportsRtl="true">
-
-                  <activity
-                      android:name="org.qtproject.qt5.android.bindings.QtActivity"
-                      android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-                      android:launchMode="singleTop"
-                      android:windowSoftInputMode="adjustResize"
-                      android:exported="true">
-                      
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                      
-                      <meta-data android:name="android.app.lib_name" android:value="ICQ" />
-                      <meta-data android:name="android.app.arguments" android:value="-platform android:port" />
-                  </activity>
-              </application>
-
-              <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
-          </manifest>
-          EOF
-          else
-            echo "✅ Custom AndroidManifest.xml found."
-          fi
-          
-      - name: Generate Missing Resources (Fallback)
-        run: |
-          if [ ! -f "android/res/drawable/ic_launcher.xml" ] && [ ! -f "android/res/drawable/ic_launcher.png" ]; then
-            cat > android/res/drawable/ic_launcher.xml << 'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#2196F3"
-                  android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
-          </vector>
-          EOF
-          fi
-          
-          if [ ! -f "android/res/values/strings.xml" ]; then
-            cat > android/res/values/strings.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">ICQ</string>
-              <string name="version">${{ needs.prepare-android.outputs.version }}</string>
-          </resources>
-          EOF
-          fi
-          
-      - name: Patch CMakeLists.txt for Android
-        run: |
-          if [ ! -f "CMakeLists.txt" ]; then
-            echo "❌ CMakeLists.txt not found!"
-            exit 1
-          fi
-          
-          if ! grep -q "ANDROID" CMakeLists.txt; then
-            echo "Injecting basic Android definitions into CMakeLists.txt..."
-            cp CMakeLists.txt CMakeLists.txt.bak
-            cat >> CMakeLists.txt << 'EOF'
-
-          # Android support
-          if(ANDROID)
-              set(ICQ_PLATFORM android)
-              message(STATUS "Building for Android platform")
-              add_definitions(-DANDROID -DQT_ANDROID)
-              
-              find_package(Qt5 REQUIRED COMPONENTS Core AndroidExtras Multimedia Network Qml Quick Svg)
-              
-              set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CMAKE_CURRENT_BINARY_DIR}")
-          endif()
-          EOF
-          fi
+            libxcb-shape0 libxcb-xinerama0
           
       - name: Configure CMake
         run: |
           mkdir -p build-android
           cd build-android
           
+          # Убран патчинг CMakeLists. В production предполагается, 
+          # что твой CMakeLists.txt уже умеет собираться под Android.
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=${{ steps.map-arch.outputs.ndk_abi }} \
@@ -256,6 +149,7 @@ jobs:
             -DANDROID=ON \
             -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} \
             -DQt5_DIR="$QT_ROOT/lib/cmake/Qt5" \
+            -DQT_ANDROID_APPLICATION_DIR="${{ github.workspace }}/android" \
             -GNinja
             
       - name: Build Native Libraries
@@ -289,13 +183,9 @@ jobs:
               "libraries": [
                   "${{ github.workspace }}/build-android/libICQ.so"
               ],
-              "permissions": [
-                  "android.permission.INTERNET",
-                  "android.permission.WRITE_EXTERNAL_STORAGE",
-                  "android.permission.RECORD_AUDIO",
-                  "android.permission.CAMERA"
-              ],
-              "architectures": "${{ steps.map-arch.outputs.ndk_abi }}",
+              "architectures": {
+                  "${{ steps.map-arch.outputs.ndk_abi }}": "${{ steps.map-arch.outputs.ndk_host }}"
+              },
               "qtArchitecture": "${{ steps.map-arch.outputs.qt_arch }}"
           }
           EOF
@@ -316,10 +206,9 @@ jobs:
           APK_FILE=$(find android-build -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
             cp "$APK_FILE" ../icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk
-            echo "✅ APK created: icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk"
+            echo "✅ APK created successfully"
           else
-            echo "❌ APK not found. Checking build output:"
-            ls -la android-build/
+            echo "❌ APK not found. Check androiddeployqt logs above."
             exit 1
           fi
           
@@ -335,7 +224,6 @@ jobs:
           Qt Arch: ${{ steps.map-arch.outputs.qt_arch }}
           Build Type: ${{ github.event.inputs.build_type || 'debug' }}
           Build Number: ${{ github.run_number }}
-          Status: SUCCESS
           EOF
           
       - name: Upload APK artifact
@@ -367,7 +255,7 @@ jobs:
             ## 📱 ICQ для Android v${{ needs.prepare-android.outputs.version }}
             
             ### О сборке
-            Автоматическая сборка оригинального ICQ Desktop 2016 года для Android.
+            Это порт оригинального ICQ Desktop на Android.
             
             ### 🎯 Поддерживаемые архитектуры:
             - **ARM64-v8a** (современные устройства)
@@ -376,17 +264,8 @@ jobs:
             
             ### ✨ Спецификации сборки:
             - Qt: 5.15.2
-            - NDK: ${{ env.NDK_VERSION }}
             - Минимальная версия Android: 5.0 (API 21)
             - Целевая версия: Android 13 (API 33)
-            
-            ### 📥 Установка:
-            1. Скачайте APK для вашей архитектуры
-            2. Разрешите установку из неизвестных источников
-            3. Установите и запустите
-            
-            ### ⚠️ Примечание:
-            Это прямая сборка оригинального кода 2016 года.
             
             ---
             Сборка: ${{ needs.prepare-android.outputs.build_date }}
