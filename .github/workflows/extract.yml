@@ -29,6 +29,11 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;25.2.9519653"
       
+      - name: Fix permissions
+        run: |
+          chmod +x gradlew
+          find . -name "*.sh" -exec chmod +x {} \;
+      
       - name: Full diagnostics - find all gradle files
         run: |
           echo "========================================="
@@ -82,7 +87,7 @@ jobs:
       
       - name: Kill any existing gradle daemons
         run: |
-          ./gradlew --stop
+          ./gradlew --stop || true
           pkill -f gradle || true
       
       - name: Clear Gradle cache
@@ -91,22 +96,8 @@ jobs:
           rm -rf .gradle
           rm -rf */build
       
-      - name: Create fresh gradle wrapper with Gradle 8.6
+      - name: Fix gradle wrapper permissions
         run: |
-          rm -rf gradle/wrapper
-          mkdir -p gradle/wrapper
-          
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-          
-          curl -L -o gradle/wrapper/gradle-wrapper.jar \
-            https://github.com/gradle/gradle/raw/v8.6.0/gradle/wrapper/gradle-wrapper.jar
-          
           chmod +x gradlew
           ./gradlew --version
       
@@ -137,6 +128,10 @@ jobs:
           echo "Testing with minimal configuration"
           echo "========================================="
           
+          # Backup original files
+          cp settings.gradle.kts settings.gradle.kts.full
+          cp build.gradle.kts build.gradle.kts.full
+          
           # Create minimal settings.gradle.kts
           cat > settings.gradle.kts.min << 'EOF'
           pluginManagement {
@@ -159,9 +154,6 @@ jobs:
           include(":app")
           EOF
           
-          mv settings.gradle.kts settings.gradle.kts.full
-          mv settings.gradle.kts.min settings.gradle.kts
-          
           # Create minimal build.gradle.kts
           cat > build.gradle.kts.min << 'EOF'
           plugins {
@@ -169,7 +161,7 @@ jobs:
           }
           EOF
           
-          mv build.gradle.kts build.gradle.kts.full
+          mv settings.gradle.kts.min settings.gradle.kts
           mv build.gradle.kts.min build.gradle.kts
           
           # Try to build only app
@@ -185,7 +177,7 @@ jobs:
           echo "Testing with Gradle 8.4"
           echo "========================================="
           
-          sed -i 's/gradle-8.6-bin.zip/gradle-8.4-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+          sed -i 's/gradle-8.9-bin.zip/gradle-8.4-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           ./gradlew --version
           
           ./gradlew :app:assembleDebug --stacktrace || true
@@ -195,6 +187,9 @@ jobs:
           echo "========================================="
           echo "Testing with clean settings.gradle.kts"
           echo "========================================="
+          
+          # Backup original
+          cp settings.gradle.kts settings.gradle.kts.backup2
           
           # Create absolutely minimal settings.gradle.kts
           cat > settings.gradle.kts.clean << 'EOF'
@@ -225,7 +220,6 @@ jobs:
           include(":unittests")
           EOF
           
-          mv settings.gradle.kts settings.gradle.kts.backup2
           mv settings.gradle.kts.clean settings.gradle.kts
           
           # Try build
@@ -244,9 +238,10 @@ jobs:
           rm -rf ~/.gradle/caches/
           rm -rf .gradle
           rm -rf */build
-          ./gradlew --stop
+          ./gradlew --stop || true
           
-          # Fresh wrapper
+          # Fresh wrapper and permissions
+          chmod +x gradlew
           ./gradlew --version
           
           # Try build with original files
