@@ -31,7 +31,6 @@ on:
 env:
   QT_VERSION: '5.15.2'
   ANDROID_API_LEVEL: '33'
-  # Qt 5.15.2 официально работает только с NDK r21 (r25+ ломает libc++ и линковку)
   NDK_VERSION: '21.3.6528147'
 
 jobs:
@@ -137,13 +136,10 @@ jobs:
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
             libxcb-xfixes0 libxcb-sync1 libxcb-shm0 libxcb-xv0
 
-      - name: Create Android resources (production fallback)
+      - name: Create Android resources (fallback)
         run: |
-          mkdir -p android/res/values android/res/drawable \
-                  android/res/drawable-hdpi android/res/drawable-mdpi \
-                  android/res/drawable-xhdpi android/res/drawable-xxhdpi android/res/drawable-xxxhdpi
+          mkdir -p android/res/{values,drawable,drawable-hdpi,drawable-mdpi,drawable-xhdpi,drawable-xxhdpi,drawable-xxxhdpi}
 
-          # AndroidManifest.xml (полный production-вариант)
           cat > android/AndroidManifest.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -171,23 +167,19 @@ jobs:
         android:icon="@drawable/ic_launcher"
         android:label="ICQ"
         android:name="org.qtproject.qt5.android.bindings.QtApplication"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light">
+        android:supportsRtl="true">
 
         <activity
             android:name="org.qtproject.qt5.android.bindings.QtActivity"
-            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:configChanges="orientation|keyboardHidden|screenSize|locale|layoutDirection|uiMode"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize"
             android:exported="true">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
             <meta-data android:name="android.app.lib_name" android:value="ICQ" />
-            <meta-data android:name="android.app.arguments" android:value="-platform android:port" />
         </activity>
     </application>
 
@@ -195,11 +187,10 @@ jobs:
 </manifest>
 EOF
 
-          # ic_launcher (векторная иконка)
           cat > android/res/drawable/ic_launcher.xml << 'EOF'
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
+    android:width="48dp"
+    android:height="48dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
   <path android:fillColor="#00A0E0" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
@@ -207,7 +198,6 @@ EOF
 </vector>
 EOF
 
-          # strings.xml
           cat > android/res/values/strings.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
@@ -218,10 +208,10 @@ EOF
       - name: Patch CMakeLists.txt for Android
         run: |
           if ! grep -q "ANDROID" CMakeLists.txt; then
-            echo "✅ Добавляем поддержку Android в CMakeLists.txt"
+            echo "Добавляем поддержку Android в CMakeLists.txt"
             cat >> CMakeLists.txt << 'EOF'
 
-# === Android production support (injected by CI) ===
+# Android support (injected by CI)
 if(ANDROID)
     set(ICQ_PLATFORM android)
     message(STATUS "Building for Android platform")
@@ -268,11 +258,9 @@ EOF
         run: |
           cd build-android
           MAIN_SO=$(find . -name "lib*.so" -type f | grep -iE 'icq|core|client|main' | head -1 | sed 's|^\./||')
-          if [ -z "$MAIN_SO" ]; then
-            MAIN_SO="libicq.so"  # самый частый вариант в этом репозитории
-          fi
+          [ -z "$MAIN_SO" ] && MAIN_SO="libicq.so"
           echo "MAIN_SO=$MAIN_SO" >> $GITHUB_ENV
-          echo "✅ Главная библиотека обнаружена: $MAIN_SO"
+          echo "Главная библиотека: $MAIN_SO"
 
       - name: Create Deployment Settings
         run: |
@@ -310,26 +298,23 @@ EOF
           APK_FILE=$(find android-build -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
             cp "\( APK_FILE" ../icq-android- \){{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk
-            echo "✅ APK успешно создан: icq-android-\( {{ matrix.arch }}- \){{ github.event.inputs.build_type || 'debug' }}.apk"
+            echo "APK создан: icq-android-\( {{ matrix.arch }}- \){{ github.event.inputs.build_type || 'debug' }}.apk"
           else
-            echo "❌ APK не найден! Проверьте логи androiddeployqt выше."
+            echo "APK не найден"
             exit 1
           fi
 
       - name: Generate build info
         run: |
           cat > build-info-${{ matrix.arch }}.txt << EOF
-ICQ Android Production Build
-============================
+ICQ Android Build
+=================
 Version: ${{ needs.prepare-android.outputs.version }}
-Build Date: $(date)
+Date: $(date)
 Commit: ${{ github.sha }}
-Architecture: ${{ matrix.arch }}
-Qt Arch: ${{ steps.map-arch.outputs.qt_arch }}
-Build Type: ${{ github.event.inputs.build_type || 'debug' }}
-Build Number: ${{ github.run_number }}
-NDK: $NDK_VERSION
-Status: SUCCESS
+Arch: ${{ matrix.arch }}
+Build type: ${{ github.event.inputs.build_type || 'debug' }}
+Number: ${{ github.run_number }}
 EOF
 
       - name: Upload APK artifact
@@ -358,26 +343,25 @@ EOF
         with:
           name: ICQ Android ${{ needs.prepare-android.outputs.version }}
           body: |
-            ## 📱 ICQ для Android v${{ needs.prepare-android.outputs.version }}
+            ## ICQ для Android v${{ needs.prepare-android.outputs.version }}
 
-            **Полноценная production-сборка** оригинального ICQ Desktop 2016 (Mail.Ru) под Android.
+            Полноценная сборка оригинального ICQ Desktop 2016 под Android.
 
-            ### Поддерживаемые архитектуры
-            - ARM64-v8a (современные устройства)
-            - ARMv7-a (старые устройства)
-            - x86_64 (эмуляторы)
+            Поддерживаемые архитектуры:
+            - ARM64-v8a
+            - ARMv7-a
+            - x86_64
 
-            ### Технические характеристики
-            - Qt 5.15.2 + NDK r21
+            Технические характеристики:
+            - Qt 5.15.2
+            - NDK r21
             - minSdk 21 / targetSdk 33
-            - Полная поддержка Qt Android bindings
 
-            ### Установка
-            1. Скачайте APK для вашей архитектуры
+            Установка:
+            1. Скачайте APK
             2. Разрешите установку из неизвестных источников
             3. Установите
 
-            ---
             Сборка: ${{ needs.prepare-android.outputs.build_date }}
             Коммит: [\( {{ github.sha }}](https://github.com/ \){{ github.repository }}/commit/${{ github.sha }})
           files: artifacts/**/*
