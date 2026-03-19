@@ -1,6 +1,6 @@
 #include <voip/voip3.h>
 #pragma once
-
+using namespace voip
 #include <string>
 #include <list>
 
