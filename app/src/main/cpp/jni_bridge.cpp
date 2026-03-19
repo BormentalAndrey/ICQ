@@ -27,10 +27,10 @@ namespace core { namespace stats {
     class im_stats {};
 }}
 
-// Пути как в CMakeLists.txt
-#include "../../../../im-desktop-master/core/core.h"
-#include "../../../../im-desktop-master/core/core_dispatcher.h"
-#include "../../../../im-desktop-master/core/gui_interface.h"
+// Пути теперь резолвятся через CMake include_directories
+#include "core.h"
+#include "core_dispatcher.h"
+#include "gui_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
