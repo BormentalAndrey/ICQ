@@ -1,9 +1,8 @@
 #include <voip/voip3.h>
 #pragma once
-using namespace voip;
 
 namespace voip {
-
+using namespace voip;
 
 // CallStateInternal contains all info about the call that should be shared between modules.
 // This struct intended to be easy-copyable, it should not contain pointers or other not-owned objects.
