@@ -1,3 +1,6 @@
+// Нужно добавить в начало proxy_settings.h:
+#include "tools/binary_stream.h"
+#include "tools/tlv.h"
 #pragma once
 
 #include "../corelib/enumerations.h"
