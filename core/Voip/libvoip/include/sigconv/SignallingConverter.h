@@ -1,7 +1,6 @@
 #include <voip/voip3.h>
 #pragma once
 
-#include <voip/voip3.h>
 #include <string>
 #include <list>
 
