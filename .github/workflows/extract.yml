@@ -28,9 +28,14 @@ on:
           - x86_64
           - all
 
+env:
+  QT_VERSION: '5.15.2'
+  ANDROID_API_LEVEL: '33'
+  NDK_VERSION: '25.2.9519653'
+
 jobs:
   prepare-android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # Зафиксировано на 22.04 для совместимости OpenSSL 1.1 с Qt 5.15
     outputs:
       version: ${{ steps.get-version.outputs.version }}
       build_date: ${{ steps.get-date.outputs.date }}
@@ -55,42 +60,119 @@ jobs:
       - name: Get current date
         id: get-date
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+  build-android:
+    needs: prepare-android
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event.inputs.arch == 'all' && '["arm64-v8a", "armeabi-v7a", "x86_64"]' || format('["{0}"]', github.event.inputs.arch || 'arm64-v8a')) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
         
-      - name: Setup Android project structure
+      - name: Map architecture to Qt arch
+        id: map-arch
         run: |
+          case "${{ matrix.arch }}" in
+            arm64-v8a)
+              echo "qt_arch=android_arm64_v8a" >> $GITHUB_OUTPUT
+              echo "ndk_abi=arm64-v8a" >> $GITHUB_OUTPUT
+              echo "ndk_host=aarch64-linux-android" >> $GITHUB_OUTPUT
+              ;;
+            armeabi-v7a)
+              echo "qt_arch=android_armv7" >> $GITHUB_OUTPUT
+              echo "ndk_abi=armeabi-v7a" >> $GITHUB_OUTPUT
+              echo "ndk_host=arm-linux-androideabi" >> $GITHUB_OUTPUT
+              ;;
+            x86_64)
+              echo "qt_arch=android_x86_64" >> $GITHUB_OUTPUT
+              echo "ndk_abi=x86_64" >> $GITHUB_OUTPUT
+              echo "ndk_host=x86_64-linux-android" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11' # JDK 11 более стабилен для сборки Gradle под Qt 5.15
+          distribution: 'temulin'
+          
+      - name: Install Qt for Android
+        run: |
+          pip3 install --upgrade aqtinstall
+          
+          echo "=== Installing Qt $QT_VERSION for Android (${{ steps.map-arch.outputs.qt_arch }}) ==="
+          
+          python3 -m aqt install-qt linux android $QT_VERSION ${{ steps.map-arch.outputs.qt_arch }} \
+            --outputdir ${{ github.workspace }}/Qt \
+            --modules \
+              qtbase qtdeclarative qtmultimedia qtsvg qtimageformats \
+              qtandroidextras qtnetworkauth qtquickcontrols2 qtquickcontrols \
+              qtgraphicaleffects qtxmlpatterns
+          
+          python3 -m aqt install-tool linux android --outputdir ${{ github.workspace }}/Qt android_sdk
+          python3 -m aqt install-ndk linux android $NDK_VERSION --outputdir ${{ github.workspace }}/Qt
+          
+      - name: Set environment variables
+        run: |
+          echo "QT_ROOT=${{ github.workspace }}/Qt/$QT_VERSION/${{ steps.map-arch.outputs.qt_arch }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${{ github.workspace }}/Qt/Tools/ndk/$NDK_VERSION" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${{ github.workspace }}/Qt/Tools/android-sdk" >> $GITHUB_ENV
+          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build build-essential libgl1-mesa-dev libglu1-mesa-dev \
+            libxkbcommon-x11-0 libpulse-dev libasound2-dev libssl-dev libxcb-util1 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0
+          
+      - name: Ensure Android resource directories exist
+        run: |
+          # Создаем только если их нет, чтобы не затереть существующие в репозитории файлы
           mkdir -p android/res/values
           mkdir -p android/res/drawable
           
-      - name: Generate AndroidManifest.xml
+      - name: Generate AndroidManifest.xml (Fallback)
         run: |
-          cat > android/AndroidManifest.xml << 'EOF'
+          if [ ! -f "android/AndroidManifest.xml" ]; then
+            echo "⚠️ AndroidManifest.xml not found. Generating default..."
+            cat > android/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.icq.desktop"
               android:versionCode="${{ github.run_number }}"
-              android:versionName="${{ steps.get-version.outputs.version }}">
+              android:versionName="${{ needs.prepare-android.outputs.version }}">
 
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.VIBRATE" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.CAMERA" />
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.microphone" android:required="false" />
+              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
               <application
                   android:allowBackup="true"
                   android:icon="@drawable/ic_launcher"
                   android:label="ICQ"
-                  android:theme="@android:style/Theme.Holo.Light"
-                  android:name="android.app.NativeActivity"
+                  android:name="org.qtproject.qt5.android.bindings.QtApplication"
                   android:supportsRtl="true">
 
                   <activity
-                      android:name="android.app.NativeActivity"
-                      android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode"
+                      android:name="org.qtproject.qt5.android.bindings.QtActivity"
+                      android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
                       android:launchMode="singleTop"
                       android:windowSoftInputMode="adjustResize"
                       android:exported="true">
@@ -100,211 +182,148 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                       
-                      <meta-data
-                          android:name="android.app.lib_name"
-                          android:value="ICQ" />
+                      <meta-data android:name="android.app.lib_name" android:value="ICQ" />
+                      <meta-data android:name="android.app.arguments" android:value="-platform android:port" />
                   </activity>
               </application>
 
               <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
           </manifest>
           EOF
-
-  build-android:
-    needs: prepare-android
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: ${{ fromJSON(github.event.inputs.arch == 'all' && '["arm64-v8a", "armeabi-v7a", "x86_64"]' || format('["{0}"]', github.event.inputs.arch || 'arm64-v8a')) }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+          else
+            echo "✅ Custom AndroidManifest.xml found."
+          fi
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Install Qt for Android (manual method)
+      - name: Generate Missing Resources (Fallback)
         run: |
-          # Устанавливаем aqt
-          pip3 install aqtinstall
+          if [ ! -f "android/res/drawable/ic_launcher.xml" ] && [ ! -f "android/res/drawable/ic_launcher.png" ]; then
+            echo "<?xml version=\"1.0\" encoding=\"utf-8\"?>
+            <vector xmlns:android=\"http://schemas.android.com/apk/res/android\"
+                android:width=\"24dp\" android:height=\"24dp\"
+                android:viewportWidth=\"24\" android:viewportHeight=\"24\">
+                <path android:fillColor=\"#2196F3\"
+                    android:pathData=\"M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z\"/>
+            </vector>" > android/res/drawable/ic_launcher.xml
+          fi
           
-          # Получаем список доступных архитектур
-          echo "Available Android architectures for Qt 5.15.2:"
-          python3 -m aqt list-qt linux android --arch 5.15.2
-          
-          # Устанавливаем Qt базовые модули для Android
-          python3 -m aqt install-qt linux android 5.15.2 android_arm64_v8a \
-            --outputdir ${{ github.workspace }}/Qt \
-            --modules android_arm64_v8a qtbase qtdeclarative qtmultimedia qtsvg qtimageformats qtandroidextras qtnetworkauth
-          
-          # Устанавливаем дополнительные тулзы
-          python3 -m aqt install-tool linux android android_sdk
-          
-          # Устанавливаем NDK
-          python3 -m aqt install-ndk linux android 25.2.9519653
-          
-      - name: Set Qt environment variables
-        run: |
-          echo "QT_ROOT=${{ github.workspace }}/Qt/5.15.2/android_arm64_v8a" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=${{ github.workspace }}/Qt/Tools/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=${{ github.workspace }}/Qt/Tools/android-sdk" >> $GITHUB_ENV
-          
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake \
-            ninja-build \
-            build-essential \
-            libgl1-mesa-dev \
-            libglu1-mesa-dev \
-            libxkbcommon-x11-0 \
-            libpulse-dev \
-            libasound2-dev \
-            libssl-dev \
-            libxcb-util1 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-xinerama0
+          if [ ! -f "android/res/values/strings.xml" ]; then
+            cat > android/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">ICQ</string>
+              <string name="version">${{ needs.prepare-android.outputs.version }}</string>
+          </resources>
+          EOF
+          fi
           
       - name: Patch CMakeLists.txt for Android
         run: |
           if [ ! -f "CMakeLists.txt" ]; then
-            echo "❌ CMakeLists.txt not found!"
+            echo "❌ CMakeLists.txt not found! Is this the correct repository root?"
             exit 1
           fi
           
-          # Создаем резервную копию
-          cp CMakeLists.txt CMakeLists.txt.original
-          
-          # Добавляем Android поддержку если её нет
           if ! grep -q "ANDROID" CMakeLists.txt; then
+            echo "Injecting basic Android definitions into CMakeLists.txt..."
+            cp CMakeLists.txt CMakeLists.txt.bak
             cat >> CMakeLists.txt << 'EOF'
 
-# Android support
-if(ANDROID)
-    set(ICQ_PLATFORM android)
-    message(STATUS "Building for Android platform")
-    
-    add_definitions(-DANDROID -DQT_ANDROID)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funwind-tables -fPIC")
-    
-    # Find Qt components
-    find_package(Qt5 COMPONENTS Core AndroidExtras Multimedia Network REQUIRED)
-    
-    # Android specific libraries
-    set(ANDROID_LIBRARIES
-        -lOpenSLES
-        -landroid
-        -lEGL
-        -lGLESv2
-        -llog
-    )
-    
-    # Set rpath for Android
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CMAKE_SOURCE_DIR}/build-android/lib")
-endif()
-EOF
-            echo "✅ Android support added to CMakeLists.txt"
-          else
-            echo "ℹ️ Android support already exists"
+          # --- Injected Android Support ---
+          if(ANDROID)
+              set(ICQ_PLATFORM android)
+              message(STATUS "Building for Android platform")
+              add_definitions(-DANDROID -DQT_ANDROID)
+              
+              find_package(Qt5 REQUIRED COMPONENTS Core AndroidExtras Multimedia Network Qml Quick Svg)
+              
+              set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CMAKE_CURRENT_BINARY_DIR}")
+          endif()
+          EOF
           fi
           
-      - name: Configure CMake for Android (${{ matrix.arch }})
+      - name: Configure CMake
         run: |
-          mkdir -p build-android-${{ matrix.arch }}
-          cd build-android-${{ matrix.arch }}
+          mkdir -p build-android
+          cd build-android
           
-          # Определяем ABI
-          case "${{ matrix.arch }}" in
-            arm64-v8a)
-              ABI="arm64-v8a"
-              QT_ARCH="android_arm64_v8a"
-              ;;
-            armeabi-v7a)
-              ABI="armeabi-v7a"
-              QT_ARCH="android_armv7"
-              ;;
-            x86_64)
-              ABI="x86_64"
-              QT_ARCH="android_x86_64"
-              ;;
-            *)
-              ABI="arm64-v8a"
-              QT_ARCH="android_arm64_v8a"
-              ;;
-          esac
-          
-          # Конфигурируем CMake
           cmake .. \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=$ABI \
+            -DANDROID_ABI=${{ steps.map-arch.outputs.ndk_abi }} \
             -DANDROID_PLATFORM=android-21 \
             -DANDROID_STL=c++_shared \
             -DANDROID_NATIVE_API_LEVEL=21 \
-            -DIM_QT_DYNAMIC=ON \
             -DANDROID=ON \
             -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} \
             -DQt5_DIR="$QT_ROOT/lib/cmake/Qt5" \
+            -DQT_ANDROID_APPLICATION_DIR="${{ github.workspace }}/android" \
             -GNinja
             
-      - name: Build native libraries (${{ matrix.arch }})
+      - name: Build Native Libraries
         run: |
-          cd build-android-${{ matrix.arch }}
+          cd build-android
           ninja -v || make -j$(nproc)
           
-      - name: Prepare APK structure
+      - name: Create Deployment Settings
         run: |
-          cd build-android-${{ matrix.arch }}
+          cd build-android
           
-          # Создаем структуру для APK
-          mkdir -p android-build/libs/${{ matrix.arch }}
-          mkdir -p android-build/res
-          mkdir -p android-build/assets
+          # androiddeployqt требует специфичных путей NDK. Генерируем надежный JSON.
+          cat > android-deployment-settings.json << EOF
+          {
+              "description": "ICQ for Android",
+              "qt": "$QT_ROOT",
+              "sdk": "$ANDROID_SDK_ROOT",
+              "ndk": "$ANDROID_NDK_ROOT",
+              "toolchain-prefix": "llvm",
+              "tool-prefix": "llvm",
+              "target-architecture": "${{ steps.map-arch.outputs.ndk_abi }}",
+              "ndk-host": "linux-x86_64",
+              "stdcpp-path": "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ steps.map-arch.outputs.ndk_host }}/libc++_shared.so",
+              "android-package-source": "${{ github.workspace }}/android",
+              "application-binary": "${{ github.workspace }}/build-android/libICQ.so",
+              "android-package-name": "com.icq.desktop",
+              "version-name": "${{ needs.prepare-android.outputs.version }}",
+              "version-code": ${{ github.run_number }},
+              "deployment-dependencies": [
+                  "plugins/platforms/android/libqtforandroid.so"
+              ],
+              "libraries": [
+                  "${{ github.workspace }}/build-android/libICQ.so"
+              ],
+              "permissions": [
+                  "android.permission.INTERNET",
+                  "android.permission.WRITE_EXTERNAL_STORAGE",
+                  "android.permission.RECORD_AUDIO",
+                  "android.permission.CAMERA"
+              ],
+              "architectures": {
+                  "${{ steps.map-arch.outputs.ndk_abi }}": "${{ steps.map-arch.outputs.ndk_host }}"
+              },
+              "qtArchitecture": "${{ steps.map-arch.outputs.qt_arch }}"
+          }
+          EOF
           
-          # Копируем библиотеку
-          find . -name "*.so" -exec cp {} android-build/libs/${{ matrix.arch }}/ \;
-          
-          # Копируем Android ресурсы
-          cp -r ../android/* android-build/ 2>/dev/null || true
-          
-          # Создаем простой AndroidManifest.xml если его нет
-          if [ ! -f "android-build/AndroidManifest.xml" ]; then
-            cp ../android/AndroidManifest.xml android-build/
-          fi
-          
-      - name: Create APK with aapt
+      - name: Create APK with androiddeployqt
         run: |
-          cd build-android-${{ matrix.arch }}
+          cd build-android
           
-          # Используем aapt для создания APK
-          $ANDROID_SDK_ROOT/build-tools/33.0.0/aapt package -f -F icq-unaligned.apk \
-            -M android-build/AndroidManifest.xml \
-            -S android-build/res \
-            -A android-build/assets \
-            -I $ANDROID_SDK_ROOT/platforms/android-33/android.jar
+          $QT_ROOT/bin/androiddeployqt \
+            --input android-deployment-settings.json \
+            --output android-build \
+            --deployment bundled \
+            --android-platform android-$ANDROID_API_LEVEL \
+            --jdk $JAVA_HOME \
+            --gradle \
+            ${{ github.event.inputs.build_type == 'release' && '--release' || '--debug' }}
             
-          # Добавляем библиотеки в APK
-          cd android-build
-          zip -r ../icq-unaligned.apk lib
-          cd ..
-          
-          # Выравниваем APK
-          $ANDROID_SDK_ROOT/build-tools/33.0.0/zipalign -f -p 4 icq-unaligned.apk icq-aligned.apk
-          
-          # Копируем финальный APK
-          cp icq-aligned.apk ../icq-android-${{ matrix.arch }}.apk
+          APK_FILE=$(find android-build -name "*.apk" | head -1)
+          if [ -n "$APK_FILE" ]; then
+            cp "$APK_FILE" ../icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk
+            echo "✅ APK created successfully"
+          else
+            echo "❌ APK not found. androiddeployqt might have failed silently."
+            exit 1
+          fi
           
       - name: Generate build info
         run: |
@@ -312,26 +331,20 @@ EOF
           ICQ Android Build Information
           =============================
           Version: ${{ needs.prepare-android.outputs.version }}
-          Build Date: ${{ needs.prepare-android.outputs.build_date }}
+          Build Date: $(date)
           Commit: ${{ github.sha }}
           Architecture: ${{ matrix.arch }}
+          Qt Arch: ${{ steps.map-arch.outputs.qt_arch }}
           Build Type: ${{ github.event.inputs.build_type || 'debug' }}
           Build Number: ${{ github.run_number }}
-          
-          Environment:
-          - Qt Version: 5.15.2
-          - NDK Version: 25.2.9519653
-          - Android SDK: 33
-          - CMake: $(cmake --version | head -1)
-          - Ninja: $(ninja --version)
           EOF
           
-      - name: Upload APK artifact (${{ matrix.arch }})
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}
           path: |
-            icq-android-${{ matrix.arch }}.apk
+            icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk
             build-info-${{ matrix.arch }}.txt
           retention-days: 30
 
@@ -352,32 +365,25 @@ EOF
         with:
           name: ICQ Android ${{ needs.prepare-android.outputs.version }}
           body: |
-            ## 🎉 ICQ для Android v${{ needs.prepare-android.outputs.version }}
+            ## 📱 ICQ для Android v${{ needs.prepare-android.outputs.version }}
             
-            Официальный порт оригинального ICQ Desktop 2016 года на Android!
+            ### О сборке
+            Это порт оригинального ICQ Desktop на Android.
             
-            ### 📱 Поддерживаемые архитектуры:
-            - ARM64-v8a
-            - ARMv7-a
-            - x86_64
+            ### 🎯 Поддерживаемые архитектуры:
+            - **ARM64-v8a** (современные устройства)
+            - **ARMv7-a** (старые устройства)
+            - **x86_64** (эмуляторы, планшеты)
             
-            ### ✨ Особенности сборки:
-            - Оригинальный код ICQ 2016
-            - Qt 5.15.2
-            - Android API 21+
+            ### ✨ Спецификации сборки:
+            - Qt: 5.15.2
+            - Минимальная версия Android: 5.0 (API 21)
+            - Целевая версия: Android 13 (API 33)
             
-            ### 📥 Установка:
-            1. Скачайте APK для вашей архитектуры
-            2. Разрешите установку из неизвестных источников
-            3. Установите и наслаждайтесь!
-            
-            ### ⚠️ Примечание:
-            Это экспериментальная сборка. Некоторые функции могут работать некорректно.
-            
-            ### 🔧 Технические детали:
-            - Версия: ${{ needs.prepare-android.outputs.version }}
-            - Сборка: ${{ needs.prepare-android.outputs.build_date }}
-            - Коммит: ${{ github.sha }}
+            ---
+            Сборка: ${{ needs.prepare-android.outputs.build_date }}
+            Коммит: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
           files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
