@@ -19,12 +19,21 @@ dependencyResolutionManagement {
             name = "JitPack"
             url = uri("https://jitpack.io")
         }
+        // Добавлено для WebRTC
+        maven {
+            name = "Google Maven"
+            url = uri("https://maven.google.com")
+        }
+        // JCenter mirror для старых библиотек
+        maven {
+            name = "JCenter"
+            url = uri("https://jcenter.bintray.com")
+        }
     }
 }
 
 rootProject.name = "ICQ"
 
-// Include all modules
 include(":app")
 include(":core")
 include(":corelib")
@@ -34,7 +43,6 @@ include(":common.shared")
 include(":libomicron")
 include(":unittests")
 
-// Project structure configuration
 project(":app").projectDir = file("app")
 project(":core").projectDir = file("core")
 project(":corelib").projectDir = file("corelib")
