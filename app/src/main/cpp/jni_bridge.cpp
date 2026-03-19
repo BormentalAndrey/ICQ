@@ -3,51 +3,24 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <map>
 #include <android/log.h>
 
-// Добавляем определение im_assert
-#ifndef im_assert
-#include <cstdlib>
-#define im_assert(condition) do { \
-    if (!(condition)) { \
-        __android_log_print(ANDROID_LOG_ERROR, "ICQCore", \
-            "Assertion failed: %s:%d: %s", __FILE__, __LINE__, #condition); \
-        abort(); \
-    } \
-} while(0)
-#endif
-
-// Временное определение для stats
-namespace core { namespace stats {
-    using event_props_type = std::map<std::string, std::string>;
-    enum class stats_event_names {};
-    enum class im_stat_event_names {};
-    class statistics {};
-    class im_stats {};
-}}
-
-// Пути теперь резолвятся через CMake include_directories
-#include "core.h"
-#include "core_dispatcher.h"
-#include "gui_interface.h"
-
+// Логирование для отладки в Logcat
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Глобальный указатель на JVM для фоновых потоков
+// Оригинальные заголовки ядра ICQ
+#include "core.h"
+#include "core_dispatcher.h"
+#include "gui_interface.h"
+
+// Глобальные ссылки
 JavaVM* g_jvm = nullptr;
 static std::unique_ptr<core::core_dispatcher> g_core;
 static jobject g_event_callback_obj = nullptr;
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    g_jvm = vm;
-    LOGI("JNI_OnLoad: JVM успешно закэширована");
-    return JNI_VERSION_1_6;
-}
-
-// Реализация интерфейса ядра для отправки событий в Kotlin
+// Реализация callback-интерфейса для передачи событий из C++ в Kotlin
 class AndroidGuiCallback : public core::icore_interface {
 public:
     void post_message_to_gui(const char* message) override {
@@ -56,18 +29,22 @@ public:
         JNIEnv* env = nullptr;
         bool attached = false;
         
-        if (g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-            g_jvm->AttachCurrentThread(&env, nullptr);
+        // Проверка привязки текущего потока к JVM
+        jint getEnvRes = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+        if (getEnvRes == JNI_EDETACHED) {
+            if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
             attached = true;
         }
 
         jclass callbackClass = env->GetObjectClass(g_event_callback_obj);
         jmethodID methodId = env->GetMethodID(callbackClass, "onCoreEvent", "(Ljava/lang/String;)V");
         
-        jstring jMessage = env->NewStringUTF(message);
-        env->CallVoidMethod(g_event_callback_obj, methodId, jMessage);
+        if (methodId) {
+            jstring jMessage = env->NewStringUTF(message);
+            env->CallVoidMethod(g_event_callback_obj, methodId, jMessage);
+            env->DeleteLocalRef(jMessage);
+        }
         
-        env->DeleteLocalRef(jMessage);
         env->DeleteLocalRef(callbackClass);
 
         if (attached) {
@@ -78,26 +55,34 @@ public:
 
 static std::shared_ptr<AndroidGuiCallback> g_gui_callback;
 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    return JNI_VERSION_1_6;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring data_path, jstring cache_path, jobject callback) {
     const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
-    const char *cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
     
+    // Создаем глобальную ссылку на объект callback, чтобы он не удалился GC
     g_event_callback_obj = env->NewGlobalRef(callback);
     g_gui_callback = std::make_shared<AndroidGuiCallback>();
 
+    // Настройка параметров ядра
     common::core_gui_settings settings;
     settings.os_version_ = "Android";
     settings.locale_ = "ru_RU";
-    settings.profile_path_ = std::wstring(data_path_cstr, data_path_cstr + strlen(data_path_cstr));
     
+    std::string path_str(data_path_cstr);
+    settings.profile_path_ = std::wstring(path_str.begin(), path_str.end());
+    
+    // Инициализация Core
     g_core = std::make_unique<core::core_dispatcher>();
     g_core->link_gui(g_gui_callback, settings);
     
-    LOGI("Ядро ICQ запущено. Путь БД: %s", data_path_cstr);
+    LOGI("Core Engine started. Base path: %s", data_path_cstr);
 
     env->ReleaseStringUTFChars(data_path, data_path_cstr);
-    env->ReleaseStringUTFChars(cache_path, cache_path_cstr);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -111,5 +96,5 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv *env, jobject thiz)
         g_event_callback_obj = nullptr;
     }
     g_gui_callback.reset();
-    LOGI("Ядро ICQ безопасно остановлено");
+    LOGI("Core Engine safely stopped");
 }
