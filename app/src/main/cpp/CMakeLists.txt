@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core")
 
 # Путь к оригинальным исходникам ICQ
-set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../im-desktop-master")
+set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 
 # Дефайны для сборки без GUI и десктопных зависимостей
 add_definitions(-DLINUX)
