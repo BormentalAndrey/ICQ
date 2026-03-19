@@ -16,8 +16,9 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Получаем путь к Boost из переменной окружения
+                // Получаем пути к библиотекам из переменных окружения
                 val boostRoot = System.getenv("BOOST_ROOT") ?: ""
+                val rapidjsonRoot = System.getenv("RAPIDJSON_ROOT") ?: ""
 
                 // Аргументы для CMake
                 arguments += listOf(
@@ -39,8 +40,10 @@ android {
                     "-I${project.projectDir}/../core",
                     "-I${project.projectDir}/../corelib",
                     "-I${project.projectDir}/../common.shared",
-                    "-I$boostRoot" // Путь к Boost
-                ).joinToString(" ")
+                    "-I${project.projectDir}/..", // Добавили корень для надежности инклудов
+                    "-I$boostRoot", // Путь к Boost
+                    "-I$rapidjsonRoot" // Путь к RapidJSON
+                ).filter { it.isNotBlank() }.joinToString(" ")
 
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
             }
