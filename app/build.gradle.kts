@@ -75,6 +75,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     
-    // WebRTC - изменена версия на существующую
-    implementation("org.webrtc:google-webrtc:1.0.30039")
+    // WebRTC - правильная версия
+    implementation("org.webrtc:google-webrtc:1.0.32006")
 }
