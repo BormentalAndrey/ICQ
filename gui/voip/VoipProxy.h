@@ -1,6 +1,6 @@
 #pragma once
 #include "../../core/Voip/VoipManagerDefines.h"
-#include "src/CallStateInternal.h"
+#include "../../core/Voip/libvoip/src/CallStateInternal.h"
 #include "VoipController.h"
 
 #define DEFAULT_DEVICE_UID "default_device"
