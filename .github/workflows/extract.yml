@@ -62,6 +62,33 @@ jobs:
           }}
           EOF
 
+      - name: Fix includes in proxy_settings.h
+        run: |
+          # Добавляем недостающие инклюды
+          if [ -f "core/proxy_settings.h" ]; then
+            if ! grep -q "tools/binary_stream.h" "core/proxy_settings.h"; then
+              sed -i '1i#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/proxy_settings.h
+              echo "✅ Added includes to proxy_settings.h"
+            else
+              echo "✅ Includes already present in proxy_settings.h"
+            fi
+          else
+            echo "⚠️ proxy_settings.h not found"
+          fi
+
+      - name: Fix includes in im_stats.h
+        run: |
+          if [ -f "core/stats/im/im_stats.h" ]; then
+            if ! grep -q "rapidjson/document.h" "core/stats/im/im_stats.h"; then
+              sed -i '1i#include <rapidjson/document.h>\n#include <rapidjson/writer.h>\n#include <rapidjson/stringbuffer.h>\n#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/stats/im/im_stats.h
+              echo "✅ Added includes to im_stats.h"
+            else
+              echo "✅ Includes already present in im_stats.h"
+            fi
+          else
+            echo "⚠️ im_stats.h not found"
+          fi
+
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
