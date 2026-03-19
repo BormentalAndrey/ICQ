@@ -1,25 +1,8 @@
-// settings.gradle.kts
 pluginManagement {
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
-        maven { url = uri("https://jitpack.io") }
-    }
-    plugins {
-        id("com.android.application") version "8.6.0"
-        id("com.android.library") version "8.6.0"
-        id("org.jetbrains.kotlin.android") version "1.9.23"
-        id("com.google.gms.google-services") version "4.4.2"
-        id("com.google.devtools.ksp") version "1.9.23-1.0.20"
-        id("com.google.firebase.crashlytics") version "2.9.9"
-    }
-    resolutionStrategy {
-        eachPlugin {
-            if (requested.id.namespace == "com.android" || requested.id.id.startsWith("androidx.")) {
-                useModule("com.android.tools.build:gradle:${requested.version}")
-            }
-        }
     }
 }
 
@@ -28,24 +11,20 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
-        maven { url = uri("https://maven.google.com") }
-        // Зеркала для ускорения
+        maven {
+            name = "JitPack"
+            url = uri("https://jitpack.io")
+        }
         maven {
             name = "Aliyun Mirror"
             url = uri("https://maven.aliyun.com/repository/public")
-        }
-    }
-    versionCatalogs {
-        create("libs") {
-            from(files("gradle/libs.versions.toml"))
         }
     }
 }
 
 rootProject.name = "ICQ"
 
-// Включение всех модулей
+// Include all modules
 include(":app")
 include(":core")
 include(":corelib")
@@ -55,7 +34,17 @@ include(":common.shared")
 include(":libomicron")
 include(":unittests")
 
-// Настройка build directories
+// Project structure configuration
+project(":app").projectDir = file("app")
+project(":core").projectDir = file("core")
+project(":corelib").projectDir = file("corelib")
+project(":gui").projectDir = file("gui")
+project(":gui.shared").projectDir = file("gui.shared")
+project(":common.shared").projectDir = file("common.shared")
+project(":libomicron").projectDir = file("libomicron")
+project(":unittests").projectDir = file("unittests")
+
+// Build cache configuration
 buildCache {
     local {
         isEnabled = true
