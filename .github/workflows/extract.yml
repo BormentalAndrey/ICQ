@@ -28,40 +28,35 @@ jobs:
         with:
           packages: 'ndk;26.1.10909125'
 
-      - name: Fix Case Sensitivity and Missing Headers
+      - name: Fix Environment and Case Sensitivity
         run: |
-          # Исправление регистра для папки Voip (Linux sensitive)
+          # Создаем симлинки для Linux (Case Sensitivity)
+          # Это решает ошибку fatal error: 'voip/voip3.h'
+          mkdir -p core/voip
           if [ -d "core/Voip" ]; then
-            ln -sf Voip core/voip
-            echo "Symlink for core/voip created."
+            ln -sf ../Voip/VoipManager.h core/voip/voip3.h
+            # Если в Voip есть реальный voip3.h, линкуем его:
+            [ -f "core/Voip/voip3.h" ] && ln -sf ../Voip/voip3.h core/voip/voip3.h
+            ln -sf Voip core/voip_dir 
           fi
           
-          # Исправление регистра для common.shared
-          if [ -d "common.shared" ]; then
-            ln -sf common.shared common_shared
-            echo "Symlink for common_shared created."
-          fi
-
-          # Создание базового конфига, если он отсутствует (предотвращение fatal error 'config_data.h')
+          # Заглушки для конфигурации
           mkdir -p common.shared/config
-          if [ ! -f "common.shared/config/config_data.h" ]; then
-            echo "#pragma once" > common.shared/config/config_data.h
-            echo "// Auto-generated stub for build" >> common.shared/config/config_data.h
-            echo "Created stub for config_data.h"
-          fi
+          touch common.shared/config/config_data.h
 
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/boost_1_85_0
-          key: ${{ runner.os }}-boost-1.85.0
+          path: ${{ github.workspace }}/boost_1_83_0
+          key: ${{ runner.os }}-boost-1.83.0
 
-      - name: Download Boost
+      - name: Download Boost 1.83.0
         if: steps.cache-boost.outputs.cache-hit != 'true'
         run: |
-          wget -q https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.bz2
-          tar -xjf boost_1_85_0.tar.bz2
+          # Используем 1.83.0, так как в 1.85 удален wpath
+          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
+          tar -xjf boost_1_83_0.tar.bz2
 
       - name: Download RapidJSON
         run: |
@@ -72,7 +67,7 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace
         env:
-          BOOST_ROOT: ${{ github.workspace }}/boost_1_85_0
+          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
 
       - name: Upload APK
@@ -80,3 +75,4 @@ jobs:
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
+          
