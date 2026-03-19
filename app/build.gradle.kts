@@ -16,18 +16,16 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Получаем пути к библиотекам из переменных окружения
                 val boostRoot = System.getenv("BOOST_ROOT") ?: ""
                 val rapidjsonRoot = System.getenv("RAPIDJSON_ROOT") ?: ""
+                val root = "${project.projectDir}/.."
 
-                // Аргументы для CMake
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DBOOST_ROOT=$boostRoot",
                     "-DBoost_INCLUDE_DIR=$boostRoot"
                 )
 
-                // Флаги C++
                 cppFlags += listOf(
                     "-std=c++17",
                     "-fexceptions",
@@ -36,13 +34,15 @@ android {
                     "-DNDEBUG",
                     "-O3",
                     "-flto",
-                    // Пути к заголовочным файлам
-                    "-I${project.projectDir}/../core",
-                    "-I${project.projectDir}/../corelib",
-                    "-I${project.projectDir}/../common.shared",
-                    "-I${project.projectDir}/..", // Добавили корень для надежности инклудов
-                    "-I$boostRoot", // Путь к Boost
-                    "-I$rapidjsonRoot" // Путь к RapidJSON
+                    // Пути поиска (Include Directories)
+                    "-I$root",
+                    "-I$root/core",
+                    "-I$root/corelib",
+                    "-I$root/common.shared",
+                    "-I$root/core/Voip",
+                    "-I$root/gui.shared",
+                    "-I$boostRoot",
+                    "-I$rapidjsonRoot"
                 ).filter { it.isNotBlank() }.joinToString(" ")
 
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
@@ -57,24 +57,7 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            ndk {
-                debugSymbolLevel = "SYMBOL_TABLE"
-            }
-        }
-    }
-
     packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
         jniLibs {
             pickFirsts.add("lib/**/libc++_shared.so")
         }
@@ -101,8 +84,4 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("io.github.webrtc-sdk:android:137.7151.05")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.fragment:fragment-ktx:1.6.2")
-    implementation("androidx.activity:activity-ktx:1.8.2")
 }
