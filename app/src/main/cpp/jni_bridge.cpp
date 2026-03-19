@@ -6,6 +6,9 @@
 #include <map>
 #include <android/log.h>
 
+// Подключаем stdafx.h для im_assert и базовых определений
+#include "../../core/stdafx.h"
+
 // Определяем типы для stats (ДО включения заголовков ядра)
 #include <map>
 namespace core { namespace stats {
