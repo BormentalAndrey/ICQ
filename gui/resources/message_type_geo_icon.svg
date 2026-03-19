@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <!-- Generator: Sketch 57.1 (83088) - https://sketch.com -->
+    <title>message_type_geo_icon</title>
+    <desc>Created with Sketch.</desc>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="message_type_geo_icon">
+            <rect id="Rectangle" x="0" y="0" width="20" height="20"></rect>
+            <path d="M2.51791872,9.03024511 L16.8349971,3.06493958 C17.2639429,2.88621653 17.7565561,3.08906096 17.9352797,3.51800532 C18.0215751,3.72511798 18.0215733,3.95811899 17.9352749,4.16523035 L11.9698078,18.4820062 C11.7910778,18.9109479 11.2984614,19.113785 10.8695185,18.9350556 C10.6021035,18.8236307 10.4108186,18.5824725 10.3631911,18.2967148 L9.36770394,12.3239357 C9.30859851,11.9693115 9.03070461,11.6914204 8.67607902,11.6323175 L2.70320476,10.6368625 C2.2448374,10.5604698 1.93518596,10.1269623 2.0115789,9.66859631 C2.05920545,9.38283196 2.25049618,9.14166847 2.51791872,9.03024511 Z" id="{geo}-copy-2-a" fill="#A8ADB8" fill-rule="nonzero"></path>
+        </g>
+    </g>
+</svg>
