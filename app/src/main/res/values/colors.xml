@@ -1,5 +1,33 @@
 <resources>
+    <!-- Основные цвета ICQ -->
+    <color name="icq_primary">#FF6200EE</color>
+    <color name="icq_primary_dark">#FF3700B3</color>
+    <color name="icq_primary_light">#FF9E67FF</color>
+    
+    <color name="icq_secondary">#FF03DAC5</color>
+    <color name="icq_secondary_dark">#FF018786</color>
+    <color name="icq_secondary_light">#FF66FFF0</color>
+    
+    <!-- Фоновые цвета -->
+    <color name="icq_background">#FFFFFFFF</color>
+    <color name="icq_surface">#FFF5F5F5</color>
+    <color name="icq_card">#FFFFFFFF</color>
+    
+    <!-- Текстовые цвета -->
+    <color name="icq_text_primary">#DE000000</color>
+    <color name="icq_text_secondary">#8A000000</color>
+    <color name="icq_text_hint">#61000000</color>
+    <color name="icq_text_disabled">#42000000</color>
+    
+    <!-- Цвета для ошибок и предупреждений -->
+    <color name="icq_error">#FFB00020</color>
+    <color name="icq_success">#FF4CAF50</color>
+    <color name="icq_warning">#FFFFC107</color>
+    <color name="icq_info">#FF2196F3</color>
+    
+    <!-- Стандартные цвета для обратной совместимости -->
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
 </resources>
