@@ -28,21 +28,39 @@ jobs:
         with:
           packages: 'ndk;26.1.10909125'
 
+      - name: Install system dependencies (libcurl)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev
+
       - name: Fix Environment and Case Sensitivity
         run: |
           # Создаем симлинки для Linux (Case Sensitivity)
           # Это решает ошибку fatal error: 'voip/voip3.h'
           mkdir -p core/voip
           if [ -d "core/Voip" ]; then
-            ln -sf ../Voip/VoipManager.h core/voip/voip3.h
-            # Если в Voip есть реальный voip3.h, линкуем его:
-            [ -f "core/Voip/voip3.h" ] && ln -sf ../Voip/voip3.h core/voip/voip3.h
-            ln -sf Voip core/voip_dir 
+            # Создаем симлинк для voip3.h если его нет
+            if [ ! -f "core/voip/voip3.h" ]; then
+              echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
+            fi
           fi
           
-          # Заглушки для конфигурации
+          # Создаем недостающие заглушки
           mkdir -p common.shared/config
-          touch common.shared/config/config_data.h
+          cat > common.shared/config/config_data.h << 'EOF'
+          #pragma once
+          #include <string>
+          namespace config {
+              std::string config_json();
+          }
+          EOF
+          
+          cat > common.shared/loader_errors.h << 'EOF'
+          #pragma once
+          namespace core { namespace loader {
+              enum class error_code { ok, network_error, file_error };
+          }}
+          EOF
 
       - name: Cache Boost
         id: cache-boost
@@ -54,13 +72,22 @@ jobs:
       - name: Download Boost 1.83.0
         if: steps.cache-boost.outputs.cache-hit != 'true'
         run: |
-          # Используем 1.83.0, так как в 1.85 удален wpath
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
           tar -xjf boost_1_83_0.tar.bz2
 
       - name: Download RapidJSON
         run: |
           git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
+
+      - name: Find libcurl for Android
+        run: |
+          # Ищем libcurl в системе
+          CURL_LIB_PATH=$(find /usr -name "libcurl.so" 2>/dev/null | head -1)
+          CURL_INCLUDE_PATH=$(find /usr -name "curl.h" 2>/dev/null | head -1 | xargs dirname)
+          echo "CURL_LIB_PATH=$CURL_LIB_PATH" >> $GITHUB_ENV
+          echo "CURL_INCLUDE_PATH=$CURL_INCLUDE_PATH" >> $GITHUB_ENV
+          echo "Found curl at: $CURL_LIB_PATH"
+          echo "Found curl includes at: $CURL_INCLUDE_PATH"
 
       - name: Build ICQ Mobile
         run: |
@@ -69,10 +96,11 @@ jobs:
         env:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
+          CURL_LIB_PATH: ${{ env.CURL_LIB_PATH }}
+          CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
-          
