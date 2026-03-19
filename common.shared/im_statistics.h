@@ -1,3 +1,5 @@
+// Добавьте в начало файла:
+#include <cassert>
 #pragma once
 
 namespace core
