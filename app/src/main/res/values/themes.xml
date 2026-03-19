@@ -1,11 +1,35 @@
 <resources>
+    <!-- Базовый стиль ICQ -->
     <style name="Theme.ICQ" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorPrimary">@color/icq_primary</item>
+        <item name="colorPrimaryVariant">@color/icq_primary_dark</item>
         <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/icq_secondary</item>
+        <item name="colorSecondaryVariant">@color/icq_secondary_dark</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:colorBackground">@color/icq_background</item>
+        <item name="colorOnBackground">@color/icq_text_primary</item>
+        <item name="colorSurface">@color/icq_surface</item>
+        <item name="colorOnSurface">@color/icq_text_primary</item>
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
     </style>
     
+    <!-- Полноэкранный стиль для звонков -->
     <style name="Theme.ICQ.Fullscreen" parent="Theme.ICQ">
         <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">@android:color/black</item>
+    </style>
+    
+    <!-- Стиль для диалогов -->
+    <style name="Theme.ICQ.Dialog" parent="Theme.Material3.Light.Dialog">
+        <item name="colorPrimary">@color/icq_primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
     </style>
 </resources>
