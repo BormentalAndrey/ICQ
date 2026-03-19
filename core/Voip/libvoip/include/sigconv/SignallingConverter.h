@@ -1,11 +1,11 @@
 #include <voip/voip3.h>
 #pragma once
-using namespace voip
+
 #include <string>
 #include <list>
 
 namespace voip {
-
+using namespace voip;
 class WIMSignallingConverter {
 public:
     bool    PackAllocRequest(const std::string &user_id,
