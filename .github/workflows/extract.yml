@@ -28,31 +28,71 @@ jobs:
       - name: Install NDK
         run: sdkmanager "ndk;25.2.9519653"
       
-      - name: Create gradle wrapper
+      - name: Create gradle wrapper with correct version
         run: |
           mkdir -p gradle/wrapper
           
-          # gradle-wrapper.properties
+          # gradle-wrapper.properties с правильной версией Gradle 8.7
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
           
-          # Download wrapper jar
+          # Download wrapper jar для Gradle 8.7
           curl -L -o gradle/wrapper/gradle-wrapper.jar \
-            https://github.com/gradle/gradle/raw/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+            https://github.com/gradle/gradle/raw/v8.7.0/gradle/wrapper/gradle-wrapper.jar
           
           chmod +x gradlew
+          
+          # Проверка версии
+          ./gradlew --version
+      
+      - name: Fix settings.gradle.kts
+        run: |
+          cat > settings.gradle.kts << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ICQ"
+          include(":app")
+          EOF
+      
+      - name: Fix build.gradle.kts
+        run: |
+          # Создаем корневой build.gradle.kts если его нет
+          if [ ! -f "build.gradle.kts" ]; then
+            cat > build.gradle.kts << 'EOF'
+            plugins {
+                id("com.android.application") version "8.6.0" apply false
+            }
+            EOF
+          fi
       
       - name: Build debug APK
         run: |
           ./gradlew :app:assembleDebug --stacktrace
+        env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            **/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
