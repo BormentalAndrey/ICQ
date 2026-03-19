@@ -5,7 +5,8 @@ project("icq_mobile_core")
 set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 
 # --- Секция компиляции и дефайнов ---
-# Использование современного метода установки макросов
+# Использование современного метода установки макросов.
+# Добавлены заглушки для im_assert и фикс для boost::filesystem::wpath
 add_compile_definitions(
     LINUX
     __linux__
@@ -13,6 +14,8 @@ add_compile_definitions(
     STRIP_CRASH_HANDLER
     SUPPORT_EXTERNAL_CONFIG
     HAVE_SECURE_GETENV=1
+    "im_assert(x)=((void)0)"
+    "boost::filesystem::wpath=boost::filesystem::path"
 )
 
 # --- Поиск путей заголовков ---
@@ -26,8 +29,8 @@ include_directories(
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/common.shared/config
     ${ICQ_ROOT}/gui.shared
-    $ENV{BOOST_ROOT}             # Исправлено: переменная окружения Boost
-    $ENV{RAPIDJSON_ROOT}         # Исправлено: переменная окружения RapidJSON
+    $ENV{BOOST_ROOT}             # Переменная окружения Boost
+    $ENV{RAPIDJSON_ROOT}         # Переменная окружения RapidJSON
 )
 
 # --- Сбор исходных файлов ---
@@ -56,7 +59,6 @@ target_link_libraries(icq_core
     ${log-lib}
     ${android-lib}
     ${z-lib}
-    # Если Boost используется как static, линкуем здесь (например, boost_system)
     atomic
 )
 
