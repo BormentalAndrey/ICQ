@@ -16,18 +16,16 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Production-флаги для C++ ядра
                 cppFlags += listOf(
                     "-std=c++17", 
                     "-fexceptions", 
                     "-frtti", 
                     "-D__linux__", 
                     "-DNDEBUG",
-                    "-O3", // Максимальная оптимизация
-                    "-flto" // Link-Time Optimization
+                    "-O3",
+                    "-flto"
                 ).joinToString(" ")
                 
-                // Оставляем только актуальные архитектуры для уменьшения размера APK
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
             }
         }
@@ -59,7 +57,6 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            // Разрешаем конфликты, если WebRTC и Core используют разные версии libc++
             pickFirsts.add("lib/**/libc++_shared.so") 
         }
     }
@@ -78,6 +75,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     
-    // Библиотека WebRTC для отрисовки видеокадров и P2P
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    // WebRTC - изменена версия на существующую
+    implementation("org.webrtc:google-webrtc:1.0.30039")
 }
