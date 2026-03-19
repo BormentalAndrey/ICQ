@@ -50,15 +50,17 @@ add_library(icq_core SHARED
     ${CORE_SOURCES}
 )
 
-# --- Настройка путей инклудов ---
+# --- Настройка путей инклудов (полная версия) ---
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
     
-    # Core директории
+    # Core основные директории
     ${ICQ_ROOT}/core
     ${ICQ_ROOT}/core/voip
     ${ICQ_ROOT}/core/Voip
+    ${ICQ_ROOT}/core/Voip/libvoip/include      # VoipController.h
+    ${ICQ_ROOT}/core/Voip/libvoip/src          # CallStateInternal.h
     ${ICQ_ROOT}/core/archive
     ${ICQ_ROOT}/core/connections
     ${ICQ_ROOT}/core/connections/wim
@@ -97,6 +99,9 @@ target_include_directories(icq_core PRIVATE
     # Gui.shared
     ${ICQ_ROOT}/gui.shared
     ${ICQ_ROOT}/gui.shared/spellcheck
+    ${ICQ_ROOT}/gui                      # Для core_dispatcher.h
+    ${ICQ_ROOT}/gui/voip                  # Для VoipProxy.h
+    ${ICQ_ROOT}/gui/voip/src              # Для дополнительных инклудов
     
     # Внешние зависимости
     ${BOOST_PATH}
@@ -127,7 +132,7 @@ target_compile_options(icq_core PRIVATE
     -Wno-missing-field-initializers
 )
 
-# --- Линковка системных библиотек (без atomic) ---
+# --- Линковка системных библиотек ---
 find_library(log-lib log)
 find_library(z-lib z)
 
@@ -154,4 +159,5 @@ message(STATUS "CURL_INCLUDE_DIR: ${CURL_INCLUDE_DIR}")
 message(STATUS "ANDROID_ABI: ${ANDROID_ABI}")
 message(STATUS "ANDROID_NDK: ${ANDROID_NDK}")
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
+message(STATUS "CORE_SOURCES count: ${CORE_SOURCES_COUNT}")
 message(STATUS "==================================================================")
