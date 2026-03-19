@@ -28,6 +28,28 @@ jobs:
         with:
           packages: 'ndk;26.1.10909125'
 
+      - name: Fix Case Sensitivity and Missing Headers
+        run: |
+          # Исправление регистра для папки Voip (Linux sensitive)
+          if [ -d "core/Voip" ]; then
+            ln -sf Voip core/voip
+            echo "Symlink for core/voip created."
+          fi
+          
+          # Исправление регистра для common.shared
+          if [ -d "common.shared" ]; then
+            ln -sf common.shared common_shared
+            echo "Symlink for common_shared created."
+          fi
+
+          # Создание базового конфига, если он отсутствует (предотвращение fatal error 'config_data.h')
+          mkdir -p common.shared/config
+          if [ ! -f "common.shared/config/config_data.h" ]; then
+            echo "#pragma once" > common.shared/config/config_data.h
+            echo "// Auto-generated stub for build" >> common.shared/config/config_data.h
+            echo "Created stub for config_data.h"
+          fi
+
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
@@ -45,11 +67,16 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
 
-      - name: Build ICQ
+      - name: Build ICQ Mobile
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace
         env:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_85_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
-          
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: icq-mobile-debug
+          path: app/build/outputs/apk/debug/*.apk
