@@ -50,74 +50,40 @@ jobs:
           echo "STEP 4: Finding mavenCentral() in all files"
           echo "========================================="
           find . -name "*.gradle*" -type f -exec grep -l "mavenCentral()" {} \;
+      
+      - name: Show content of all gradle files
+        run: |
+          echo "========================================="
+          echo "Content of settings.gradle.kts:"
+          echo "========================================="
+          cat -A settings.gradle.kts
           
           echo "\n========================================="
-          echo "STEP 5: Finding buildscript blocks"
+          echo "Content of build.gradle.kts:"
           echo "========================================="
-          find . -name "*.gradle*" -type f -exec grep -l "buildscript" {} \;
+          cat -A build.gradle.kts
           
           echo "\n========================================="
-          echo "STEP 6: Finding allprojects blocks"
+          echo "Content of gradle.properties:"
           echo "========================================="
-          find . -name "*.gradle*" -type f -exec grep -l "allprojects" {} \;
+          cat -A gradle.properties
           
           echo "\n========================================="
-          echo "STEP 7: Finding subprojects blocks"
+          echo "Content of gradle-wrapper.properties:"
           echo "========================================="
-          find . -name "*.gradle*" -type f -exec grep -l "subprojects" {} \;
+          cat -A gradle/wrapper/gradle-wrapper.properties
       
-      - name: Show content of settings.gradle.kts
+      - name: Check for hidden BOM characters
         run: |
           echo "========================================="
-          echo "settings.gradle.kts content:"
+          echo "Checking for UTF-8 BOM in files:"
           echo "========================================="
-          cat settings.gradle.kts
+          find . -name "*.gradle.kts" -exec file {} \; | grep "UTF-8 Unicode (with BOM)" || echo "No BOM found"
       
-      - name: Show content of build.gradle.kts
+      - name: Kill any existing gradle daemons
         run: |
-          echo "========================================="
-          echo "build.gradle.kts content:"
-          echo "========================================="
-          cat build.gradle.kts
-      
-      - name: Show content of gradle.properties
-        run: |
-          echo "========================================="
-          echo "gradle.properties content:"
-          echo "========================================="
-          cat gradle.properties
-      
-      - name: Show content of gradle wrapper properties
-        run: |
-          echo "========================================="
-          echo "gradle-wrapper.properties content:"
-          echo "========================================="
-          cat gradle/wrapper/gradle-wrapper.properties
-      
-      - name: Show all module build.gradle.kts files
-        run: |
-          echo "========================================="
-          echo "All module build.gradle.kts files:"
-          echo "========================================="
-          find . -path "*/build.gradle.kts" -not -path "./build.gradle.kts" | while read file; do
-            echo "\n--- $file ---"
-            head -20 "$file"
-          done
-      
-      - name: Check for any build.gradle files (without .kts)
-        run: |
-          echo "========================================="
-          echo "Checking for build.gradle (without .kts):"
-          echo "========================================="
-          find . -name "build.gradle" -not -name "*.kts"
-      
-      - name: Check for init scripts
-        run: |
-          echo "========================================="
-          echo "Checking for init scripts:"
-          echo "========================================="
-          find . -name "init.gradle*"
-          ls -la ~/.gradle/init.d/ 2>/dev/null || echo "No init.d folder"
+          ./gradlew --stop
+          pkill -f gradle || true
       
       - name: Clear Gradle cache
         run: |
@@ -125,7 +91,7 @@ jobs:
           rm -rf .gradle
           rm -rf */build
       
-      - name: Create fresh gradle wrapper
+      - name: Create fresh gradle wrapper with Gradle 8.6
         run: |
           rm -rf gradle/wrapper
           mkdir -p gradle/wrapper
@@ -142,10 +108,37 @@ jobs:
             https://github.com/gradle/gradle/raw/v8.6.0/gradle/wrapper/gradle-wrapper.jar
           
           chmod +x gradlew
+          ./gradlew --version
       
-      - name: Create minimal settings.gradle.kts
+      - name: Test with FAIL_ON_PROJECT_REPOS to identify problematic module
         run: |
-          cat > settings.gradle.kts << 'EOF'
+          echo "========================================="
+          echo "Testing with FAIL_ON_PROJECT_REPOS mode"
+          echo "========================================="
+          
+          # Backup original settings
+          cp settings.gradle.kts settings.gradle.kts.backup
+          
+          # Modify to FAIL_ON_PROJECT_REPOS
+          sed -i 's/PREFER_SETTINGS/FAIL_ON_PROJECT_REPOS/' settings.gradle.kts
+          
+          echo "Modified settings.gradle.kts:"
+          grep -A 2 "repositoriesMode" settings.gradle.kts
+          
+          # Try to build - this will fail and show which module adds repositories
+          ./gradlew :app:assembleDebug --stacktrace || true
+          
+          # Restore original
+          mv settings.gradle.kts.backup settings.gradle.kts
+      
+      - name: Try minimal configuration with only app module
+        run: |
+          echo "========================================="
+          echo "Testing with minimal configuration"
+          echo "========================================="
+          
+          # Create minimal settings.gradle.kts
+          cat > settings.gradle.kts.min << 'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -165,19 +158,106 @@ jobs:
           rootProject.name = "ICQ"
           include(":app")
           EOF
-      
-      - name: Create minimal build.gradle.kts
-        run: |
-          cat > build.gradle.kts << 'EOF'
+          
+          mv settings.gradle.kts settings.gradle.kts.full
+          mv settings.gradle.kts.min settings.gradle.kts
+          
+          # Create minimal build.gradle.kts
+          cat > build.gradle.kts.min << 'EOF'
           plugins {
               id("com.android.application") version "8.6.0" apply false
           }
           EOF
+          
+          mv build.gradle.kts build.gradle.kts.full
+          mv build.gradle.kts.min build.gradle.kts
+          
+          # Try to build only app
+          ./gradlew :app:assembleDebug --stacktrace || true
+          
+          # Restore original files
+          mv settings.gradle.kts.full settings.gradle.kts
+          mv build.gradle.kts.full build.gradle.kts
       
-      - name: Try minimal build
+      - name: Try with Gradle 8.4
         run: |
-          ./gradlew projects --stacktrace
+          echo "========================================="
+          echo "Testing with Gradle 8.4"
+          echo "========================================="
+          
+          sed -i 's/gradle-8.6-bin.zip/gradle-8.4-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+          ./gradlew --version
+          
+          ./gradlew :app:assembleDebug --stacktrace || true
       
-      - name: Now try full build with FAIL_ON_PROJECT_REPOS
+      - name: Try with all repositories in settings.gradle.kts only
         run: |
+          echo "========================================="
+          echo "Testing with clean settings.gradle.kts"
+          echo "========================================="
+          
+          # Create absolutely minimal settings.gradle.kts
+          cat > settings.gradle.kts.clean << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          
+          rootProject.name = "ICQ"
+          include(":app")
+          include(":core")
+          include(":corelib")
+          include(":gui")
+          include(":gui.shared")
+          include(":common.shared")
+          include(":libomicron")
+          include(":unittests")
+          EOF
+          
+          mv settings.gradle.kts settings.gradle.kts.backup2
+          mv settings.gradle.kts.clean settings.gradle.kts
+          
+          # Try build
+          ./gradlew :app:assembleDebug --stacktrace || true
+          
+          # Restore
+          mv settings.gradle.kts.backup2 settings.gradle.kts
+      
+      - name: Final attempt with clean environment
+        run: |
+          echo "========================================="
+          echo "Final attempt with clean environment"
+          echo "========================================="
+          
+          # Full cleanup
+          rm -rf ~/.gradle/caches/
+          rm -rf .gradle
+          rm -rf */build
+          ./gradlew --stop
+          
+          # Fresh wrapper
+          ./gradlew --version
+          
+          # Try build with original files
           ./gradlew :app:assembleDebug --stacktrace
+      
+      - name: Upload logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-logs
+          path: |
+            **/build/reports/
+            .gradle/daemon/**/daemon-*.log
+          retention-days: 7
