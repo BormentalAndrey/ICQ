@@ -9,25 +9,7 @@
 // Подключаем stdafx.h для im_assert и базовых определений
 #include "../../core/stdafx.h"
 
-// Определяем типы для stats (ДО включения заголовков ядра)
-#include <map>
-namespace core { namespace stats {
-    using event_props_type = std::map<std::string, std::string>;
-    enum class stats_event_names {};
-    enum class im_stat_event_names {};
-    class statistics {
-    public:
-        void insert_event(stats_event_names, const event_props_type&) {}
-        void insert_event(stats_event_names, event_props_type&&) {}
-        bool is_enabled() const { return false; }
-    };
-    class im_stats {
-    public:
-        void insert_event(im_stat_event_names, const event_props_type&) {}
-        void insert_event(im_stat_event_names, event_props_type&&) {}
-        bool is_enabled() const { return false; }
-    };
-}}
+// НЕ ПЕРЕОПРЕДЕЛЯЕМ event_props_type - оно уже есть в common.h
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
