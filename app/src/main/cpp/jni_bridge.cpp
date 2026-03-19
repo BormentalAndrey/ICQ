@@ -24,9 +24,9 @@
 
 // 3. ПУТИ К ЗАГОЛОВКАМ:
 // Если CMake настроен верно (с ICQ_ROOT), используйте прямые пути без ../../../
-#include "core/core.h"
-#include "core/core_dispatcher.h"
-#include "core/gui_interface.h"
+#include "core.h"
+#include "core_dispatcher.h"
+#include "gui_interface.h"
 
 // Глобальные ссылки
 JavaVM* g_jvm = nullptr;
