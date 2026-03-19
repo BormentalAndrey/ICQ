@@ -35,7 +35,7 @@ env:
 
 jobs:
   prepare-android:
-    runs-on: ubuntu-22.04 # Зафиксировано на 22.04 для совместимости OpenSSL 1.1 с Qt 5.15
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.get-version.outputs.version }}
       build_date: ${{ steps.get-date.outputs.date }}
@@ -97,8 +97,8 @@ jobs:
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '11' # JDK 11 более стабилен для сборки Gradle под Qt 5.15
-          distribution: 'temulin'
+          java-version: '11'
+          distribution: 'temurin'  # ИСПРАВЛЕНО: temulin -> temurin
           
       - name: Install Qt for Android
         run: |
@@ -130,11 +130,11 @@ jobs:
             cmake ninja-build build-essential libgl1-mesa-dev libglu1-mesa-dev \
             libxkbcommon-x11-0 libpulse-dev libasound2-dev libssl-dev libxcb-util1 \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-xinerama0
+            libxcb-shape0 libxcb-xinerama0 \
+            libxcb-xfixes0 libxcb-sync1 libxcb-shm0 libxcb-xv0
           
       - name: Ensure Android resource directories exist
         run: |
-          # Создаем только если их нет, чтобы не затереть существующие в репозитории файлы
           mkdir -p android/res/values
           mkdir -p android/res/drawable
           
@@ -197,13 +197,14 @@ jobs:
       - name: Generate Missing Resources (Fallback)
         run: |
           if [ ! -f "android/res/drawable/ic_launcher.xml" ] && [ ! -f "android/res/drawable/ic_launcher.png" ]; then
-            echo "<?xml version=\"1.0\" encoding=\"utf-8\"?>
-            <vector xmlns:android=\"http://schemas.android.com/apk/res/android\"
-                android:width=\"24dp\" android:height=\"24dp\"
-                android:viewportWidth=\"24\" android:viewportHeight=\"24\">
-                <path android:fillColor=\"#2196F3\"
-                    android:pathData=\"M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z\"/>
-            </vector>" > android/res/drawable/ic_launcher.xml
+            cat > android/res/drawable/ic_launcher.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#2196F3"
+                  android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
+          </vector>
+          EOF
           fi
           
           if [ ! -f "android/res/values/strings.xml" ]; then
@@ -219,7 +220,7 @@ jobs:
       - name: Patch CMakeLists.txt for Android
         run: |
           if [ ! -f "CMakeLists.txt" ]; then
-            echo "❌ CMakeLists.txt not found! Is this the correct repository root?"
+            echo "❌ CMakeLists.txt not found!"
             exit 1
           fi
           
@@ -228,7 +229,7 @@ jobs:
             cp CMakeLists.txt CMakeLists.txt.bak
             cat >> CMakeLists.txt << 'EOF'
 
-          # --- Injected Android Support ---
+          # Android support
           if(ANDROID)
               set(ICQ_PLATFORM android)
               message(STATUS "Building for Android platform")
@@ -255,7 +256,6 @@ jobs:
             -DANDROID=ON \
             -DCMAKE_BUILD_TYPE=${{ github.event.inputs.build_type == 'release' && 'Release' || 'Debug' }} \
             -DQt5_DIR="$QT_ROOT/lib/cmake/Qt5" \
-            -DQT_ANDROID_APPLICATION_DIR="${{ github.workspace }}/android" \
             -GNinja
             
       - name: Build Native Libraries
@@ -267,7 +267,6 @@ jobs:
         run: |
           cd build-android
           
-          # androiddeployqt требует специфичных путей NDK. Генерируем надежный JSON.
           cat > android-deployment-settings.json << EOF
           {
               "description": "ICQ for Android",
@@ -296,9 +295,7 @@ jobs:
                   "android.permission.RECORD_AUDIO",
                   "android.permission.CAMERA"
               ],
-              "architectures": {
-                  "${{ steps.map-arch.outputs.ndk_abi }}": "${{ steps.map-arch.outputs.ndk_host }}"
-              },
+              "architectures": "${{ steps.map-arch.outputs.ndk_abi }}",
               "qtArchitecture": "${{ steps.map-arch.outputs.qt_arch }}"
           }
           EOF
@@ -319,9 +316,10 @@ jobs:
           APK_FILE=$(find android-build -name "*.apk" | head -1)
           if [ -n "$APK_FILE" ]; then
             cp "$APK_FILE" ../icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk
-            echo "✅ APK created successfully"
+            echo "✅ APK created: icq-android-${{ matrix.arch }}-${{ github.event.inputs.build_type || 'debug' }}.apk"
           else
-            echo "❌ APK not found. androiddeployqt might have failed silently."
+            echo "❌ APK not found. Checking build output:"
+            ls -la android-build/
             exit 1
           fi
           
@@ -337,6 +335,7 @@ jobs:
           Qt Arch: ${{ steps.map-arch.outputs.qt_arch }}
           Build Type: ${{ github.event.inputs.build_type || 'debug' }}
           Build Number: ${{ github.run_number }}
+          Status: SUCCESS
           EOF
           
       - name: Upload APK artifact
@@ -368,7 +367,7 @@ jobs:
             ## 📱 ICQ для Android v${{ needs.prepare-android.outputs.version }}
             
             ### О сборке
-            Это порт оригинального ICQ Desktop на Android.
+            Автоматическая сборка оригинального ICQ Desktop 2016 года для Android.
             
             ### 🎯 Поддерживаемые архитектуры:
             - **ARM64-v8a** (современные устройства)
@@ -377,8 +376,17 @@ jobs:
             
             ### ✨ Спецификации сборки:
             - Qt: 5.15.2
+            - NDK: ${{ env.NDK_VERSION }}
             - Минимальная версия Android: 5.0 (API 21)
             - Целевая версия: Android 13 (API 33)
+            
+            ### 📥 Установка:
+            1. Скачайте APK для вашей архитектуры
+            2. Разрешите установку из неизвестных источников
+            3. Установите и запустите
+            
+            ### ⚠️ Примечание:
+            Это прямая сборка оригинального кода 2016 года.
             
             ---
             Сборка: ${{ needs.prepare-android.outputs.build_date }}
@@ -386,4 +394,3 @@ jobs:
           files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
