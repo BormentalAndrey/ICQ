@@ -26,8 +26,8 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          # Установка NDK через экшен надежнее
-          packages: 'ndk;25.2.9519653'
+          # Версия NDK обновлена в соответствии с логом Gradle
+          packages: 'ndk;26.1.10909125'
 
       - name: Cache Boost
         id: cache-boost
@@ -42,6 +42,12 @@ jobs:
           wget -q https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.bz2
           tar -xjf boost_1_85_0.tar.bz2
 
+      - name: Download RapidJSON
+        run: |
+          # Скачиваем недостающую зависимость rapidjson
+          git clone https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
+          echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
+
       - name: Set Boost Path
         run: |
           echo "BOOST_ROOT=${{ github.workspace }}/boost_1_85_0" >> $GITHUB_ENV
@@ -53,8 +59,8 @@ jobs:
         run: ./gradlew :app:assembleDebug --stacktrace
         env:
           BOOST_ROOT: ${{ env.BOOST_ROOT }}
-          # Явно подсказываем путь к NDK, если CMake начнет капризничать
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
+          RAPIDJSON_ROOT: ${{ env.RAPIDJSON_ROOT }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
