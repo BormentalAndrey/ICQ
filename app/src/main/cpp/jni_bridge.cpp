@@ -4,6 +4,18 @@
 #include <mutex>
 #include <android/log.h>
 
+// Добавляем определение im_assert перед включением заголовков ICQ
+#ifndef im_assert
+#include <cstdlib>
+#define im_assert(condition) do { \
+    if (!(condition)) { \
+        __android_log_print(ANDROID_LOG_ERROR, "ICQCore", \
+            "Assertion failed: %s:%d: %s", __FILE__, __LINE__, #condition); \
+        abort(); \
+    } \
+} while(0)
+#endif
+
 // Предполагаемые заголовки из ICQ Desktop core
 #include "core.h"
 #include "core_dispatcher.h"
