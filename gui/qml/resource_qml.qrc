@@ -1,8 +1,9 @@
 <RCC>
-    <qresource>
-        <file>qml_components/expanded_gallery/GalleryTabs.qml</file>
-        <file>qml_components/expanded_gallery/GalleryTabButton.qml</file>
-        <file>qml_components/expanded_gallery/BurgerButton.qml</file>
-        <file>qml_components/expanded_gallery/TabsList.qml</file>
+    <qresource prefix="/qml">
+        <!-- Компоненты расширенной галереи -->
+        <file alias="expanded_gallery/GalleryTabs.qml">qml_components/expanded_gallery/GalleryTabs.qml</file>
+        <file alias="expanded_gallery/GalleryTabButton.qml">qml_components/expanded_gallery/GalleryTabButton.qml</file>
+        <file alias="expanded_gallery/BurgerButton.qml">qml_components/expanded_gallery/BurgerButton.qml</file>
+        <file alias="expanded_gallery/TabsList.qml">qml_components/expanded_gallery/TabsList.qml</file>
     </qresource>
 </RCC>
