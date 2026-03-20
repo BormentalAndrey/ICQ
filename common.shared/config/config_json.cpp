@@ -26,10 +26,14 @@ namespace config
     
     std::string config_json()
     {
+        // Получаем wstring путь и конвертируем в string
+        std::wstring wpath = core::utils::get_product_data_path();
+        std::string base_path(wpath.begin(), wpath.end());
+        
         // Пытаемся загрузить конфиг из нескольких возможных мест
         std::vector<std::string> possible_paths = {
-            core::utils::get_product_data_path() + "/products/icq/config.json",
-            core::utils::get_product_data_path() + "/../products/icq/config.json",
+            base_path + "/products/icq/config.json",
+            base_path + "/../products/icq/config.json",
             "/data/data/com.icq.mobile/files/products/icq/config.json",
             "./products/icq/config.json"
         };
