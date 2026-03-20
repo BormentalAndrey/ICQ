@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <functional>
+#include <memory>
 
 #define PREVIEW_RENDER_NAME "@camera_stream_id"
 #define DEFAULT_DEVICE_UID "default_device"
@@ -13,6 +14,7 @@ namespace voip
     using CallId = std::string;
     using PeerId = std::string;
 
+    // Состояния отправителя медиа-данных (необходимы для CallStateInternal.h в ядре)
     enum MediaSenderState {
         MSS_None = 0,
         MSS_Starting,
@@ -131,6 +133,7 @@ namespace voip_manager
     struct DeviceState { DeviceType type; std::string uid; bool success; };
     struct DeviceMute { DeviceType type; bool mute; };
     struct DeviceVol { DeviceType type; float volume; };
+    
     struct Contact {
         voip::CallId call_id;
         std::string contact;
@@ -138,9 +141,12 @@ namespace voip_manager
         bool remote_mic_enabled = false;
         bool remote_sending_desktop = false;
         bool connected_state = false;
+
         Contact() {}
         Contact(const voip::CallId& call_id_, const std::string& contact_) : call_id(call_id_), contact(contact_) {}
-        bool operator==(const Contact& otherContact) const { return otherContact.call_id == call_id && otherContact.contact == contact; }
+        bool operator==(const Contact& otherContact) const { 
+            return otherContact.call_id == call_id && otherContact.contact == contact; 
+        }
     };
 
     struct ContactEx {
@@ -161,7 +167,12 @@ namespace voip_manager
         bool is_default = false;
     };
 
-    struct WindowBitmap { void* data; unsigned size; unsigned w; unsigned h; };
+    struct WindowBitmap { 
+        void* data; 
+        unsigned size; 
+        unsigned w; 
+        unsigned h; 
+    };
     
     struct WindowParams {
         void* hwnd;
@@ -171,18 +182,44 @@ namespace voip_manager
         float scale;
     };
 
+    struct VoipProtoMsg {
+        std::string account_uid;
+        int msg_type;
+        std::vector<char> data;
+    };
+
+    // Основной интерфейс управления VoIP для интеграции с Core
     class VoipManager
     {
     public:
         virtual ~VoipManager() = default;
+
+        // Управление звонками
         virtual void call_create(const std::vector<std::string> &contacts, std::string &account, const bool video) = 0;
         virtual void call_stop() = 0;
         virtual void call_accept(const voip::CallId &call_id, const std::string &account, bool video) = 0;
         virtual void call_decline(const Contact& contact, bool busy, bool conference) = 0;
+        virtual void call_terminate(const voip::CallId& call_id, TerminateReason reason) = 0;
+
+        // Управление устройствами
+        virtual void get_device_list(DeviceType device_type, std::vector<device_description>& dev_list) = 0;
+        virtual void set_device(DeviceType device_type, const std::string& device_guid, bool force_reset) = 0;
         virtual void set_device_mute(DeviceType deviceType, bool mute) = 0;
+        virtual bool get_device_mute(DeviceType deviceType) = 0;
+
+        // Работа с окнами видео (для Android передается Surface/Texture ID через void*)
         virtual void window_add(WindowParams& windowParams) = 0;
         virtual void window_remove(void* hwnd) = 0;
+
+        // Управление потоками
         virtual void media_video_en(bool enable) = 0;
         virtual void media_audio_en(bool enable) = 0;
+
+        // Обработка протокола (P2P/WIM)
+        virtual void ProcessVoipMsg(const std::string& account_uid, int voipIncomingMsg, const char *data, unsigned len) = 0;
+        virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
+
+        virtual void reset() = 0;
+        virtual void update() = 0;
     };
 }
