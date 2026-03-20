@@ -177,15 +177,17 @@ namespace voip_manager
     struct WindowParams {
         void* hwnd;
         voip::CallId call_id;
-        bool isPrimary;
-        bool isIncoming;
-        float scale;
+        bool isPrimary = false;
+        bool isIncoming = false;
+        float scale = 1.0f;
+        WindowParams() : hwnd(nullptr), isPrimary(false), isIncoming(false), scale(1.0f) {}
     };
 
     struct VoipProtoMsg {
         std::string account_uid;
-        int msg_type;
+        int msg_type = 0;
         std::vector<char> data;
+        VoipProtoMsg() : msg_type(0) {}
     };
 
     // Основной интерфейс управления VoIP для интеграции с Core
@@ -206,6 +208,8 @@ namespace voip_manager
         virtual void set_device(DeviceType device_type, const std::string& device_guid, bool force_reset) = 0;
         virtual void set_device_mute(DeviceType deviceType, bool mute) = 0;
         virtual bool get_device_mute(DeviceType deviceType) = 0;
+        virtual void set_device_vol(DeviceType deviceType, float vol) = 0;
+        virtual float get_device_vol(DeviceType deviceType) = 0;
 
         // Работа с окнами видео (для Android передается Surface/Texture ID через void*)
         virtual void window_add(WindowParams& windowParams) = 0;
@@ -214,8 +218,10 @@ namespace voip_manager
         // Управление потоками
         virtual void media_video_en(bool enable) = 0;
         virtual void media_audio_en(bool enable) = 0;
+        virtual bool is_video_en() = 0;
+        virtual bool is_audio_en() = 0;
 
-        // Обработка протокола (P2P/WIM)
+        // Обработка сигнального протокола
         virtual void ProcessVoipMsg(const std::string& account_uid, int voipIncomingMsg, const char *data, unsigned len) = 0;
         virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
 
