@@ -34,7 +34,8 @@ jobs:
           sudo apt-get install -y \
             libcurl4-openssl-dev \
             cmake \
-            ninja-build
+            ninja-build \
+            build-essential
 
       - name: Fix Environment and Case Sensitivity
         run: |
@@ -91,7 +92,6 @@ jobs:
 
       - name: Fix voip includes
         run: |
-          # Добавляем недостающие инклюды в voip файлы
           if [ -f "core/Voip/libvoip/src/CallStateInternal.h" ]; then
             if ! grep -q "#include <voip/voip3.h>" "core/Voip/libvoip/src/CallStateInternal.h"; then
               sed -i '1i#include <voip/voip3.h>' core/Voip/libvoip/src/CallStateInternal.h
@@ -116,7 +116,6 @@ jobs:
           echo "Curl directory: $CURL_DIR"
           
           # Создаем плоскую структуру для #include <curl.h>
-          # (код ICQ ожидает curl.h в корне инклуда, а не в curl/curl.h)
           mkdir -p ${{ github.workspace }}/curl_flat
           cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
           
@@ -140,17 +139,14 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
 
-      - name: Fix CMakeLists.txt paths
+      - name: Fix CMakeLists.txt
         run: |
-          # Создаем правильный CMakeLists.txt
           cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22.1)
           project("icq_mobile_core")
 
-          # --- Настройка путей ---
           set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 
-          # --- Глобальные дефайны ---
           add_compile_definitions(
               LINUX
               __linux__
@@ -161,7 +157,6 @@ jobs:
               _FORTIFY_SOURCE=2
           )
 
-          # --- Поиск исходников ---
           file(GLOB_RECURSE CORE_SOURCES
               "${ICQ_ROOT}/core/*.cpp"
               "${ICQ_ROOT}/common.shared/*.cpp"
@@ -169,7 +164,6 @@ jobs:
               "${ICQ_ROOT}/gui.shared/*.cpp"
           )
 
-          # Исключаем лишнее
           list(FILTER CORE_SOURCES EXCLUDE REGEX 
               ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*|.*/internal/.*"
           )
@@ -179,7 +173,6 @@ jobs:
               ${CORE_SOURCES}
           )
 
-          # --- Настройка путей инклудов ---
           target_include_directories(icq_core PRIVATE
               ${CMAKE_CURRENT_SOURCE_DIR}
               ${ICQ_ROOT}                                
@@ -194,7 +187,6 @@ jobs:
               $ENV{CURL_INCLUDE_PATH}
           )
 
-          # --- Свойства таргета ---
           set_target_properties(icq_core PROPERTIES
               CXX_STANDARD 17
               CXX_STANDARD_REQUIRED ON
@@ -240,7 +232,6 @@ jobs:
           #include <locale>
           #include <android/log.h>
 
-          // Подключаем заголовки ядра (Core)
           #include "core/stdafx.h"
           #include "core/core_dispatcher.h"
           #include "core/icore_interface.h"
@@ -378,11 +369,8 @@ jobs:
         run: |
           cat > core/Voip/VoipManagerDefines.h << 'EOF'
           #pragma once
-
           #include <string>
           #include <vector>
-          #include <map>
-          #include <functional>
           #include <memory>
 
           #define PREVIEW_RENDER_NAME "@camera_stream_id"
@@ -402,44 +390,15 @@ jobs:
                   MSS_Error
               };
 
-              enum DeviceType
-              {
-                  AudioRecording = 0,
-                  AudioPlayback,
-                  VideoCapturing,
-              };
-
-              enum DeviceClass
-              {
-                  Audio = 0,
-                  Video
-              };
-
-              enum VideoCaptureType
-              {
-                  VC_DeviceCamera,
-                  VC_DeviceVirtualCamera,
-                  VC_DeviceDesktop
-              };
+              enum DeviceType { AudioRecording = 0, AudioPlayback, VideoCapturing };
+              enum VideoCaptureType { VC_DeviceCamera, VC_DeviceVirtualCamera, VC_DeviceDesktop };
 
               enum TerminateReason {
-                  TR_HANGUP = 0,
-                  TR_REJECT,
-                  TR_BUSY,
-                  TR_HANDLED_BY_ANOTHER_INSTANCE,
-                  TR_UNAUTHORIZED,
-                  TR_ALLOCATE_FAILED,
-                  TR_ANSWER_TIMEOUT,
-                  TR_CONNECT_TIMEOUT,
-                  TR_NOT_FOUND,
-                  TR_BLOCKED_BY_CALLER_IS_STRANGER,
-                  TR_BLOCKED_BY_CALLEE_PRIVACY,
-                  TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA,
-                  TR_BAD_URI,
-                  TR_NOT_AVAILABLE_NOW,
-                  TR_PARTICIPANTS_LIMIT_EXCEEDED,
-                  TR_DURATION_LIMIT_EXCEEDED,
-                  TR_INTERNAL_ERROR
+                  TR_HANGUP = 0, TR_REJECT, TR_BUSY, TR_HANDLED_BY_ANOTHER_INSTANCE,
+                  TR_UNAUTHORIZED, TR_ALLOCATE_FAILED, TR_ANSWER_TIMEOUT, TR_CONNECT_TIMEOUT,
+                  TR_NOT_FOUND, TR_BLOCKED_BY_CALLER_IS_STRANGER, TR_BLOCKED_BY_CALLEE_PRIVACY,
+                  TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA, TR_BAD_URI, TR_NOT_AVAILABLE_NOW,
+                  TR_PARTICIPANTS_LIMIT_EXCEEDED, TR_DURATION_LIMIT_EXCEEDED, TR_INTERNAL_ERROR
               };
           }
 
@@ -452,14 +411,10 @@ jobs:
                   std::string contact;
                   bool remote_cam_enabled = false;
                   bool remote_mic_enabled = false;
-                  bool remote_sending_desktop = false;
                   bool connected_state = false;
-
                   Contact() {}
                   Contact(const voip::CallId& call_id_, const std::string& contact_) : call_id(call_id_), contact(contact_) {}
-                  bool operator==(const Contact& otherContact) const { 
-                      return otherContact.call_id == call_id && otherContact.contact == contact; 
-                  }
+                  bool operator==(const Contact& other) const { return other.call_id == call_id && other.contact == contact; }
               };
 
               struct ContactEx {
@@ -470,6 +425,14 @@ jobs:
                   bool incoming = false;
                   int terminate_reason = 0;
                   std::vector<void*> windows;
+              };
+
+              struct device_description {
+                  std::string uid;
+                  std::string name;
+                  DeviceType type = VideoCapturing;
+                  VideoCaptureType videoCaptureType = VC_DeviceCamera;
+                  bool is_default = false;
               };
 
               struct WindowParams {
@@ -488,35 +451,28 @@ jobs:
                   VoipProtoMsg() : msg_type(0) {}
               };
 
-              class VoipManager
-              {
+              class VoipManager {
               public:
                   virtual ~VoipManager() = default;
-
-                  virtual void call_create(const std::vector<std::string> &contacts, std::string &account, const bool video) = 0;
+                  virtual void call_create(const std::vector<std::string>& contacts, std::string& account, bool video) = 0;
                   virtual void call_stop() = 0;
-                  virtual void call_accept(const voip::CallId &call_id, const std::string &account, bool video) = 0;
+                  virtual void call_accept(const voip::CallId& call_id, const std::string& account, bool video) = 0;
                   virtual void call_decline(const Contact& contact, bool busy, bool conference) = 0;
                   virtual void call_terminate(const voip::CallId& call_id, TerminateReason reason) = 0;
-
-                  virtual void get_device_list(DeviceType device_type, std::vector<device_description>& dev_list) = 0;
-                  virtual void set_device(DeviceType device_type, const std::string& device_guid, bool force_reset) = 0;
-                  virtual void set_device_mute(DeviceType deviceType, bool mute) = 0;
-                  virtual bool get_device_mute(DeviceType deviceType) = 0;
-                  virtual void set_device_vol(DeviceType deviceType, float vol) = 0;
-                  virtual float get_device_vol(DeviceType deviceType) = 0;
-
-                  virtual void window_add(WindowParams& windowParams) = 0;
+                  virtual void get_device_list(DeviceType type, std::vector<device_description>& dev_list) = 0;
+                  virtual void set_device(DeviceType type, const std::string& guid, bool force_reset) = 0;
+                  virtual void set_device_mute(DeviceType type, bool mute) = 0;
+                  virtual bool get_device_mute(DeviceType type) = 0;
+                  virtual void set_device_vol(DeviceType type, float vol) = 0;
+                  virtual float get_device_vol(DeviceType type) = 0;
+                  virtual void window_add(WindowParams& params) = 0;
                   virtual void window_remove(void* hwnd) = 0;
-
                   virtual void media_video_en(bool enable) = 0;
                   virtual void media_audio_en(bool enable) = 0;
                   virtual bool is_video_en() = 0;
                   virtual bool is_audio_en() = 0;
-
-                  virtual void ProcessVoipMsg(const std::string& account_uid, int voipIncomingMsg, const char *data, unsigned len) = 0;
+                  virtual void ProcessVoipMsg(const std::string& account, int msg, const char* data, unsigned len) = 0;
                   virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
-
                   virtual void reset() = 0;
                   virtual void update() = 0;
               };
@@ -528,11 +484,18 @@ jobs:
       - name: Fix permissions and build
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
         env:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
           CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
+
+      - name: Save build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Upload APK
         if: success()
@@ -541,7 +504,7 @@ jobs:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
 
-      - name: Upload logs if failed
+      - name: Upload build logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -550,3 +513,4 @@ jobs:
             app/build/reports/
             app/.cxx/**/*.log
             .gradle/daemon/**/daemon-*.log
+            build.log
