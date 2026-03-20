@@ -9,21 +9,15 @@
 #define PREVIEW_RENDER_NAME "@camera_stream_id"
 #define DEFAULT_DEVICE_UID "default_device"
 
+// Предварительное объявление типов из voip3.h
+// Убираем дублирование MediaSenderState и TerminateReason
+
 namespace voip
 {
     using CallId = std::string;
     using PeerId = std::string;
 
-    // Состояния отправителя медиа-данных (необходимы для CallStateInternal.h в ядре)
-    enum MediaSenderState {
-        MSS_None = 0,
-        MSS_Starting,
-        MSS_Started,
-        MSS_Stopping,
-        MSS_Stopped,
-        MSS_Error
-    };
-
+    // DeviceType и DeviceClass остаются здесь
     enum DeviceType
     {
         AudioRecording = 0,
@@ -53,25 +47,8 @@ namespace voip
         Img_Max
     };
 
-    enum TerminateReason {
-        TR_HANGUP = 0,
-        TR_REJECT,
-        TR_BUSY,
-        TR_HANDLED_BY_ANOTHER_INSTANCE,
-        TR_UNAUTHORIZED,
-        TR_ALLOCATE_FAILED,
-        TR_ANSWER_TIMEOUT,
-        TR_CONNECT_TIMEOUT,
-        TR_NOT_FOUND,
-        TR_BLOCKED_BY_CALLER_IS_STRANGER,
-        TR_BLOCKED_BY_CALLEE_PRIVACY,
-        TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA,
-        TR_BAD_URI,
-        TR_NOT_AVAILABLE_NOW,
-        TR_PARTICIPANTS_LIMIT_EXCEEDED,
-        TR_DURATION_LIMIT_EXCEEDED,
-        TR_INTERNAL_ERROR
-    };
+    // MediaSenderState удален - он есть в voip3.h
+    // TerminateReason удален - он есть в voip3.h
 
     struct VoipDesc
     {
@@ -188,6 +165,13 @@ namespace voip_manager
         int msg_type = 0;
         std::vector<char> data;
         VoipProtoMsg() : msg_type(0) {}
+    };
+
+    // Добавляем недостающие типы для base_im.h
+    struct CallStartParams {
+        bool video = false;
+        bool attach = false;
+        std::string call_type;
     };
 
     // Основной интерфейс управления VoIP для интеграции с Core
