@@ -8,9 +8,9 @@
 #include <locale>
 #include <android/log.h>
 
-// Подключаем заголовки ядра (Core)
+// Подключаем заголовки ядра (Core) - исправленный путь
 #include "core/stdafx.h"
-#include "core/core_dispatcher.h"
+#include "gui/core_dispatcher.h"  // core_dispatcher.h находится в папке gui/
 #include "core/icore_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
