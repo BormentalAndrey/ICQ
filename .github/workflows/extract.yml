@@ -1,133 +1,26 @@
-name: Build ICQ Mobile
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Setup Android SDK & NDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'ndk;26.1.10909125'
-
-      - name: Install system dependencies (libcurl)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev
-
-      - name: Fix Environment and Case Sensitivity
-        run: |
-          # Создаем симлинки для Linux (Case Sensitivity)
-          # Это решает ошибку fatal error: 'voip/voip3.h'
-          mkdir -p core/voip
-          if [ -d "core/Voip" ]; then
-            # Создаем симлинк для voip3.h если его нет
-            if [ ! -f "core/voip/voip3.h" ]; then
-              echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
-            fi
-          fi
-          
-          # Создаем недостающие заглушки
-          mkdir -p common.shared/config
-          cat > common.shared/config/config_data.h << 'EOF'
-          #pragma once
-          #include <string>
-          namespace config {
-              std::string config_json();
-          }
-          EOF
-          
-          cat > common.shared/loader_errors.h << 'EOF'
-          #pragma once
-          namespace core { namespace loader {
-              enum class error_code { ok, network_error, file_error };
-          }}
-          EOF
-
-      - name: Fix includes in proxy_settings.h
-        run: |
-          # Добавляем недостающие инклюды
-          if [ -f "core/proxy_settings.h" ]; then
-            if ! grep -q "tools/binary_stream.h" "core/proxy_settings.h"; then
-              sed -i '1i#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/proxy_settings.h
-              echo "✅ Added includes to proxy_settings.h"
-            else
-              echo "✅ Includes already present in proxy_settings.h"
-            fi
-          else
-            echo "⚠️ proxy_settings.h not found"
-          fi
-
-      - name: Fix includes in im_stats.h
-        run: |
-          if [ -f "core/stats/im/im_stats.h" ]; then
-            if ! grep -q "rapidjson/document.h" "core/stats/im/im_stats.h"; then
-              sed -i '1i#include <rapidjson/document.h>\n#include <rapidjson/writer.h>\n#include <rapidjson/stringbuffer.h>\n#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/stats/im/im_stats.h
-              echo "✅ Added includes to im_stats.h"
-            else
-              echo "✅ Includes already present in im_stats.h"
-            fi
-          else
-            echo "⚠️ im_stats.h not found"
-          fi
-
-      - name: Cache Boost
-        id: cache-boost
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/boost_1_83_0
-          key: ${{ runner.os }}-boost-1.83.0
-
-      - name: Download Boost 1.83.0
-        if: steps.cache-boost.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
-          tar -xjf boost_1_83_0.tar.bz2
-
-      - name: Download RapidJSON
-        run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
-
       - name: Find libcurl for Android
         run: |
-          # Ищем libcurl в системе
-          CURL_LIB_PATH=$(find /usr -name "libcurl.so" 2>/dev/null | head -1)
-          CURL_INCLUDE_PATH=$(find /usr -name "curl.h" 2>/dev/null | head -1 | xargs dirname)
-          echo "CURL_LIB_PATH=$CURL_LIB_PATH" >> $GITHUB_ENV
-          echo "CURL_INCLUDE_PATH=$CURL_INCLUDE_PATH" >> $GITHUB_ENV
-          echo "Found curl at: $CURL_LIB_PATH"
-          echo "Found curl includes at: $CURL_INCLUDE_PATH"
+          # Устанавливаем заголовки
+          sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+          
+          # Находим, где лежит curl.h (обычно /usr/include/x86_64-linux-gnu/curl или /usr/include/curl)
+          CURL_H_PATH=$(find /usr/include -name "curl.h" | head -n 1)
+          CURL_DIR=$(dirname "$CURL_H_PATH")
+          
+          echo "CURL_INCLUDE_PATH=$CURL_DIR" >> $GITHUB_ENV
+          echo "Найден путь инклудов Curl: $CURL_DIR"
+          
+          # ХАК ДЛЯ ЯДРА ICQ: Код хочет #include <curl.h>, а в системе он лежит в curl/curl.h
+          # Создаем временную папку и копируем туда содержимое, чтобы curl.h лежал в корне инклуда
+          mkdir -p ${{ github.workspace }}/external_curl_fix
+          cp -r $CURL_DIR/* ${{ github.workspace }}/external_curl_fix/
+          echo "CURL_INCLUDE_PATH=${{ github.workspace }}/external_curl_fix" >> $GITHUB_ENV
 
       - name: Build ICQ Mobile
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
+          # Передаем переменную в CMake через аргументы Gradle
+          ./gradlew :app:assembleDebug -Pandroid.externalNativeBuildFlags="-DCURL_INCLUDE_PATH=${{ env.CURL_INCLUDE_PATH }}" --stacktrace
         env:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
-          CURL_LIB_PATH: ${{ env.CURL_LIB_PATH }}
-          CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
