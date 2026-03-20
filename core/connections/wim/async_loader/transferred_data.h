@@ -1,8 +1,7 @@
 #pragma once
 
-#include "../../../corelib/collection_helper.h"
-#include "../../../corelib/ifptr.h"
-
+#include "corelib/collection_helper.h"
+#include "corelib/ifptr.h"
 #include "../../../tools/system.h"
 
 namespace core
