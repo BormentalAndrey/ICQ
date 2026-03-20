@@ -13,9 +13,8 @@
 
 #include "../../../log/log.h"
 
-#include "../../../corelib/collection_helper.h"
-#include "../../../corelib/enumerations.h"
-
+#include "corelib/collection_helper.h"
+#include "corelib/enumerations.h"
 namespace core
 {
     class coll_helper;
