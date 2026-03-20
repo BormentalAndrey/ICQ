@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../../common.shared/loader_errors.h"
+#include "common.shared/loader_errors.h"
 
 #include "transferred_data.h"
 
