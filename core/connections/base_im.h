@@ -7,6 +7,14 @@
 #include "smartreply/smartreply_marker.h"
 #ifndef STRIP_VOIP
 #include "../Voip/VoipManager.h"
+// Добавить после строки 9:
+namespace voip_manager {
+    struct CallStartParams {
+        bool video = false;
+        bool attach = false;
+        std::string call_type;
+    };
+}
 #endif
 
 namespace voip_manager {
@@ -358,7 +366,7 @@ namespace core
         virtual void on_voip_user_update_avatar_background(const std::string& contact, const unsigned char* data, unsigned size, unsigned h, unsigned w, voip_manager::AvatarThemeType theme);
 
         virtual void on_voip_device_changed(std::string_view dev_type, const std::string& uid, bool force_reset);
-        virtual void on_voip_devices_changed(DeviceClass deviceClass);
+        virtual void on_voip_devices_changed(voip::DeviceClass deviceClass);
 
         virtual void on_voip_switch_media(bool video);
         virtual void on_voip_mute_switch();
