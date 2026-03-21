@@ -9,7 +9,6 @@
 
 #include "core/stdafx.h"
 #include "gui/core_dispatcher.h"
-#include "core/icore_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -27,6 +26,19 @@ static std::mutex g_core_mutex;
  */
 class AndroidGuiCallback : public core::icore_interface {
 public:
+    // Методы управления ссылками из ibase
+    virtual int32_t addref() override {
+        // Для Android увеличиваем счетчик ссылок
+        // В простейшем случае возвращаем 1, если не требуется точный подсчет
+        return 1;
+    }
+    
+    virtual int32_t release() override {
+        // Для Android уменьшаем счетчик ссылок
+        // В простейшем случае возвращаем 0
+        return 0;
+    }
+    
     // Передача переменной (флаги, простые данные)
     void receive_variable(const std::string& _name, core::coll_ptr _value) override {
         notify_java_event(_name);
@@ -54,7 +66,7 @@ public:
         return "android_device_id_stable"; 
     }
 
-    // --- РЕАЛИЗАЦИЯ КОННЕКТОРОВ (БЕЗ ЗАГЛУШЕК) ---
+    // --- РЕАЛИЗАЦИЯ КОННЕКТОРОВ ---
     // Эти методы позволяют компонентам ядра связываться друг с другом
     core::iconnector* get_core_connector() override { 
         return g_core ? g_core->get_core_connector() : nullptr;
@@ -123,7 +135,9 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     }
 
     // Создаем GlobalRef, чтобы Java-объект не «съел» Garbage Collector
-    if (g_event_callback_obj) env->DeleteGlobalRef(g_event_callback_obj);
+    if (g_event_callback_obj) {
+        env->DeleteGlobalRef(g_event_callback_obj);
+    }
     g_event_callback_obj = env->NewGlobalRef(callback);
     
     auto callback_impl = std::make_shared<AndroidGuiCallback>();
@@ -142,10 +156,6 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     settings.os_version_ = "Android";
     settings.locale_ = "ru_RU";
     settings.recents_avatars_size_ = 120;
-    // В некоторых версиях ICQ Core пути устанавливаются через settings.
-    // Если в вашей структуре есть эти поля, раскомментируйте:
-    // settings.set_data_path(internal_data_path);
-    // settings.set_cache_path(internal_cache_path);
     
     // Создаем ядро
     g_core = std::make_unique<Ui::core_dispatcher>();
@@ -154,7 +164,8 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     // В мобильной версии это часто делается через настройки перед линковкой
     g_core->link_gui(g_gui_callback, settings);
     
-    LOGI("Core Engine started successfully. Data at: %s", internal_data_path.c_str());
+    LOGI("Core Engine started successfully. Data at: %s, Cache at: %s", 
+         internal_data_path.c_str(), internal_cache_path.c_str());
 }
 
 /**
