@@ -47,11 +47,12 @@ jobs:
 
       - name: Install Qt 6.5.0 for Android & Linux
         run: |
-          # Устанавливаем Qt для Android (arm64_v8a)
-          aqt install-qt linux android 6.5.0 android_arm64_v8a -o ${{ github.workspace }}/Qt
-          # Устанавливаем Host-инструменты (нужны для компилятора moc, rcc)
-          aqt install-qt linux desktop 6.5.0 gcc_64 -o ${{ github.workspace }}/Qt
+          # Используем --outputdir вместо -o
+          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
           
+          # Устанавливаем Host-инструменты (нужны для компилятора moc, rcc)
+          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
+
       - name: Setup Boost 1.83.0
         run: |
           if [ ! -d "boost_1_83_0" ]; then
