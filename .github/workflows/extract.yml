@@ -59,22 +59,29 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/Qt
-          key: ${{ runner.os }}-qt-6.5.0-android-${{ hashFiles('.qt-version') }}
+          key: ${{ runner.os }}-qt-6.5.0-android-modules-${{ hashFiles('.qt-version') }}
           restore-keys: |
+            ${{ runner.os }}-qt-6.5.0-android-modules-
             ${{ runner.os }}-qt-6.5.0-android-
 
       - name: Install aqtinstall (Qt Downloader)
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: pip install aqtinstall
 
-      - name: Install Qt 6.5.0 for Android & Linux
+      - name: Install Qt 6.5.0 with required modules
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
-          echo "📦 Installing Qt desktop version (required for android tools)..."
-          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
-          echo "📦 Installing Qt android version..."
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          echo "6.5.0-android" > .qt-version
+          echo "📦 Installing Qt desktop version with modules..."
+          aqt install-qt linux desktop 6.5.0 gcc_64 \
+            --outputdir ${{ github.workspace }}/Qt \
+            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
+          
+          echo "📦 Installing Qt android version with modules..."
+          aqt install-qt linux android 6.5.0 android_arm64_v8a \
+            --outputdir ${{ github.workspace }}/Qt \
+            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
+          
+          echo "6.5.0-android-modules" > .qt-version
           echo "✅ Qt installation complete"
 
       - name: Set Qt environment
@@ -89,21 +96,22 @@ jobs:
           echo "=== Verifying Qt installation ==="
           echo "Qt Android path: ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a"
           echo "Qt Host path: ${{ github.workspace }}/Qt/6.5.0/gcc_64"
-    
+          
           if [ -d "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" ]; then
-          echo "✅ Qt Android directory exists"
-          ls -la ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6/
+            echo "✅ Qt Android directory exists"
+            ls -la ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6/
           else
-          echo "❌ Qt Android directory not found"
+            echo "❌ Qt Android directory not found"
           fi
-    
+          
           if [ -f "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6Core/Qt6CoreConfig.cmake" ]; then
-          echo "✅ Qt6Core config found"
+            echo "✅ Qt6Core config found"
           else
-          echo "❌ Qt6Core config not found"
-          find ${{ github.workspace }}/Qt -name "Qt6CoreConfig.cmake" 2>/dev/null
+            echo "❌ Qt6Core config not found"
+            echo "Searching for Qt6Core config..."
+            find ${{ github.workspace }}/Qt -name "Qt6CoreConfig.cmake" 2>/dev/null || echo "No Qt6Core config found"
           fi
-    
+
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
