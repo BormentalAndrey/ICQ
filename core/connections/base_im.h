@@ -7,14 +7,6 @@
 #include "smartreply/smartreply_marker.h"
 #ifndef STRIP_VOIP
 #include "../Voip/VoipManager.h"
-// Добавить после строки 9:
-namespace voip_manager {
-    struct CallStartParams {
-        bool video = false;
-        bool attach = false;
-        std::string call_type;
-    };
-}
 #endif
 
 namespace voip_manager {
@@ -23,6 +15,7 @@ namespace voip_manager {
     struct WindowParams;
     struct VoipProxySettings;
     enum AvatarThemeType : unsigned short;
+    struct CallStartParams; // forward declaration - defined in VoipManagerDefines.h
 }
 
 namespace core
@@ -138,10 +131,7 @@ namespace core
         std::shared_ptr<voip_manager::VoipManager> voip_manager_;
         int32_t id_;
 
-        // stickers
-        // use it only this from thread
         std::shared_ptr<stickers::face> stickers_;
-
         std::shared_ptr<themes::wallpaper_loader> wp_loader_;
 
     protected:
@@ -199,7 +189,7 @@ namespace core
         virtual wim::wim_packet_params make_wim_params() const = 0;
         virtual wim::wim_packet_params make_wim_params_general(bool _is_current_auth_params) const = 0;
 
-        virtual void erase_auth_data() = 0; // when logout
+        virtual void erase_auth_data() = 0;
         virtual void start_session(wim::is_ping _is_ping, wim::is_login _is_login) = 0;
         virtual void handle_net_error(const std::string& _url, int32_t err) = 0;
 
@@ -328,7 +318,6 @@ namespace core
         virtual void add_search_pattern_to_history(const std::string_view _search_pattern, const std::string_view _contact) = 0;
         virtual void remove_search_pattern_from_history(const std::string_view _search_pattern, const std::string_view _contact) = 0;
 
-
         // cl
         virtual std::string get_contact_friendly_name(const std::string& contact_login) = 0;
         virtual void hide_chat(const std::string& _contact) = 0;
@@ -366,6 +355,7 @@ namespace core
         virtual void on_voip_user_update_avatar_background(const std::string& contact, const unsigned char* data, unsigned size, unsigned h, unsigned w, voip_manager::AvatarThemeType theme);
 
         virtual void on_voip_device_changed(std::string_view dev_type, const std::string& uid, bool force_reset);
+         // Исправлено: DeviceClass с полным пространством имен voip
         virtual void on_voip_devices_changed(voip::DeviceClass deviceClass);
 
         virtual void on_voip_switch_media(bool video);
@@ -630,5 +620,4 @@ namespace core
 
         virtual void notify_history_droppped(const std::string& _aimid) = 0;
     };
-
 }
