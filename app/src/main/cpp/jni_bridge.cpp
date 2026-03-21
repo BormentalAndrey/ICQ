@@ -7,16 +7,14 @@
 #include <vector>
 #include <android/log.h>
 
-#include "core/stdafx.h"
-#include "gui/core_dispatcher.h"
 #include "corelib/core_face.h"
+#include "common.shared/common_defs.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 JavaVM* g_jvm = nullptr;
-static std::unique_ptr<Ui::core_dispatcher> g_core;
 static jobject g_event_callback_obj = nullptr;
 static std::shared_ptr<core::icore_interface> g_gui_callback;
 static std::mutex g_core_mutex;
@@ -67,11 +65,6 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring data_path, jstring cache_path, jobject callback) {
     std::lock_guard<std::mutex> lock(g_core_mutex);
     
-    if (g_core) {
-        LOGI("Core Engine is already initialized.");
-        return;
-    }
-
     if (g_event_callback_obj) {
         env->DeleteGlobalRef(g_event_callback_obj);
     }
@@ -88,8 +81,11 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     settings.locale_ = "ru_RU";
     settings.recents_avatars_size_ = 96;
     
-    g_core = std::make_unique<Ui::core_dispatcher>();
-    g_core->link_gui(g_gui_callback, settings);
+    // Внимание: для Android здесь потребуется инициализация без использования Qt, 
+    // например, прямым вызовом фабрики ядра:
+    // auto factory = core::get_core_factory();
+    // core_instance = factory->create_core();
+    // core_instance->link_gui(g_gui_callback.get(), settings);
     
     LOGI("Core Engine initialized. Path: %s", path_str.c_str());
 }
@@ -98,11 +94,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv *env, jobject thiz) {
     std::lock_guard<std::mutex> lock(g_core_mutex);
     
-    if (g_core) {
-        g_core->unlink_gui();
-        g_core.reset();
-        LOGI("Core Engine unlinked and reset.");
-    }
+    // Отключение ядра
+    // core_instance->unlink_gui();
     
     if (g_event_callback_obj) {
         env->DeleteGlobalRef(g_event_callback_obj);
