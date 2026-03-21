@@ -1,3 +1,4 @@
+// core/Voip/libvoip/include/VoipController.h
 #pragma once
 
 #include <string>
@@ -16,10 +17,12 @@ namespace voip {
     // Внешние зависимости (forward declarations)
     class VoipEngine;
     class IVoipVideoWindowRenderer;
-    struct CallAppData;
+    // CallAppData уже определен в voip3.h как using CallAppData = std::string;
+    // struct CallAppData; // Удалено - конфликтует с voip3.h
     struct CallParticipantInfo;
     struct CallStateInternal;
-    enum class SoundEvent;
+    // SoundEvent уже определен в voip3.h как enum SoundEvent
+    // enum class SoundEvent; // Удалено - конфликтует с voip3.h
 }
 
 namespace camera {
@@ -53,7 +56,6 @@ class VoipControllerObserver {
 public:
     virtual ~VoipControllerObserver() = default;
     
-    // Теперь voip::CallId и voip::TerminateReason распознаются корректно
     virtual void onPreOutgoingCall(const voip::CallId &call_id, const std::string &user_id) = 0;
     virtual void onStartedOutgoingCall(const voip::CallId &call_id, const std::string &user_id) = 0;
     virtual void onIncomingCall(const voip::CallId &call_id, const std::string &from_user_id, bool is_video) = 0;
@@ -75,7 +77,6 @@ public:
 
     static void EnableLogToDir(const std::string& path, const std::string& log_prefix, size_t max_size, LogLevel level);
     
-    // Исправлено: передача корректного типа CallId
     bool Initialize(const std::string &config_json);
 
     void Action_EnableMicrophone(const voip::CallId &call_id, bool enabled);
