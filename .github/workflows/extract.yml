@@ -59,9 +59,17 @@ jobs:
           
           cat > common.shared/loader_errors.h << 'EOF'
           #pragma once
-          namespace core { namespace loader {
-              enum class error_code { ok, network_error, file_error };
-          }}
+          enum class loader_errors {
+              success = 0,
+              network_error,
+              load_failure,
+              parse_failure,
+              invalid_json,
+              come_back_later,
+              http_client_error,
+              file_error,
+              cancelled
+          };
           EOF
 
       - name: Fix includes in proxy_settings.h
@@ -232,9 +240,9 @@ jobs:
           #include <locale>
           #include <android/log.h>
 
-          #include "core/stdafx.h"
-          #include "core/core_dispatcher.h"
-          #include "core/icore_interface.h"
+          #include "stdafx.h"
+          #include "core_dispatcher.h"
+          #include "icore_interface.h"
 
           #define LOG_TAG "IcqCoreJNI"
           #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
