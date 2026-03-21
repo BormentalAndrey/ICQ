@@ -1,7 +1,9 @@
-name: Build ICQ Mobile
+name: Build ICQ Mobile with Qt
 
 on:
   push:
+    branches: [ main, develop ]
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -27,6 +29,7 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: 'ndk;26.1.10909125'
+          cmdline-tools-version: 'latest'
 
       - name: Install system dependencies
         run: |
@@ -50,16 +53,49 @@ jobs:
             libxkbcommon-dev \
             libxkbcommon-x11-dev
 
-      - name: Setup Qt for Android
-        uses: jurplel/install-qt-action@v3
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
         with:
-          version: '6.5.0'
-          host: 'linux'
-          target: 'android'
-          arch: 'android_arm64_v8a'
-          modules: 'qtbase qtdeclarative qtmultimedia qtsvg'
-          tools: 'tools_qtcreator,cmake'
-          cache: true
+          path: |
+            /home/runner/work/ICQ/Qt
+            ~/.aqt
+          key: ${{ runner.os }}-qt-6.5.0-android-full-${{ hashFiles('.qt-version') }}
+          restore-keys: |
+            ${{ runner.os }}-qt-6.5.0-android-full-
+            ${{ runner.os }}-qt-6.5.0-
+
+      - name: Install Qt (if not cached)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          # Устанавливаем aqtinstall
+          pip3 install aqtinstall
+          
+          # Устанавливаем desktop версию Qt (необходима для android сборки)
+          echo "📦 Installing Qt desktop version..."
+          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /home/runner/work/ICQ/Qt
+          
+          # Устанавливаем android версию Qt
+          echo "📦 Installing Qt android version..."
+          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /home/runner/work/ICQ/Qt
+          
+          # Устанавливаем Qt Creator tools (опционально)
+          echo "📦 Installing Qt Creator tools..."
+          aqt install-tool linux desktop tools_qtcreator --outputdir /home/runner/work/ICQ/Qt || true
+          
+          echo "✅ Qt installation complete"
+
+      - name: Set Qt environment
+        run: |
+          echo "Qt6_DIR=/home/runner/work/ICQ/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
+          echo "Qt6_ANDROID_DIR=/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=/home/runner/work/ICQ/Qt/6.5.0/gcc_64/lib/cmake:/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
+          echo "PATH=/home/runner/work/ICQ/Qt/Tools/QtCreator/bin:$PATH" >> $GITHUB_ENV
+          
+          # Проверяем установку
+          echo "✅ Qt environment configured"
+          echo "Qt6_DIR: $Qt6_DIR"
+          echo "CMAKE_PREFIX_PATH: $CMAKE_PREFIX_PATH"
 
       - name: Fix Environment and Case Sensitivity
         run: |
@@ -95,6 +131,8 @@ jobs:
               cancelled
           };
           EOF
+          
+          echo "✅ Environment fixed"
 
       - name: Fix includes in proxy_settings.h
         run: |
@@ -159,30 +197,50 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/boost_1_83_0
-          key: ${{ runner.os }}-boost-1.83.0
+          key: ${{ runner.os }}-boost-1.83.0-${{ hashFiles('boost-version.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-boost-1.83.0-
 
       - name: Download Boost 1.83.0
         if: steps.cache-boost.outputs.cache-hit != 'true'
         run: |
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
           tar -xjf boost_1_83_0.tar.bz2
+          echo "1.83.0" > boost-version.txt
+
+      - name: Cache RapidJSON
+        id: cache-rapidjson
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/rapidjson
+          key: ${{ runner.os }}-rapidjson
+          restore-keys: |
+            ${{ runner.os }}-rapidjson
 
       - name: Download RapidJSON
+        if: steps.cache-rapidjson.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
 
       - name: Fix CMakeLists.txt
         run: |
           cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
+          # app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.22.1)
           project("icq_mobile_core")
 
+          # --- Настройка путей ---
           set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
-          
-          # Находим Qt
-          set(CMAKE_PREFIX_PATH $ENV{Qt6_DIR})
-          find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
+          # --- Поиск Qt ---
+          if(DEFINED ENV{CMAKE_PREFIX_PATH})
+              set(CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH})
+          endif()
+          
+          find_package(Qt6 CONFIG REQUIRED Core Network)
+          message(STATUS "✅ Qt6 found: ${Qt6_VERSION}")
+
+          # --- Глобальные дефайны ---
           add_compile_definitions(
               LINUX
               __linux__
@@ -191,8 +249,11 @@ jobs:
               SUPPORT_EXTERNAL_CONFIG
               HAVE_SECURE_GETENV=1
               _FORTIFY_SOURCE=2
+              QT_CORE_LIB
+              QT_NETWORK_LIB
           )
 
+          # --- Поиск исходников ---
           file(GLOB_RECURSE CORE_SOURCES
               "${ICQ_ROOT}/core/*.cpp"
               "${ICQ_ROOT}/common.shared/*.cpp"
@@ -200,6 +261,7 @@ jobs:
               "${ICQ_ROOT}/gui.shared/*.cpp"
           )
 
+          # Исключаем лишнее
           list(FILTER CORE_SOURCES EXCLUDE REGEX 
               ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp"
           )
@@ -209,6 +271,7 @@ jobs:
               ${CORE_SOURCES}
           )
 
+          # --- Настройка путей инклудов ---
           target_include_directories(icq_core PRIVATE
               ${CMAKE_CURRENT_SOURCE_DIR}
               ${ICQ_ROOT}                                
@@ -221,8 +284,11 @@ jobs:
               ${ICQ_ROOT}/boost_1_83_0
               ${ICQ_ROOT}/rapidjson/include
               $ENV{CURL_INCLUDE_PATH}
+              ${Qt6Core_INCLUDE_DIRS}
+              ${Qt6Network_INCLUDE_DIRS}
           )
 
+          # --- Свойства таргета ---
           set_target_properties(icq_core PROPERTIES
               CXX_STANDARD 17
               CXX_STANDARD_REQUIRED ON
@@ -234,26 +300,38 @@ jobs:
           target_compile_options(icq_core PRIVATE 
               -fexceptions -frtti -fPIC -Wall 
               -Wno-unused-parameter -Wno-unused-variable
+              -Wno-mismatched-tags
               -fdata-sections -ffunction-sections
           )
 
+          find_library(log-lib log)
+          find_library(z-lib z)
+          find_library(android-lib android)
+
           target_link_libraries(icq_core
               Qt6::Core
-              Qt6::Widgets
               Qt6::Network
-              log
-              z
-              android
+              ${log-lib}
+              ${z-lib}
+              ${android-lib}
               -Wl,--gc-sections
           )
 
-          message(STATUS "Build Configuration:")
+          # Для Android добавляем специфичные флаги
+          if(ANDROID)
+              target_link_options(icq_core PRIVATE -u JNI_OnLoad)
+          endif()
+
+          message(STATUS "========================================")
+          message(STATUS "ICQ Mobile Core Build Configuration")
+          message(STATUS "========================================")
           message(STATUS "  ICQ_ROOT: ${ICQ_ROOT}")
-          message(STATUS "  Qt6_DIR: $ENV{Qt6_DIR}")
+          message(STATUS "  Qt Version: ${Qt6_VERSION}")
           message(STATUS "  CURL_INC: $ENV{CURL_INCLUDE_PATH}")
+          message(STATUS "========================================")
           EOF
           
-          echo "✅ Updated CMakeLists.txt with Qt support"
+          echo "✅ Updated CMakeLists.txt"
 
       - name: Fix jni_bridge.cpp
         run: |
@@ -554,6 +632,11 @@ jobs:
             echo "✅ Removed conflicting core/icore_interface.h"
           fi
 
+      - name: Create Qt version file for cache
+        run: |
+          echo "6.5.0-android" > .qt-version
+          echo "✅ Created .qt-version file"
+
       - name: Fix permissions and build
         run: |
           chmod +x gradlew
@@ -562,7 +645,6 @@ jobs:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
           CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
-          Qt6_DIR: ${{ env.Qt6_DIR }}
 
       - name: Save build log
         if: always()
@@ -577,8 +659,9 @@ jobs:
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
 
-      - name: Upload build logs
+      - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -588,3 +671,11 @@ jobs:
             app/.cxx/**/*.log
             .gradle/daemon/**/daemon-*.log
             build.log
+          retention-days: 7
+
+      - name: Cleanup old artifacts
+        if: always()
+        run: |
+          # Очищаем старые артефакты для экономии места
+          rm -rf app/.cxx/Debug/*/obj
+          rm -rf app/build/intermediates
