@@ -190,7 +190,6 @@ jobs:
               ${ICQ_ROOT}/corelib
               ${ICQ_ROOT}/common.shared
               ${ICQ_ROOT}/gui.shared
-              ${ICQ_ROOT}/gui
               ${ICQ_ROOT}/boost_1_83_0
               ${ICQ_ROOT}/rapidjson/include
               $ENV{CURL_INCLUDE_PATH}
@@ -241,16 +240,16 @@ jobs:
           #include <locale>
           #include <android/log.h>
 
-          #include "stdafx.h"
-          #include "gui/core_dispatcher.h"
-          #include "icore_interface.h"
+          #include "core/stdafx.h"
+          #include "core/core.h"
+          #include "core/icore_interface.h"
 
           #define LOG_TAG "IcqCoreJNI"
           #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
           #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
           JavaVM* g_jvm = nullptr;
-          static std::unique_ptr<core::core_dispatcher> g_core;
+          static std::unique_ptr<core::core> g_core;
           static jobject g_event_callback_obj = nullptr;
           static std::shared_ptr<core::icore_interface> g_gui_callback;
           static std::mutex g_core_mutex;
@@ -346,7 +345,7 @@ jobs:
                   settings.profile_path_ = std::wstring(path_str.begin(), path_str.end());
               }
               
-              g_core = std::make_unique<core::core_dispatcher>();
+              g_core = std::make_unique<core::core>();
               g_core->link_gui(g_gui_callback, settings);
               
               LOGI("Core Engine initialized. Path: %s", path_str.c_str());
@@ -381,6 +380,8 @@ jobs:
           #include <string>
           #include <vector>
           #include <memory>
+          
+          #include <voip/voip3.h>
 
           #define PREVIEW_RENDER_NAME "@camera_stream_id"
           #define DEFAULT_DEVICE_UID "default_device"
@@ -474,7 +475,7 @@ jobs:
                   virtual void call_stop() = 0;
                   virtual void call_accept(const voip::CallId& call_id, const std::string& account, bool video) = 0;
                   virtual void call_decline(const Contact& contact, bool busy, bool conference) = 0;
-                  virtual void call_terminate(const voip::CallId& call_id, TerminateReason reason) = 0;
+                  virtual void call_terminate(const voip::CallId& call_id, voip::TerminateReason reason) = 0;
                   virtual void get_device_list(DeviceType type, std::vector<device_description>& dev_list) = 0;
                   virtual void set_device(DeviceType type, const std::string& guid, bool force_reset) = 0;
                   virtual void set_device_mute(DeviceType type, bool mute) = 0;
@@ -537,3 +538,4 @@ jobs:
             app/.cxx/**/*.log
             .gradle/daemon/**/daemon-*.log
             build.log
+            
