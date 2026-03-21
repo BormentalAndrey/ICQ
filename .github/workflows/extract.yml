@@ -501,9 +501,37 @@ jobs:
       - name: Fix base_im.h DeviceClass
         run: |
           if [ -f "core/connections/base_im.h" ]; then
-            sed -i 's/voip::DeviceClass/DeviceClass/g' core/connections/base_im.h
+            sed -i 's/DeviceClass deviceClass/voip::DeviceClass deviceClass/g' core/connections/base_im.h
             echo "✅ Fixed DeviceClass in base_im.h"
           fi
+
+      - name: Create missing icore_interface.h
+        run: |
+          cat > core/icore_interface.h << 'EOF'
+          #pragma once
+          #include <string>
+          #include <vector>
+          #include <memory>
+
+          namespace core
+          {
+              using coll_ptr = std::shared_ptr<void>;
+              using event_props_type = std::vector<std::pair<std::string, std::string>>;
+
+              class icore_interface
+              {
+              public:
+                  virtual ~icore_interface() = default;
+                  virtual void receive_variable(const std::string& _name, coll_ptr _value) = 0;
+                  virtual void receive_package(const std::string& _name, coll_ptr _value) = 0;
+                  virtual void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) = 0;
+                  virtual void send_statistic_event(const std::string& _event, const event_props_type& _props) = 0;
+                  virtual std::string get_device_id() = 0;
+              };
+          }
+          EOF
+          
+          echo "✅ Created core/icore_interface.h"
 
       - name: Fix permissions and build
         run: |
@@ -538,4 +566,3 @@ jobs:
             app/.cxx/**/*.log
             .gradle/daemon/**/daemon-*.log
             build.log
-            
