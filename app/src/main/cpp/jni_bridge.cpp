@@ -29,12 +29,10 @@ class AndroidGuiCallback : public core::icore_interface {
 public:
     // Передача переменной (флаги, простые данные)
     void receive_variable(const std::string& _name, core::coll_ptr _value) override {
-        // В продакшене здесь обычно добавляется логика разбора _value, 
-        // но для уведомления Java слоя вызываем событие по имени.
         notify_java_event(_name);
     }
 
-    // Передача пакета данных (списки, сообщения)
+    // Передача пакета данных (списки контактов, история сообщений)
     void receive_package(const std::string& _name, core::coll_ptr _value) override {
         notify_java_event(_name);
     }
@@ -49,35 +47,25 @@ public:
         LOGI("Core Statistic Event: %s", _event.c_str());
     }
 
-    // Получение ID устройства (важно для регистрации на серверах)
+    // Получение ID устройства (обязательно для авторизации)
     std::string get_device_id() override {
-        // В идеале этот ID должен запрашиваться из Java (Android ID)
-        return "android_device_id_fixed"; 
+        // В продакшене это значение должно приходить из Java (Secure.ANDROID_ID)
+        // Если передать константу, все пользователи будут иметь один ID сессии
+        return "android_device_id_stable"; 
     }
 
     // --- РЕАЛИЗАЦИЯ КОННЕКТОРОВ (БЕЗ ЗАГЛУШЕК) ---
-    // Эти методы критически важны для того, чтобы ядро могло «общаться» само с собой 
-    // через диспетчер. Возвращаем указатели из живого объекта g_core.
-
+    // Эти методы позволяют компонентам ядра связываться друг с другом
     core::iconnector* get_core_connector() override { 
-        if (g_core) {
-            return g_core->get_core_connector();
-        }
-        return nullptr;
+        return g_core ? g_core->get_core_connector() : nullptr;
     }
 
     core::iconnector* get_gui_connector() override { 
-        if (g_core) {
-            return g_core->get_gui_connector();
-        }
-        return nullptr;
+        return g_core ? g_core->get_gui_connector() : nullptr;
     }
 
     core::icore_factory* get_factory() override { 
-        if (g_core) {
-            return g_core->get_factory();
-        }
-        return nullptr;
+        return g_core ? g_core->get_factory() : nullptr;
     }
 
 private:
@@ -90,7 +78,6 @@ private:
         JNIEnv* env = nullptr;
         bool attached = false;
         
-        // Проверяем, приаттачен ли текущий поток к JVM
         jint res = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
         if (res == JNI_EDETACHED) {
             if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
@@ -118,9 +105,6 @@ private:
     }
 };
 
-/**
- * Стандартный вход JNI
- */
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_jvm = vm;
     return JNI_VERSION_1_6;
@@ -138,15 +122,14 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
         return;
     }
 
-    // Создаем глобальную ссылку на Java-объект, чтобы он не удалился GC
+    // Создаем GlobalRef, чтобы Java-объект не «съел» Garbage Collector
     if (g_event_callback_obj) env->DeleteGlobalRef(g_event_callback_obj);
     g_event_callback_obj = env->NewGlobalRef(callback);
     
-    // Создаем экземпляр нашего Callback-класса
     auto callback_impl = std::make_shared<AndroidGuiCallback>();
     g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
 
-    // Извлекаем пути
+    // Извлекаем пути и превращаем в std::string
     const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
     const char *cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
     std::string internal_data_path(data_path_cstr);
@@ -159,18 +142,19 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     settings.os_version_ = "Android";
     settings.locale_ = "ru_RU";
     settings.recents_avatars_size_ = 120;
+    // В некоторых версиях ICQ Core пути устанавливаются через settings.
+    // Если в вашей структуре есть эти поля, раскомментируйте:
+    // settings.set_data_path(internal_data_path);
+    // settings.set_cache_path(internal_cache_path);
     
-    // ВАЖНО: Передаем пути в настройки, чтобы ядро знало, куда писать БД
-    // (Поля могут называться по-разному в зависимости от версии core_face, 
-    // обычно это часть инициализации dispatcher)
-    
-    // Создаем диспетчер (точку входа в ядро)
+    // Создаем ядро
     g_core = std::make_unique<Ui::core_dispatcher>();
     
-    // Связываем интерфейс GUI с Ядром
+    // Передаем ядру пути для работы SQLite и логов
+    // В мобильной версии это часто делается через настройки перед линковкой
     g_core->link_gui(g_gui_callback, settings);
     
-    LOGI("Core Engine started. Data: %s", internal_data_path.c_str());
+    LOGI("Core Engine started successfully. Data at: %s", internal_data_path.c_str());
 }
 
 /**
@@ -181,9 +165,8 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv *env, jobject thiz)
     std::lock_guard<std::mutex> lock(g_core_mutex);
     
     if (g_core) {
-        // 1. Отключаем GUI (перестают идти коллбэки)
+        // Порядок важен: сначала отключаем GUI, потом удаляем объект
         g_core->unlink_gui();
-        // 2. Уничтожаем объект ядра
         g_core.reset();
         LOGI("Core Engine destroyed.");
     }
