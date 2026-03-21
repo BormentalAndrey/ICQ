@@ -190,6 +190,7 @@ jobs:
               ${ICQ_ROOT}/corelib
               ${ICQ_ROOT}/common.shared
               ${ICQ_ROOT}/gui.shared
+              ${ICQ_ROOT}/gui
               ${ICQ_ROOT}/boost_1_83_0
               ${ICQ_ROOT}/rapidjson/include
               $ENV{CURL_INCLUDE_PATH}
@@ -241,7 +242,7 @@ jobs:
           #include <android/log.h>
 
           #include "stdafx.h"
-          #include "core_dispatcher.h"
+          #include "gui/core_dispatcher.h"
           #include "icore_interface.h"
 
           #define LOG_TAG "IcqCoreJNI"
@@ -389,24 +390,25 @@ jobs:
               using CallId = std::string;
               using PeerId = std::string;
 
-              enum MediaSenderState {
-                  MSS_None = 0,
-                  MSS_Starting,
-                  MSS_Started,
-                  MSS_Stopping,
-                  MSS_Stopped,
-                  MSS_Error
-              };
-
               enum DeviceType { AudioRecording = 0, AudioPlayback, VideoCapturing };
+              enum DeviceClass { Audio = 0, Video };
               enum VideoCaptureType { VC_DeviceCamera, VC_DeviceVirtualCamera, VC_DeviceDesktop };
 
-              enum TerminateReason {
-                  TR_HANGUP = 0, TR_REJECT, TR_BUSY, TR_HANDLED_BY_ANOTHER_INSTANCE,
-                  TR_UNAUTHORIZED, TR_ALLOCATE_FAILED, TR_ANSWER_TIMEOUT, TR_CONNECT_TIMEOUT,
-                  TR_NOT_FOUND, TR_BLOCKED_BY_CALLER_IS_STRANGER, TR_BLOCKED_BY_CALLEE_PRIVACY,
-                  TR_CALLER_MUST_BE_AUTHORIZED_BY_CAPCHA, TR_BAD_URI, TR_NOT_AVAILABLE_NOW,
-                  TR_PARTICIPANTS_LIMIT_EXCEEDED, TR_DURATION_LIMIT_EXCEEDED, TR_INTERNAL_ERROR
+              struct VoipDesc
+              {
+                  bool first_notify_send = false;
+                  bool local_cam_en = false;
+                  bool local_aud_en = true;
+                  bool local_cam_allowed = true;
+                  bool local_aud_allowed = true;
+                  bool local_desktop_allowed = true;
+                  bool mute_en = false;
+                  bool incomingSoundsMuted = false;
+                  float volume = 1.0f;
+
+                  std::string aPlaybackDevice;
+                  std::string aRecordingDevice;
+                  std::string vCaptureDevice;
               };
           }
 
@@ -459,6 +461,12 @@ jobs:
                   VoipProtoMsg() : msg_type(0) {}
               };
 
+              struct CallStartParams {
+                  bool video = false;
+                  bool attach = false;
+                  std::string call_type;
+              };
+
               class VoipManager {
               public:
                   virtual ~VoipManager() = default;
@@ -488,6 +496,13 @@ jobs:
           EOF
           
           echo "✅ Updated VoipManagerDefines.h"
+
+      - name: Fix base_im.h DeviceClass
+        run: |
+          if [ -f "core/connections/base_im.h" ]; then
+            sed -i 's/voip::DeviceClass/DeviceClass/g' core/connections/base_im.h
+            echo "✅ Fixed DeviceClass in base_im.h"
+          fi
 
       - name: Fix permissions and build
         run: |
