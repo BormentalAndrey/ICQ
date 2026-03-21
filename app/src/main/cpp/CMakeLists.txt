@@ -1,10 +1,11 @@
+# app/src/main/cpp/CMakeLists.txt
 cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core")
 
 # --- Настройка путей ---
 set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 
-# --- Глобальные дефайны (Production набор) ---
+# --- Глобальные дефайны ---
 add_compile_definitions(
     LINUX
     __linux__
@@ -23,9 +24,9 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Исключаем лишнее (и особенно десктопный GUI)
+# Исключаем лишнее
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
-    ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*|.*/internal/.*"
+    ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*|.*/internal/.*|.*VoipProxy.*|.*core_dispatcher.*|.*crash_reporter.*"
 )
 
 add_library(icq_core SHARED
@@ -45,7 +46,7 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
     ${ICQ_ROOT}/boost_1_83_0
     ${ICQ_ROOT}/rapidjson/include
-    $ENV{CURL_INCLUDE_PATH}                       # Путь из окружения GitHub Actions
+    $ENV{CURL_INCLUDE_PATH}
 )
 
 # --- Свойства таргета ---
