@@ -1,7 +1,10 @@
+// gui/voip/VoipProxy.h
+#ifndef ANDROID
+
 #pragma once
 #include "../../core/Voip/VoipManagerDefines.h"
 #include "../../core/Voip/libvoip/src/CallStateInternal.h"
-#include "../../core/Voip/libvoip/include/VoipController.h"  // стало
+#include "../../core/Voip/libvoip/include/VoipController.h"
 
 #define DEFAULT_DEVICE_UID "default_device"
 
@@ -111,7 +114,7 @@ namespace voip_proxy
         void onVoipCallDestroyed(const voip_manager::ContactEx& _contactEx);
         void onVoipCallConnected(const voip_manager::ContactEx& _contactEx);
         void onVoipCallTimeChanged(unsigned _secElapsed, bool _hasCall);
-        void onVoipResetComplete(); //hack for correct close
+        void onVoipResetComplete();
         void onVoipWindowRemoveComplete(quintptr _winId);
         void onVoipWindowAddComplete(quintptr _winId);
         void onVoipMaskEngineEnable(bool _enable);
@@ -123,17 +126,14 @@ namespace voip_proxy
     private Q_SLOTS:
         void _updateCallTime();
         void _checkIgnoreContact(const QString& contact);
-
         void avatarChanged(const QString& aimId);
 
     private:
-        //voip_manager::CipherState cipherState_;
         Ui::core_dispatcher& dispatcher_;
         QTimer               callTimeTimer_;
         unsigned             callTimeElapsed_ = 0;
         VoipEmojiManager     voipEmojiManager_;
         voip_manager::ContactsList activePeerList_;
-        // It is currenlty connected contacts, contacts, which do not accept call, are not contained in this list.
         QList<voip_proxy::device_desc> screenList_;
         voip_proxy::device_desc currentSelectedVideoDevice_;
         std::unique_ptr<Ui::gui_coll_helper> pendingCallStart_;
@@ -142,12 +142,8 @@ namespace voip_proxy
         std::string chatId_;
         bool vcsWebinar_ = false;
 
-        // Map to store call termination reasons for groupcalls [reason, disconnected list]
         std::map<TermincationReasonGroup, std::vector<std::string>> disconnectedPeers_;
-
-        std::map<std::string, voip_manager::ContactEx> inCallsList_; // for better IMDESKTOP-15780 case when answer incoming from chat through join to this chat
-
-        // For each device type.
+        std::map<std::string, voip_manager::ContactEx> inCallsList_;
         std::vector<device_desc> devices_[3];
         std::unordered_map<EvoipDevTypes, device_desc> activeDevices_;
 
@@ -163,8 +159,7 @@ namespace voip_proxy
         bool localCamPermission_ = false;
 
         bool settingsLoaded_ = false;
-        bool voipIsKilled_ = false; // Do we kill voip on exiting from programm.
-
+        bool voipIsKilled_ = false;
         bool hideControlsWhenRemDesktopSharing_ = false;
         bool isResetDialogActive_ = false;
 
@@ -182,12 +177,10 @@ namespace voip_proxy
         void _prepareUserBitmaps(Ui::gui_coll_helper& _collection, const std::string& _contact,
             int _size, int userBitmapParamBitSet, voip_manager::AvatarThemeType theme);
 
-        void onStartCall(bool _bOutgoing); // This method is called, when you start or recive call.
-        void onEndCall(); // This method is called on end of call.
-
+        void onStartCall(bool _bOutgoing);
+        void onEndCall();
         void updateScreenList(const std::vector<voip_proxy::device_desc>& _devices);
         void _setSwitchVCaptureMute();
-
         void updateDisconnectedPeers();
 
     public:
@@ -197,11 +190,7 @@ namespace voip_proxy
         void loadSettings(std::function<void(voip_proxy::device_desc &description)> callback);
         void voipReset();
         void updateActivePeerList();
-        //void getSecureCode(voip_manager::CipherState& _state) const;
-        VoipEmojiManager& getEmojiManager()
-        {
-            return voipEmojiManager_;
-        }
+        VoipEmojiManager& getEmojiManager() { return voipEmojiManager_; }
 
         void setWindowAdd(quintptr hwnd, const char *call_id, bool _primaryWnd, bool _systemWd, int _panelHeight);
         void setWindowRemove(quintptr _hwnd);
@@ -242,10 +231,8 @@ namespace voip_proxy
 
         bool isHideControlsWhenRemDesktopSharing() const { return hideControlsWhenRemDesktopSharing_; }
         bool isResetCallDialogActive() const;
-
         bool isWebinar() const { return vcsWebinar_; }
         std::string getChatId() const { return chatId_; }
-
         QString getConferenceUrl() const { return QString::fromStdString(vcsConferenceUrl_); }
 
         const std::vector<device_desc>& deviceList(EvoipDevTypes type) const;
@@ -253,14 +240,13 @@ namespace voip_proxy
         const std::vector<voip_manager::Contact>& currentCallContacts() const;
         bool hasActiveAudioCaptureDevice() const;
 
-        bool hasEstablishCall() const; // @return true is any of users are accepted call.
+        bool hasEstablishCall() const;
         int maxVideoConferenceMembers() const;
         int maxUsersWithVideo() const;
         int lowerBoundForBigConference() const;
 
-        void openChat(const QString& contact); // Open chat with user
-        void switchShareScreen(voip_proxy::device_desc const * _description); // Switch share screen mode.
-
+        void openChat(const QString& contact);
+        void switchShareScreen(voip_proxy::device_desc const * _description);
         const QList<voip_proxy::device_desc>& screenList() const;
 
         void notifyDevicesChanged(bool audio);
@@ -269,10 +255,11 @@ namespace voip_proxy
         CheckActiveCallResult checkActiveCall(const std::string& _contact);
 
     Q_SIGNALS:
-        // NOTE: Only for stats-specific tasks
         void onVoipCallEndedStat(const voip_manager::CallEndStat& _stat);
     };
 }
 
 Q_DECLARE_METATYPE(voip_proxy::device_desc);
 Q_DECLARE_METATYPE(voip_proxy::device_desc_vector);
+
+#endif // !ANDROID
