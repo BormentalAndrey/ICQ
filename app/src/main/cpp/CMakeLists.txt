@@ -23,7 +23,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Исключаем лишнее
+# Исключаем лишнее (и особенно десктопный GUI)
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
     ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*|.*/internal/.*"
 )
@@ -45,7 +45,7 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
     ${ICQ_ROOT}/boost_1_83_0
     ${ICQ_ROOT}/rapidjson/include
-    ${CURL_INCLUDE_PATH}                       # Путь из окружения GitHub Actions
+    $ENV{CURL_INCLUDE_PATH}                       # Путь из окружения GitHub Actions
 )
 
 # --- Свойства таргета ---
@@ -76,4 +76,4 @@ target_link_libraries(icq_core
 
 message(STATUS "Build Configuration:")
 message(STATUS "  ICQ_ROOT: ${ICQ_ROOT}")
-message(STATUS "  CURL_INC: ${CURL_INCLUDE_PATH}")
+message(STATUS "  CURL_INC: $ENV{CURL_INCLUDE_PATH}")
