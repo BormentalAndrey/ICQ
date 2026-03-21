@@ -173,7 +173,7 @@ jobs:
           )
 
           list(FILTER CORE_SOURCES EXCLUDE REGEX 
-              ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*|.*/internal/.*"
+              ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*VoipProxy.*|.*/gui/.*crash_reporter.*"
           )
 
           add_library(icq_core SHARED
@@ -236,26 +236,26 @@ jobs:
           #include <mutex>
           #include <thread>
           #include <vector>
-          #include <codecvt>
-          #include <locale>
           #include <android/log.h>
 
           #include "core/stdafx.h"
-          #include "core/core.h"
-          #include "core/icore_interface.h"
+          #include "gui/core_dispatcher.h"
 
           #define LOG_TAG "IcqCoreJNI"
           #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
           #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
           JavaVM* g_jvm = nullptr;
-          static std::unique_ptr<core::core> g_core;
+          static std::unique_ptr<Ui::core_dispatcher> g_core;
           static jobject g_event_callback_obj = nullptr;
           static std::shared_ptr<core::icore_interface> g_gui_callback;
           static std::mutex g_core_mutex;
 
           class AndroidGuiCallback : public core::icore_interface {
           public:
+              virtual int32_t addref() override { return 1; }
+              virtual int32_t release() override { return 0; }
+              
               void receive_variable(const std::string& _name, core::coll_ptr _value) override {
                   notify_java_event(_name);
               }
@@ -273,7 +273,19 @@ jobs:
               }
 
               std::string get_device_id() override {
-                  return "android_id";
+                  return "android_device_id_stable";
+              }
+
+              core::iconnector* get_core_connector() override { 
+                  return g_core ? g_core->get_core_connector() : nullptr;
+              }
+
+              core::iconnector* get_gui_connector() override { 
+                  return g_core ? g_core->get_gui_connector() : nullptr;
+              }
+
+              core::icore_factory* get_factory() override { 
+                  return g_core ? g_core->get_factory() : nullptr;
               }
 
           private:
@@ -318,7 +330,7 @@ jobs:
               std::lock_guard<std::mutex> lock(g_core_mutex);
               
               if (g_core) {
-                  LOGI("Core Engine is already initialized.");
+                  LOGI("Core Engine already running.");
                   return;
               }
 
@@ -331,24 +343,22 @@ jobs:
               g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
 
               const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
-              std::string path_str(data_path_cstr);
+              const char *cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
+              std::string internal_data_path(data_path_cstr);
+              std::string internal_cache_path(cache_path_cstr);
               env->ReleaseStringUTFChars(data_path, data_path_cstr);
+              env->ReleaseStringUTFChars(cache_path, cache_path_cstr);
 
               common::core_gui_settings settings;
               settings.os_version_ = "Android";
               settings.locale_ = "ru_RU";
+              settings.recents_avatars_size_ = 120;
               
-              try {
-                  std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-                  settings.profile_path_ = converter.from_bytes(path_str);
-              } catch (...) {
-                  settings.profile_path_ = std::wstring(path_str.begin(), path_str.end());
-              }
-              
-              g_core = std::make_unique<core::core>();
+              g_core = std::make_unique<Ui::core_dispatcher>();
               g_core->link_gui(g_gui_callback, settings);
               
-              LOGI("Core Engine initialized. Path: %s", path_str.c_str());
+              LOGI("Core Engine started successfully. Data at: %s, Cache at: %s", 
+                   internal_data_path.c_str(), internal_cache_path.c_str());
           }
 
           extern "C" JNIEXPORT void JNICALL
@@ -358,7 +368,7 @@ jobs:
               if (g_core) {
                   g_core->unlink_gui();
                   g_core.reset();
-                  LOGI("Core Engine unlinked and reset.");
+                  LOGI("Core Engine destroyed.");
               }
               
               if (g_event_callback_obj) {
@@ -367,7 +377,6 @@ jobs:
               }
               
               g_gui_callback.reset();
-              LOGI("Core Engine shutdown complete.");
           }
           EOF
           
@@ -498,40 +507,24 @@ jobs:
           
           echo "✅ Updated VoipManagerDefines.h"
 
-      - name: Fix base_im.h DeviceClass
+      - name: Fix base_im.h
         run: |
           if [ -f "core/connections/base_im.h" ]; then
-            sed -i 's/DeviceClass deviceClass/voip::DeviceClass deviceClass/g' core/connections/base_im.h
-            echo "✅ Fixed DeviceClass in base_im.h"
+            # Исправляем двойное пространство имен если есть
+            sed -i 's/voip::voip::/voip::/g' core/connections/base_im.h
+            # Добавляем недостающий include если нужно
+            if ! grep -q "#include.*VoipManagerDefines" core/connections/base_im.h; then
+              sed -i '1i#include "../Voip/VoipManagerDefines.h"' core/connections/base_im.h
+            fi
+            echo "✅ Fixed base_im.h"
           fi
 
-      - name: Create missing icore_interface.h
+      - name: Remove conflicting icore_interface.h
         run: |
-          cat > core/icore_interface.h << 'EOF'
-          #pragma once
-          #include <string>
-          #include <vector>
-          #include <memory>
-
-          namespace core
-          {
-              using coll_ptr = std::shared_ptr<void>;
-              using event_props_type = std::vector<std::pair<std::string, std::string>>;
-
-              class icore_interface
-              {
-              public:
-                  virtual ~icore_interface() = default;
-                  virtual void receive_variable(const std::string& _name, coll_ptr _value) = 0;
-                  virtual void receive_package(const std::string& _name, coll_ptr _value) = 0;
-                  virtual void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) = 0;
-                  virtual void send_statistic_event(const std::string& _event, const event_props_type& _props) = 0;
-                  virtual std::string get_device_id() = 0;
-              };
-          }
-          EOF
-          
-          echo "✅ Created core/icore_interface.h"
+          if [ -f "core/icore_interface.h" ]; then
+            rm core/icore_interface.h
+            echo "✅ Removed conflicting core/icore_interface.h"
+          fi
 
       - name: Fix permissions and build
         run: |
