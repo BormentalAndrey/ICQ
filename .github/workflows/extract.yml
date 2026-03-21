@@ -35,7 +35,31 @@ jobs:
             libcurl4-openssl-dev \
             cmake \
             ninja-build \
-            build-essential
+            build-essential \
+            libgl1-mesa-dev \
+            libxcb-xinerama0-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render-util0-dev \
+            libxcb-shape0-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev
+
+      - name: Setup Qt for Android
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.5.0'
+          host: 'linux'
+          target: 'android'
+          arch: 'android_arm64_v8a'
+          modules: 'qtbase qtdeclarative qtmultimedia qtsvg'
+          tools: 'tools_qtcreator,cmake'
+          cache: true
 
       - name: Fix Environment and Case Sensitivity
         run: |
@@ -154,6 +178,10 @@ jobs:
           project("icq_mobile_core")
 
           set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
+          
+          # Находим Qt
+          set(CMAKE_PREFIX_PATH $ENV{Qt6_DIR})
+          find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
           add_compile_definitions(
               LINUX
@@ -173,7 +201,7 @@ jobs:
           )
 
           list(FILTER CORE_SOURCES EXCLUDE REGEX 
-              ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp|.*/gui/.*VoipProxy.*|.*/gui/.*crash_reporter.*"
+              ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp"
           )
 
           add_library(icq_core SHARED
@@ -209,23 +237,23 @@ jobs:
               -fdata-sections -ffunction-sections
           )
 
-          find_library(log-lib log)
-          find_library(z-lib z)
-          find_library(android-lib android)
-
           target_link_libraries(icq_core
-              ${log-lib}
-              ${z-lib}
-              ${android-lib}
+              Qt6::Core
+              Qt6::Widgets
+              Qt6::Network
+              log
+              z
+              android
               -Wl,--gc-sections
           )
 
           message(STATUS "Build Configuration:")
           message(STATUS "  ICQ_ROOT: ${ICQ_ROOT}")
+          message(STATUS "  Qt6_DIR: $ENV{Qt6_DIR}")
           message(STATUS "  CURL_INC: $ENV{CURL_INCLUDE_PATH}")
           EOF
           
-          echo "✅ Updated CMakeLists.txt"
+          echo "✅ Updated CMakeLists.txt with Qt support"
 
       - name: Fix jni_bridge.cpp
         run: |
@@ -534,6 +562,7 @@ jobs:
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
           CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
+          Qt6_DIR: ${{ env.Qt6_DIR }}
 
       - name: Save build log
         if: always()
