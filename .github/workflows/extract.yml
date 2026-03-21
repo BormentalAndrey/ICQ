@@ -40,48 +40,217 @@ jobs:
             ninja-build \
             build-essential \
             libgl1-mesa-dev \
+            libxcb-xinerama0-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render-util0-dev \
+            libxcb-shape0-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             python3-pip
 
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: ${{ runner.os }}-qt-6.5.0-android-${{ hashFiles('.qt-version') }}
+          restore-keys: |
+            ${{ runner.os }}-qt-6.5.0-android-
+
       - name: Install aqtinstall (Qt Downloader)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         run: pip install aqtinstall
 
       - name: Install Qt 6.5.0 for Android & Linux
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
-          # Используем --outputdir вместо -o
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          
-          # Устанавливаем Host-инструменты (нужны для компилятора moc, rcc)
+          echo "📦 Installing Qt desktop version (required for android tools)..."
           aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
+          echo "📦 Installing Qt android version..."
+          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
+          echo "6.5.0-android" > .qt-version
+          echo "✅ Qt installation complete"
+
+      - name: Set Qt environment
+        run: |
+          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
+          echo "Qt6_ANDROID_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake:${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
+          echo "✅ Qt environment configured"
+
+      - name: Cache Boost
+        id: cache-boost
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/boost_1_83_0
+          key: ${{ runner.os }}-boost-1.83.0
+          restore-keys: |
+            ${{ runner.os }}-boost-1.83.0-
 
       - name: Setup Boost 1.83.0
+        if: steps.cache-boost.outputs.cache-hit != 'true'
         run: |
-          if [ ! -d "boost_1_83_0" ]; then
-            echo "Downloading Boost..."
-            wget -q https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.gz
-            tar -xzf boost_1_83_0.tar.gz
-          fi
-          echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
+          echo "📦 Downloading Boost 1.83.0..."
+          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
+          tar -xjf boost_1_83_0.tar.bz2
+          rm boost_1_83_0.tar.bz2
+          echo "✅ Boost installed"
 
       - name: Setup RapidJSON
         run: |
           if [ ! -d "rapidjson" ]; then
+            echo "📦 Cloning RapidJSON..."
             git clone --depth 1 https://github.com/Tencent/rapidjson.git
           fi
           echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
+          echo "✅ RapidJSON ready"
+
+      - name: Setup libcurl for Android
+        run: |
+          CURL_H_PATH=$(find /usr/include -name "curl.h" | head -n 1)
+          if [ -n "$CURL_H_PATH" ]; then
+            CURL_DIR=$(dirname "$CURL_H_PATH")
+            mkdir -p ${{ github.workspace }}/curl_flat
+            cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
+            echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
+            echo "✅ Curl include configured"
+          fi
+
+      - name: Create missing headers
+        run: |
+          mkdir -p common.shared/config
+          cat > common.shared/config/config_data.h << 'EOF'
+          #pragma once
+          #include <string>
+          namespace config {
+              inline std::string config_json() { return "{}"; }
+          }
+          EOF
+          cat > common.shared/loader_errors.h << 'EOF'
+          #pragma once
+          enum class loader_errors {
+              success = 0,
+              network_error,
+              load_failure,
+              parse_failure,
+              invalid_json,
+              come_back_later,
+              http_client_error,
+              file_error,
+              cancelled
+          };
+          EOF
+          mkdir -p core/voip
+          if [ ! -f "core/voip/voip3.h" ]; then
+            echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
+          fi
+          echo "✅ Missing headers created"
+
+      - name: Create VoipManagerDefines.h
+        run: |
+          mkdir -p core/Voip
+          cat > core/Voip/VoipManagerDefines.h << 'EOF'
+          #pragma once
+          #include <string>
+          #include <vector>
+          #include <memory>
+          #include <voip/voip3.h>
+          #define PREVIEW_RENDER_NAME "@camera_stream_id"
+          #define DEFAULT_DEVICE_UID "default_device"
+          namespace voip {
+              using CallId = std::string;
+              using PeerId = std::string;
+              enum DeviceType { AudioRecording = 0, AudioPlayback, VideoCapturing };
+              enum DeviceClass { Audio = 0, Video };
+              enum VideoCaptureType { VC_DeviceCamera, VC_DeviceVirtualCamera, VC_DeviceDesktop };
+          }
+          namespace voip_manager {
+              using namespace voip;
+              struct Contact { voip::CallId call_id; std::string contact; };
+              struct ContactEx { Contact contact; std::string call_type; };
+              struct device_description { std::string uid; std::string name; DeviceType type; };
+              struct WindowParams { void* hwnd; voip::CallId call_id; };
+              struct VoipProtoMsg { std::string account_uid; int msg_type; std::vector<char> data; };
+              struct CallStartParams { bool video = false; };
+              class VoipManager {
+              public:
+                  virtual ~VoipManager() = default;
+                  virtual void call_create(const std::vector<std::string>&, std::string&, bool) = 0;
+                  virtual void call_stop() = 0;
+                  virtual void call_accept(const voip::CallId&, const std::string&, bool) = 0;
+                  virtual void call_decline(const Contact&, bool, bool) = 0;
+                  virtual void call_terminate(const voip::CallId&, voip::TerminateReason) = 0;
+                  virtual void get_device_list(DeviceType, std::vector<device_description>&) = 0;
+                  virtual void set_device(DeviceType, const std::string&, bool) = 0;
+                  virtual void window_add(WindowParams&) = 0;
+                  virtual void window_remove(void*) = 0;
+                  virtual void media_video_en(bool) = 0;
+                  virtual void media_audio_en(bool) = 0;
+                  virtual void ProcessVoipMsg(const std::string&, int, const char*, unsigned) = 0;
+                  virtual void ProcessVoipAck(const VoipProtoMsg&, bool) = 0;
+                  virtual void reset() = 0;
+                  virtual void update() = 0;
+              };
+          }
+          EOF
+          echo "✅ VoipManagerDefines.h created"
+
+      - name: Fix base_im.h
+        run: |
+          if [ -f "core/connections/base_im.h" ]; then
+            sed -i 's/voip::voip::/voip::/g' core/connections/base_im.h
+            if ! grep -q "#include.*VoipManagerDefines" core/connections/base_im.h; then
+              sed -i '1i#include "../Voip/VoipManagerDefines.h"' core/connections/base_im.h
+            fi
+            echo "✅ Fixed base_im.h"
+          fi
+
+      - name: Remove conflicting icore_interface.h
+        run: |
+          if [ -f "core/icore_interface.h" ]; then
+            rm core/icore_interface.h
+            echo "✅ Removed conflicting icore_interface.h"
+          fi
+
+      - name: Fix includes in proxy_settings.h
+        run: |
+          if [ -f "core/proxy_settings.h" ]; then
+            if ! grep -q "tools/binary_stream.h" "core/proxy_settings.h"; then
+              sed -i '1i#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/proxy_settings.h
+            fi
+          fi
+
+      - name: Fix includes in im_stats.h
+        run: |
+          if [ -f "core/stats/im/im_stats.h" ]; then
+            if ! grep -q "rapidjson/document.h" "core/stats/im/im_stats.h"; then
+              sed -i '1i#include <rapidjson/document.h>\n#include <rapidjson/writer.h>\n#include <rapidjson/stringbuffer.h>' core/stats/im/im_stats.h
+            fi
+          fi
 
       - name: Fix permissions
         run: chmod +x gradlew
 
       - name: Build with Gradle
         run: |
-          # Мы передаем пути через -P (Project Properties), 
-          # так как Gradle в CI часто изолирует переменные окружения от CMake
           ./gradlew :app:assembleDebug \
             -Pqt.android.path="${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" \
             -Pqt.host.path="${{ github.workspace }}/Qt/6.5.0/gcc_64" \
             -Pboost.root="${{ github.workspace }}/boost_1_83_0" \
             -Prapidjson.root="${{ github.workspace }}/rapidjson/include" \
             --stacktrace 2>&1 | tee build.log
+        env:
+          CURL_INCLUDE_PATH: ${{ github.workspace }}/curl_flat
+          Qt6_DIR: ${{ github.workspace }}/Qt/6.5.0/gcc_64
+          Qt6_ANDROID_DIR: ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a
+          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
+          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
 
       - name: Save build log
         if: always()
@@ -106,4 +275,5 @@ jobs:
           path: |
             app/.cxx/**/*.log
             app/build/reports/
-            
+            build.log
+          retention-days: 7
