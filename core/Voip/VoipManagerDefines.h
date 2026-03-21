@@ -6,18 +6,17 @@
 #include <functional>
 #include <memory>
 
+// Подключаем оригинальный voip3.h из libvoip, чтобы взять оттуда MediaSenderState и TerminateReason
+#include <voip/voip3.h>
+
 #define PREVIEW_RENDER_NAME "@camera_stream_id"
 #define DEFAULT_DEVICE_UID "default_device"
-
-// Предварительное объявление типов из voip3.h
-// Убираем дублирование MediaSenderState и TerminateReason
 
 namespace voip
 {
     using CallId = std::string;
     using PeerId = std::string;
 
-    // DeviceType и DeviceClass остаются здесь
     enum DeviceType
     {
         AudioRecording = 0,
@@ -46,9 +45,6 @@ namespace voip
         Img_UserForeground,
         Img_Max
     };
-
-    // MediaSenderState удален - он есть в voip3.h
-    // TerminateReason удален - он есть в voip3.h
 
     struct VoipDesc
     {
@@ -167,27 +163,24 @@ namespace voip_manager
         VoipProtoMsg() : msg_type(0) {}
     };
 
-    // Добавляем недостающие типы для base_im.h
     struct CallStartParams {
         bool video = false;
         bool attach = false;
         std::string call_type;
     };
 
-    // Основной интерфейс управления VoIP для интеграции с Core
     class VoipManager
     {
     public:
         virtual ~VoipManager() = default;
 
-        // Управление звонками
         virtual void call_create(const std::vector<std::string> &contacts, std::string &account, const bool video) = 0;
         virtual void call_stop() = 0;
         virtual void call_accept(const voip::CallId &call_id, const std::string &account, bool video) = 0;
         virtual void call_decline(const Contact& contact, bool busy, bool conference) = 0;
-        virtual void call_terminate(const voip::CallId& call_id, TerminateReason reason) = 0;
+        // Используем TerminateReason из voip3.h
+        virtual void call_terminate(const voip::CallId& call_id, voip::TerminateReason reason) = 0;
 
-        // Управление устройствами
         virtual void get_device_list(DeviceType device_type, std::vector<device_description>& dev_list) = 0;
         virtual void set_device(DeviceType device_type, const std::string& device_guid, bool force_reset) = 0;
         virtual void set_device_mute(DeviceType deviceType, bool mute) = 0;
@@ -195,17 +188,14 @@ namespace voip_manager
         virtual void set_device_vol(DeviceType deviceType, float vol) = 0;
         virtual float get_device_vol(DeviceType deviceType) = 0;
 
-        // Работа с окнами видео (для Android передается Surface/Texture ID через void*)
         virtual void window_add(WindowParams& windowParams) = 0;
         virtual void window_remove(void* hwnd) = 0;
 
-        // Управление потоками
         virtual void media_video_en(bool enable) = 0;
         virtual void media_audio_en(bool enable) = 0;
         virtual bool is_video_en() = 0;
         virtual bool is_audio_en() = 0;
 
-        // Обработка сигнального протокола
         virtual void ProcessVoipMsg(const std::string& account_uid, int voipIncomingMsg, const char *data, unsigned len) = 0;
         virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
 
