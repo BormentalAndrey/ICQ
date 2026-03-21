@@ -84,6 +84,26 @@ jobs:
           echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake:${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
           echo "✅ Qt environment configured"
 
+      - name: Verify Qt installation
+        run: |
+          echo "=== Verifying Qt installation ==="
+          echo "Qt Android path: ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a"
+          echo "Qt Host path: ${{ github.workspace }}/Qt/6.5.0/gcc_64"
+    
+          if [ -d "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" ]; then
+          echo "✅ Qt Android directory exists"
+          ls -la ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6/
+          else
+          echo "❌ Qt Android directory not found"
+          fi
+    
+          if [ -f "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6Core/Qt6CoreConfig.cmake" ]; then
+          echo "✅ Qt6Core config found"
+          else
+          echo "❌ Qt6Core config not found"
+          find ${{ github.workspace }}/Qt -name "Qt6CoreConfig.cmake" 2>/dev/null
+          fi
+    
       - name: Cache Boost
         id: cache-boost
         uses: actions/cache@v4
