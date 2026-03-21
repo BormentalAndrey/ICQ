@@ -1,3 +1,4 @@
+// app/src/main/cpp/jni_bridge.cpp
 #include <jni.h>
 #include <string>
 #include <memory>
@@ -10,7 +11,7 @@
 
 // Убираем префиксы папок, так как CMake уже включает директории core/ и gui.shared/
 #include "stdafx.h"
-#include "core_dispatcher.h"
+#include "gui/core_dispatcher.h"  // Исправленный путь - файл в папке gui/
 #include "icore_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
