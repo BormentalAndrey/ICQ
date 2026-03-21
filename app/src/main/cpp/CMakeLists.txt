@@ -15,34 +15,57 @@ endif()
 
 # --- Поиск Qt для Android ---
 # Приоритет: Аргументы из Gradle -> Переменные окружения -> Хардкод CI
+set(QT_FOUND FALSE)
+
 if(QT_ANDROID_PATH AND QT_HOST_PATH)
     set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
     set(QT_HOST_PATH "${QT_HOST_PATH}")
-elseif(DEFINED ENV{Qt6_ANDROID_DIR})
+    message(STATUS "✅ Using Qt paths from Gradle arguments")
+    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
+    if(Qt6_FOUND)
+        set(QT_FOUND TRUE)
+    endif()
+elseif(DEFINED ENV{Qt6_ANDROID_DIR} AND DEFINED ENV{Qt6_DIR})
     set(QT_ANDROID_PATH "$ENV{Qt6_ANDROID_DIR}")
     set(QT_HOST_PATH "$ENV{Qt6_DIR}")
     set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-else()
+    message(STATUS "✅ Using Qt paths from environment")
+    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
+    if(Qt6_FOUND)
+        set(QT_FOUND TRUE)
+    endif()
+elseif(EXISTS "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
     # Резервный путь для GitHub Actions
     set(QT_ANDROID_PATH "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
     set(QT_HOST_PATH "/home/runner/work/ICQ/Qt/6.5.0/gcc_64")
     set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-endif()
-
-# Обязательный поиск Qt6 для Android требует наличия хостового пути для инструментов (moc, rcc)
-find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Network)
-
-if(Qt6_FOUND)
-    set(QT_FOUND TRUE)
-    message(STATUS "✅ Qt6 found. Version: ${Qt6_VERSION}")
-    message(STATUS "✅ Qt6 Path: ${Qt6_DIR}")
-    message(STATUS "✅ Qt6 Host Path: ${QT_HOST_PATH}")
+    message(STATUS "✅ Using GitHub Actions Qt paths")
+    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
+    if(Qt6_FOUND)
+        set(QT_FOUND TRUE)
+    endif()
 else()
-    message(FATAL_ERROR "❌ Qt6 is REQUIRED for this project but was not found.")
+    message(STATUS "⚠️ Qt not found via configured paths, checking system...")
+    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
+    if(Qt6_FOUND)
+        set(QT_FOUND TRUE)
+        message(STATUS "✅ Qt6 found in system: ${Qt6_VERSION}")
+    endif()
 endif()
+
+if(NOT QT_FOUND)
+    message(FATAL_ERROR "❌ Qt6 is REQUIRED for this project but was not found.\n"
+        "   Please install Qt 6.5.0 with:\n"
+        "   aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /path/to/Qt\n"
+        "   aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /path/to/Qt")
+endif()
+
+message(STATUS "✅ Qt6 found. Version: ${Qt6_VERSION}")
+message(STATUS "✅ Qt6 Path: ${Qt6_DIR}")
+message(STATUS "✅ Qt6 Host Path: ${QT_HOST_PATH}")
 
 # --- Глобальные дефайны ---
 add_compile_definitions(
@@ -93,6 +116,12 @@ target_include_directories(icq_core PRIVATE
     $ENV{CURL_INCLUDE_PATH}
 )
 
+# Добавляем Qt инклуды
+target_include_directories(icq_core PRIVATE
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Network_INCLUDE_DIRS}
+)
+
 # --- Свойства таргета ---
 set_target_properties(icq_core PROPERTIES
     CXX_STANDARD 17
@@ -100,7 +129,6 @@ set_target_properties(icq_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-    # Префикс 'lib' добавляется автоматически для Android
 )
 
 # --- Опции компиляции ---
@@ -162,7 +190,9 @@ message(STATUS "  Project:          ${PROJECT_NAME}")
 message(STATUS "  ICQ_ROOT:         ${ICQ_ROOT}")
 message(STATUS "  Build Type:       ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Android API:      ${ANDROID_NATIVE_API_LEVEL}")
+message(STATUS "  Qt6 Version:      ${Qt6_VERSION}")
 message(STATUS "  Qt6 Path:         ${Qt6_DIR}")
+message(STATUS "  Qt6 Host Path:    ${QT_HOST_PATH}")
 message(STATUS "  LTO Supported:    ${ipo_supported}")
 message(STATUS "---------------------------------------------------------")
 message(STATUS "")
