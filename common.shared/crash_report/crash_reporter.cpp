@@ -1,6 +1,9 @@
+// common.shared/crash_report/crash_reporter.cpp
 #include "stdafx.h"
 
 #include "crash_reporter.h"
+
+#ifndef ANDROID
 
 #ifdef  _WIN32
 #include "../common.shared/win32/crash_handler.h"
@@ -25,9 +28,6 @@
 #include "../core/tools/strings.h"
 #include "../utils.h"
 
-/************************************************************************/
-/* DumpCallback                                                         */
-/************************************************************************/
 #ifdef __linux__
 static bool DumpCallback(const google_breakpad::MinidumpDescriptor& descriptor, void* context, bool success)
 {
@@ -41,14 +41,6 @@ static bool FilterCallback(void *context)
     return true;
 }
 
-// A callback function to run after the minidump has been written.
-// |minidump_id| is a unique id for the dump, so the minidump
-// file is <dump_dir>/<minidump_id>.dmp.
-// |context| is the value passed into the constructor.
-// |succeeded| indicates whether a minidump file was successfully written.
-// Return true if the exception was fully handled and breakpad should exit.
-// Return false to allow any other exception handlers to process the
-// exception.
 bool MinidumpCallback(const char *dump_dir, const char *minidump_id, void *context, bool succeeded)
 {
     return succeeded;
@@ -60,9 +52,8 @@ namespace crash_system
     reporter::reporter(const string_type& _dump_path)
     {
 #ifdef  _WIN32
-        //breakpad_ = std::make_unique<google_breakpad::ExceptionHandler>(_dump_path, nullptr, nullptr, nullptr, google_breakpad::ExceptionHandler::HANDLER_ALL, MiniDumpNormal, L"", nullptr);
         crash_handler_ = std::make_unique<core::dump::crash_handler>(config::get().string(config::values::product_name_short), _dump_path, false);
-#elif __APPLE__ //  _WIN32
+#elif __APPLE__
         if constexpr (!core::dump::is_crash_handle_enabled())
             return;
 #if defined(BUILD_FOR_STORE)
@@ -70,7 +61,7 @@ namespace crash_system
         boost::filesystem::create_directories(_dump_path, e);
         breakpad_ = std::make_unique<google_breakpad::ExceptionHandler>(_dump_path, FilterCallback, MinidumpCallback, nullptr, true, nullptr);
 #endif
-#elif __linux__ //  _WIN32
+#elif __linux__
         if constexpr (!core::dump::is_crash_handle_enabled())
             return;
         std::error_code ec;
@@ -84,19 +75,18 @@ namespace crash_system
     {
 #ifdef  _WIN32
         crash_handler_ = {};
-#elif __APPLE__ //  _WIN32
+#elif __APPLE__
 #if defined(BUILD_FOR_STORE)
         breakpad_ = {};
 #else
         crashpad_ = {};
 #endif
-#elif __linux__ //  _WIN32
+#elif __linux__
         breakpad_ = {};
 #endif
     }
 
     reporter::reporter() = default;
-
     reporter::~reporter() = default;
 
 #ifdef  _WIN32
@@ -147,44 +137,32 @@ namespace crash_system
             return;
 
         using namespace crashpad;
-        // Cache directory that will store crashpad information and minidumps
         const auto path  = std::string(_dump_path);
         base::FilePath database(path);
-        // Path to the out-of-process handler executable
         base::FilePath handler(su::concat(_bundle_path, "/Contents/Helpers/crashpad_handler"));
-        // URL used to submit minidumps to
         std::string url = submit_url(_base_url, _login);
-        // Optional annotations passed via --annotations to the handler
         std::map<std::string, std::string> annotations;
-        // Optional arguments to pass to the handler
         std::vector<std::string> arguments;
-
         arguments.push_back("--no-rate-limit");
-
-        //arguments.push_back("--no-upload-gzip");
-
         crashpad_ = std::make_unique<CrashpadClient>();
-
         std::unique_ptr<CrashReportDatabase> db = CrashReportDatabase::Initialize(database);
-
         if (db == nullptr || db->GetSettings() == nullptr)
             return;
-
-        /* Enable automated uploads. */
         db->GetSettings()->SetUploadsEnabled(true);
-
         const bool success = crashpad_->StartHandler(
-        handler,
-        database,
-        database,
-        url,
-        annotations,
-        arguments,
-        /* restartable */ true,
-        /* asynchronous_start */ false
+            handler,
+            database,
+            database,
+            url,
+            annotations,
+            arguments,
+            true,
+            false
         );
         (void)success;
-#endif // BUILD_FOR_STORE
+#endif
     }
 #endif
 }
+
+#endif // !ANDROID
