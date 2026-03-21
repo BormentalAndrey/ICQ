@@ -8,8 +8,8 @@
 #include <android/log.h>
 
 #include "core/stdafx.h"
-#include "gui/core_dispatcher.h"  // Ui::core_dispatcher
-#include "corelib/core_face.h"      // core::icore_interface
+#include "gui/core_dispatcher.h"
+#include "corelib/core_face.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -23,12 +23,10 @@ static std::mutex g_core_mutex;
 
 class AndroidGuiCallback : public core::icore_interface {
 public:
-    // Методы из core::icore_interface (core_face.h)
     core::iconnector* get_core_connector() override { return nullptr; }
     core::iconnector* get_gui_connector() override { return nullptr; }
     core::icore_factory* get_factory() override { return nullptr; }
     
-    // Наши методы для уведомлений
     void notify_java_event(const std::string& _event_name) {
         if (!g_jvm || !g_event_callback_obj) return;
 
