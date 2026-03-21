@@ -5,9 +5,14 @@
 #include "wim/privacy_settings.h"
 #include "archive/history_message.h"
 #include "smartreply/smartreply_marker.h"
+
+// ДОБАВЬТЕ ЭТУ СТРОКУ:
+#include "../Voip/VoipManagerDefines.h"
+
 #ifndef STRIP_VOIP
 #include "../Voip/VoipManager.h"
 #endif
+// ... остальной код
 
 namespace voip_manager {
     class VoipManager;
