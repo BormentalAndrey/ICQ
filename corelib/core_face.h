@@ -1,140 +1,118 @@
-// app/src/main/cpp/jni_bridge.cpp
-#include <jni.h>
+#pragma once
+
+#include "ibase.h"
+#include "ivalue.h"
+#include "../common.shared/common_defs.h"
+
 #include <string>
-#include <memory>
-#include <mutex>
-#include <thread>
 #include <vector>
-#include <codecvt>
-#include <locale>
-#include <android/log.h>
+#include <memory>
+#include <map>
 
-#include "core/stdafx.h"
-#include "gui/core_dispatcher.h"  // core_dispatcher.h находится в папке gui/
-#include "core/icore_interface.h"  // теперь есть
+namespace core
+{
+    // --- Перечисления состояния (оставляем без изменений) ---
+    enum login_error
+    {
+        le_success = 0,
+        le_wrong_login = 1,
+        le_network_error = 2,
+        le_parse_response = 3,
+        le_rate_limit = 4,
+        le_unknown_error = 5,
+        le_invalid_sms_code = 6,
+        le_error_validate_phone = 7,
+        le_attach_error_busy_phone = 8,
+        le_wrong_login_2x_factor = 9,
+    };
 
-#define LOG_TAG "IcqCoreJNI"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+    enum class mchat_error
+    {
+        me_success = 0,
+        me_unknown_error = 1,
+        me_cannot_add = 2,
+    };
 
-JavaVM* g_jvm = nullptr;
-static std::unique_ptr<Ui::core_dispatcher> g_core;  // используем Ui::core_dispatcher
-static jobject g_event_callback_obj = nullptr;
-static std::shared_ptr<core::icore_interface> g_gui_callback;
-static std::mutex g_core_mutex;
+    enum avatar_error
+    {
+        ae_success = 0,
+        ae_network_error = 1,
+        ae_unknown_error = 2
+    };
 
-class AndroidGuiCallback : public core::icore_interface {
-public:
-    // Реализуем все методы из icore_interface
-    void receive_variable(const std::string& _name, core::coll_ptr _value) override {
-        notify_java_event(_name);
-    }
+    // --- Предварительные объявления ---
+    class iconnector;
+    class icore_factory;
+    typedef std::shared_ptr<class icollection> coll_ptr;
+    typedef std::map<std::string, std::string> event_props_type;
 
-    void receive_package(const std::string& _name, core::coll_ptr _value) override {
-        notify_java_event(_name);
-    }
+    /**
+     * @brief Основной интерфейс взаимодействия Core -> GUI.
+     * В этом файле НЕ должно быть реализации (return nullptr), 
+     * только объявление структуры интерфейса (= 0).
+     */
+    struct icore_interface : public ibase
+    {
+        virtual ~icore_interface() {}
 
-    void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) override {
-        notify_java_event("voip_proto_msg");
-    }
+        // Передача данных в UI
+        virtual void receive_variable(const std::string& _name, coll_ptr _value) = 0;
+        virtual void receive_package(const std::string& _name, coll_ptr _value) = 0;
 
-    void send_statistic_event(const std::string& _event, const core::event_props_type& _props) override {
-        LOGI("Core Statistic Event: %s", _event.c_str());
-    }
+        // События VoIP и статистики
+        virtual void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) = 0;
+        virtual void send_statistic_event(const std::string& _event, const event_props_type& _props) = 0;
 
-    std::string get_device_id() override {
-        return "android_id";
-    }
+        // Системные запросы
+        virtual std::string get_device_id() = 0;
 
-    // Дополнительные методы из core_face.h::icore_interface
-    core::iconnector* get_core_connector() override { return nullptr; }
-    core::iconnector* get_gui_connector() override { return nullptr; }
-    core::icore_factory* get_factory() override { return nullptr; }
+        // Коннекторы (должны быть реализованы в jni_bridge.cpp, здесь только сигнатуры)
+        virtual iconnector* get_core_connector() = 0;
+        virtual iconnector* get_gui_connector() = 0;
+        virtual icore_factory* get_factory() = 0;
+    };
 
-private:
-    void notify_java_event(const std::string& _event_name) {
-        if (!g_jvm || !g_event_callback_obj) return;
+    // --- Вспомогательные структуры (icollection, iarray и т.д.) ---
+    struct iarray : ibase
+    {
+        virtual ivalue* get_at(int32_t index) const = 0;
+        virtual int32_t count() const = 0;
+        virtual bool empty() const = 0;
+    };
 
-        JNIEnv* env = nullptr;
-        bool attached = false;
-        jint res = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-        
-        if (res == JNI_EDETACHED) {
-            if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-                LOGE("Failed to attach thread to JVM");
-                return;
-            }
-            attached = true;
-        }
+    struct icollection : ibase
+    {
+        virtual bool is_value_exist(std::string_view name) const = 0;
 
-        jclass callbackClass = env->GetObjectClass(g_event_callback_obj);
-        jmethodID methodId = env->GetMethodID(callbackClass, "onCoreEvent", "(Ljava/lang/String;)V");
-        
-        if (methodId) {
-            jstring jName = env->NewStringUTF(_event_name.c_str());
-            env->CallVoidMethod(g_event_callback_obj, methodId, jName);
-            env->DeleteLocalRef(jName);
-        }
-        
-        env->DeleteLocalRef(callbackClass);
-        if (attached) {
-            g_jvm->DetachCurrentThread();
-        }
-    }
-};
+        virtual ivalue* create_value() = 0;
+        virtual icollection* create_collection() = 0;
+        virtual iarray* create_array() = 0;
+        virtual istream* create_stream() = 0;
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    g_jvm = vm;
-    return JNI_VERSION_1_6;
-}
+        virtual void set_value(std::string_view name, ivalue* value) = 0;
+        virtual ivalue* get_value(std::string_view name) const = 0;
+        virtual ivalue* first() = 0;
+        virtual ivalue* next() = 0;
+        virtual int32_t count() const = 0;
+        virtual bool empty() const = 0;
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring data_path, jstring cache_path, jobject callback) {
-    std::lock_guard<std::mutex> lock(g_core_mutex);
-    
-    if (g_core) {
-        LOGI("Core Engine is already initialized.");
-        return;
-    }
+        virtual const char* log() const = 0;
 
-    if (g_event_callback_obj) {
-        env->DeleteGlobalRef(g_event_callback_obj);
-    }
-    g_event_callback_obj = env->NewGlobalRef(callback);
-    
-    auto callback_impl = std::make_shared<AndroidGuiCallback>();
-    g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
+        virtual ~icollection() {}
+    };
 
-    const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
-    std::string path_str(data_path_cstr);
-    env->ReleaseStringUTFChars(data_path, data_path_cstr);
+    struct iconnector : ibase
+    {
+        virtual void link(iconnector*, const common::core_gui_settings&) = 0;
+        virtual void unlink() = 0;
+        virtual void receive(std::string_view, int64_t, core::icollection*) = 0;
 
-    common::core_gui_settings settings;
-    settings.os_version_ = "Android";
-    settings.locale_ = "ru_RU";
-    settings.recents_avatars_size_ = 96;  // установим значение по умолчанию
-    
-    g_core = std::make_unique<Ui::core_dispatcher>();
-    g_core->link_gui(g_gui_callback, settings);
-    
-    LOGI("Core Engine initialized. Path: %s", path_str.c_str());
-}
+        virtual ~iconnector() {}
+    };
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv *env, jobject thiz) {
-    std::lock_guard<std::mutex> lock(g_core_mutex);
-    
-    if (g_core) {
-        g_core->unlink_gui();
-        g_core.reset();
-        LOGI("Core Engine unlinked and reset.");
-    }
-    
-    if (g_event_callback_obj) {
-        env->DeleteGlobalRef(g_event_callback_obj);
-        g_event_callback_obj = nullptr;
-    }
-    
-    g_gui_callback.reset();
-    LOGI("Core Engine shutdown complete.");
+    struct icore_factory : ibase
+    {
+        virtual iconnector* create_core() = 0;
+        virtual ~icore_factory() {}
+    };
 }
