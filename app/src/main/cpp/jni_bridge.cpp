@@ -5,48 +5,30 @@
 #include <mutex>
 #include <thread>
 #include <vector>
-#include <codecvt>
-#include <locale>
 #include <android/log.h>
 
-// Подключаем только чистое ядро
 #include "core/stdafx.h"
-#include "core/core.h"
-#include "corelib/core_face.h"
+#include "gui/core_dispatcher.h"  // Ui::core_dispatcher
+#include "corelib/core_face.h"      // core::icore_interface
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 JavaVM* g_jvm = nullptr;
-static std::unique_ptr<core::core> g_core;
+static std::unique_ptr<Ui::core_dispatcher> g_core;
 static jobject g_event_callback_obj = nullptr;
 static std::shared_ptr<core::icore_interface> g_gui_callback;
 static std::mutex g_core_mutex;
 
 class AndroidGuiCallback : public core::icore_interface {
 public:
-    void receive_variable(const std::string& _name, core::coll_ptr _value) override {
-        notify_java_event(_name);
-    }
-
-    void receive_package(const std::string& _name, core::coll_ptr _value) override {
-        notify_java_event(_name);
-    }
-
-    void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) override {
-        notify_java_event("voip_proto_msg");
-    }
-
-    void send_statistic_event(const std::string& _event, const core::event_props_type& _props) override {
-        LOGI("Core Statistic Event: %s", _event.c_str());
-    }
-
-    std::string get_device_id() override {
-        return "android_id"; 
-    }
-
-private:
+    // Методы из core::icore_interface (core_face.h)
+    core::iconnector* get_core_connector() override { return nullptr; }
+    core::iconnector* get_gui_connector() override { return nullptr; }
+    core::icore_factory* get_factory() override { return nullptr; }
+    
+    // Наши методы для уведомлений
     void notify_java_event(const std::string& _event_name) {
         if (!g_jvm || !g_event_callback_obj) return;
 
@@ -97,8 +79,7 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     }
     g_event_callback_obj = env->NewGlobalRef(callback);
     
-    auto callback_impl = std::make_shared<AndroidGuiCallback>();
-    g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
+    g_gui_callback = std::make_shared<AndroidGuiCallback>();
 
     const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
     std::string path_str(data_path_cstr);
@@ -107,15 +88,9 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
     common::core_gui_settings settings;
     settings.os_version_ = "Android";
     settings.locale_ = "ru_RU";
+    settings.recents_avatars_size_ = 96;
     
-    try {
-        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-        settings.profile_path_ = converter.from_bytes(path_str);
-    } catch (...) {
-        settings.profile_path_ = std::wstring(path_str.begin(), path_str.end());
-    }
-    
-    g_core = std::make_unique<core::core>();
+    g_core = std::make_unique<Ui::core_dispatcher>();
     g_core->link_gui(g_gui_callback, settings);
     
     LOGI("Core Engine initialized. Path: %s", path_str.c_str());
