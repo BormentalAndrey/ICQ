@@ -40,34 +40,110 @@ jobs:
             ninja-build \
             build-essential \
             libgl1-mesa-dev \
+            libxcb-xinerama0-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render-util0-dev \
+            libxcb-shape0-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             python3-pip
 
       - name: Install Qt
         run: |
           pip install aqtinstall
+          echo "📦 Installing Qt desktop version..."
           aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
+          echo "📦 Installing Qt android version..."
           aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
+          echo "✅ Qt installation complete"
 
       - name: Setup Boost
         run: |
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
-          tar -xjf boost_1_83_0.tar.bz2
+          if [ ! -d "boost_1_83_0" ]; then
+            echo "📦 Downloading Boost 1.83.0..."
+            wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
+            tar -xjf boost_1_83_0.tar.bz2
+            rm boost_1_83_0.tar.bz2
+          fi
           echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
+          echo "✅ Boost ready"
 
       - name: Setup RapidJSON
         run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          if [ ! -d "rapidjson" ]; then
+            echo "📦 Cloning RapidJSON..."
+            git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          fi
           echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
+          echo "✅ RapidJSON ready"
+
+      - name: Setup libcurl for Android
+        run: |
+          CURL_H_PATH=$(find /usr/include -name "curl.h" | head -n 1)
+          if [ -n "$CURL_H_PATH" ]; then
+            CURL_DIR=$(dirname "$CURL_H_PATH")
+            mkdir -p ${{ github.workspace }}/curl_flat
+            cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
+            echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
+            echo "✅ Curl include configured"
+          else
+            echo "⚠️ curl.h not found, using system path"
+          fi
 
       - name: Setup environment
         run: |
           echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
           echo "Qt6_ANDROID_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake:${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
           chmod +x gradlew
+          echo "✅ Environment configured"
+
+      - name: Verify Qt installation
+        run: |
+          echo "=== Verifying Qt installation ==="
+          if [ -d "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" ]; then
+            echo "✅ Qt Android directory exists"
+            ls -la ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/ || echo "No cmake modules"
+          else
+            echo "❌ Qt Android directory not found"
+            exit 1
+          fi
+          
+          if [ -d "${{ github.workspace }}/Qt/6.5.0/gcc_64" ]; then
+            echo "✅ Qt Desktop directory exists"
+          else
+            echo "❌ Qt Desktop directory not found"
+            exit 1
+          fi
 
       - name: Build
         run: |
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
+          ./gradlew :app:assembleDebug \
+            -Pqt.android.path="${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" \
+            -Pqt.host.path="${{ github.workspace }}/Qt/6.5.0/gcc_64" \
+            -Pboost.root="${{ github.workspace }}/boost_1_83_0" \
+            -Prapidjson.root="${{ github.workspace }}/rapidjson/include" \
+            --stacktrace 2>&1 | tee build.log
+        env:
+          CURL_INCLUDE_PATH: ${{ github.workspace }}/curl_flat
+          Qt6_DIR: ${{ github.workspace }}/Qt/6.5.0/gcc_64
+          Qt6_ANDROID_DIR: ${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a
+          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
+          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
+
+      - name: Save build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
 
       - name: Upload APK
         if: success()
@@ -75,10 +151,16 @@ jobs:
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
 
-      - name: Upload build log
+      - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
+          name: build-logs
+          path: |
+            build.log
+            app/.cxx/**/*.log
+            app/build/reports/
+            .gradle/daemon/**/daemon-*.log
+          retention-days: 7
