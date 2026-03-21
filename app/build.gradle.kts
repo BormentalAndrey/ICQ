@@ -14,27 +14,48 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         externalNativeBuild {
             cmake {
-                val boostRoot = System.getenv("BOOST_ROOT") ?: ""
-                val rapidjsonRoot = System.getenv("RAPIDJSON_ROOT") ?: ""
+                // 1. Определяем корни библиотек (приоритет: Gradle Properties -> Env -> Default)
+                val boostRoot = project.findProperty("boost.root")?.toString() 
+                    ?: System.getenv("BOOST_ROOT") ?: ""
+                
+                val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() 
+                    ?: System.getenv("RAPIDJSON_ROOT") ?: ""
+
+                val qtAndroidPath = project.findProperty("qt.android.path")?.toString()
+                    ?: System.getenv("Qt6_ANDROID_DIR") ?: ""
+
+                val qtHostPath = project.findProperty("qt.host.path")?.toString()
+                    ?: System.getenv("Qt6_DIR") ?: ""
+
+                // 2. Настройка путей проекта
                 val root = "${project.projectDir}/.."
 
+                // 3. Передача аргументов напрямую в CMake (Production Style)
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DBOOST_ROOT=$boostRoot",
-                    "-DBoost_INCLUDE_DIR=$boostRoot"
+                    "-DBoost_INCLUDE_DIR=$boostRoot",
+                    "-DQT_ANDROID_PATH=$qtAndroidPath",
+                    "-DQT_HOST_PATH=$qtHostPath",
+                    "-DICQ_PROJECT_ROOT=$root"
                 )
 
+                // 4. Флаги компилятора
                 cppFlags += listOf(
                     "-std=c++17",
                     "-fexceptions",
                     "-frtti",
                     "-D__linux__",
+                    "-DANDROID",
                     "-DNDEBUG",
                     "-O3",
                     "-flto",
-                    // Пути поиска (Include Directories)
+                    "-Wall",
+                    // Передаем инклуды через флаги для совместимости с кодом
                     "-I$root",
                     "-I$root/core",
                     "-I$root/corelib",
@@ -43,9 +64,32 @@ android {
                     "-I$root/gui.shared",
                     "-I$boostRoot",
                     "-I$rapidjsonRoot"
-                ).filter { it.isNotBlank() }.joinToString(" ")
+                ).filter { it.isNotEmpty() }
 
                 abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // Оптимизация нативного кода для релиза
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DCMAKE_BUILD_TYPE=Release"
+                }
+            }
+        }
+        debug {
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DCMAKE_BUILD_TYPE=Debug"
+                }
             }
         }
     }
@@ -59,7 +103,11 @@ android {
 
     packaging {
         jniLibs {
+            // Важно для Qt и WebRTC: предотвращаем конфликты дубликатов STL
             pickFirsts.add("lib/**/libc++_shared.so")
+        }
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 
@@ -74,14 +122,23 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
 dependencies {
+    // Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("io.github.webrtc-sdk:android:137.7151.05")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
+    // VoIP / WebRTC
+    implementation("io.github.webrtc-sdk:android:137.7151.05")
+    
+    // Lifecycle
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 }
