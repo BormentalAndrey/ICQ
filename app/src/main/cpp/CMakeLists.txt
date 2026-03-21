@@ -6,22 +6,30 @@ project("icq_mobile_core")
 set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 
 # --- Поиск Qt для Android ---
-# Пытаемся найти Qt из окружения CI или локальной установки
-if(DEFINED ENV{Qt6_DIR})
-    set(CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH})
-    find_package(Qt6 CONFIG REQUIRED Core Network)
+# Жестко прописываем пути для GitHub Actions, так как Gradle (AGP) 
+# изолирует пользовательские переменные окружения.
+set(CI_QT_ANDROID "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
+set(CI_QT_HOST "/home/runner/work/ICQ/Qt/6.5.0/gcc_64")
+
+if(EXISTS "${CI_QT_ANDROID}" AND EXISTS "${CI_QT_HOST}")
+    # Для кросс-компиляции Qt6 под Android ОБЯЗАТЕЛЬНО нужен QT_HOST_PATH
+    set(QT_HOST_PATH "${CI_QT_HOST}")
+    set(Qt6_DIR "${CI_QT_ANDROID}/lib/cmake/Qt6")
+    set(CMAKE_PREFIX_PATH "${CI_QT_ANDROID}/lib/cmake")
+    message(STATUS "✅ Using GitHub Actions Qt paths. Host: ${QT_HOST_PATH}")
+elseif(DEFINED ENV{Qt6_ANDROID_DIR})
+    set(QT_HOST_PATH "$ENV{Qt6_DIR}")
+    set(Qt6_DIR "$ENV{Qt6_ANDROID_DIR}/lib/cmake/Qt6")
+    set(CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
+endif()
+
+find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
+if(Qt6_FOUND)
     set(QT_FOUND TRUE)
-    message(STATUS "✅ Qt6 found at: $ENV{Qt6_DIR}")
+    message(STATUS "✅ Qt6 found at: ${Qt6_DIR}")
 else()
-    # Проверяем стандартные пути для Qt
-    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
-    if(Qt6_FOUND)
-        set(QT_FOUND TRUE)
-        message(STATUS "✅ Qt6 found in system")
-    else()
-        message(STATUS "⚠️ Qt6 not found, using stub mode (limited functionality)")
-        set(QT_FOUND FALSE)
-    endif()
+    message(WARNING "⚠️ Qt6 not found! Fallback to stub mode (limited functionality)")
+    set(QT_FOUND FALSE)
 endif()
 
 # --- Глобальные дефайны ---
@@ -135,7 +143,6 @@ if(QT_FOUND)
 endif()
 
 # --- Опциональные оптимизации ---
-# Включаем LTO если не debug сборка
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(icq_core PRIVATE -flto)
     target_link_options(icq_core PRIVATE -flto)
@@ -158,21 +165,9 @@ message(STATUS "  RapidJSON: ${ICQ_ROOT}/rapidjson/include")
 message(STATUS "  Curl Include: $ENV{CURL_INCLUDE_PATH}")
 message(STATUS "========================================")
 
-# --- Проверка критических файлов ---
-if(NOT EXISTS "${ICQ_ROOT}/corelib/core_face.h")
-    message(WARNING "⚠️ core_face.h not found at expected location")
-endif()
-
-if(NOT EXISTS "${ICQ_ROOT}/gui/core_dispatcher.h")
-    message(WARNING "⚠️ core_dispatcher.h not found at expected location")
-endif()
-
 # --- Для Android добавляем флаги совместимости ---
 if(ANDROID)
-    # Устанавливаем минимальную версию API
     set_property(TARGET icq_core PROPERTY CXX_STANDARD 17)
-    
-    # Добавляем флаги для совместимости с NDK
     target_compile_options(icq_core PRIVATE 
         -D__ANDROID_API__=24
         -DANDROID_PLATFORM=24
