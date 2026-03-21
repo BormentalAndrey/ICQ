@@ -1,4 +1,3 @@
-// app/src/main/cpp/jni_bridge.cpp
 #include <jni.h>
 #include <string>
 #include <memory>
@@ -9,17 +8,18 @@
 #include <locale>
 #include <android/log.h>
 
-// Убираем префиксы папок, так как CMake уже включает директории core/ и gui.shared/
-#include "stdafx.h"
-#include "gui/core_dispatcher.h"  // Исправленный путь - файл в папке gui/
-#include "icore_interface.h"
+// Подключаем только чистое ядро! Никакого GUI или core_dispatcher
+#include "core/stdafx.h"
+#include "core/core.h"
+#include "core/icore_interface.h"
 
 #define LOG_TAG "IcqCoreJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 JavaVM* g_jvm = nullptr;
-static std::unique_ptr<core::core_dispatcher> g_core;
+// Прямая ссылка на движок, а не на диспетчер Qt
+static std::unique_ptr<core::core> g_core;
 static jobject g_event_callback_obj = nullptr;
 static std::shared_ptr<core::icore_interface> g_gui_callback;
 static std::mutex g_core_mutex;
@@ -115,7 +115,8 @@ Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jst
         settings.profile_path_ = std::wstring(path_str.begin(), path_str.end());
     }
     
-    g_core = std::make_unique<core::core_dispatcher>();
+    // Инициализация самого ядра вместо Qt-диспетчера
+    g_core = std::make_unique<core::core>();
     g_core->link_gui(g_gui_callback, settings);
     
     LOGI("Core Engine initialized. Path: %s", path_str.c_str());
