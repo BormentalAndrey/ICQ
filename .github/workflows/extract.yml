@@ -54,29 +54,60 @@ jobs:
             libxkbcommon-x11-dev \
             python3-pip
 
-      - name: Install Qt
-        run: |
-          pip install aqtinstall
-          echo "📦 Installing Qt desktop version..."
-          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
-          echo "📦 Installing Qt android version..."
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          echo "✅ Qt installation complete"
+      # ==================== ПРОДАКШН БЛОК Qt (с кэшем) ====================
+      - name: Install & Cache Qt 6.5.0 desktop (tools)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'gcc_64'
+          dir: '${{ github.workspace }}/Qt'
+          cache: 'true'
+          cache-key-prefix: 'qt-6.5-icq'
 
-      - name: Find Qt CMake path
-        id: find-qt
+      - name: Install & Cache Qt 6.5.0 Android arm64_v8a
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.0'
+          host: 'linux'
+          target: 'android'
+          arch: 'android_arm64_v8a'
+          dir: '${{ github.workspace }}/Qt'
+          cache: 'true'
+          cache-key-prefix: 'qt-6.5-icq'
+
+      - name: Verify Qt installation
         run: |
-          QT_CMAKE_DIR=$(find ${{ github.workspace }}/Qt -path "*/lib/cmake/Qt6" -type d 2>/dev/null | head -1)
-          if [ -n "$QT_CMAKE_DIR" ]; then
-            echo "✅ Found Qt CMake at: $QT_CMAKE_DIR"
-            echo "qt_cmake_dir=$QT_CMAKE_DIR" >> $GITHUB_OUTPUT
+          echo "=== Qt Desktop ==="
+          if [ -f "${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake/Qt6/Qt6Config.cmake" ]; then
+            echo "✅ Desktop Qt OK"
           else
-            echo "⚠️ Qt CMake not found, checking structure..."
-            find ${{ github.workspace }}/Qt -name "Qt6Config.cmake" 2>/dev/null || echo "No Qt6Config.cmake"
-            find ${{ github.workspace }}/Qt -type d 2>/dev/null | head -20
+            echo "❌ Desktop Qt missing"
             exit 1
           fi
+          
+          echo "=== Qt Android ==="
+          if [ -f "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6/Qt6Config.cmake" ]; then
+            echo "✅ Android Qt OK"
+          else
+            echo "❌ Android Qt missing"
+            exit 1
+          fi
+          
+          echo "Qt structure ready for CMake"
 
+      - name: Set Qt environment variables
+        run: |
+          echo "QT_ANDROID_PATH=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
+          echo "QT_HOST_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
+          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6" >> $GITHUB_ENV
+          echo "Qt6_ANDROID_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake:${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake" >> $GITHUB_ENV
+          chmod +x gradlew
+          echo "✅ Qt environment configured for production"
+
+      # ==================== ОСТАВШИЕСЯ ШАГИ ====================
       - name: Setup Boost
         run: |
           if [ ! -d "boost_1_83_0" ]; then
@@ -110,22 +141,11 @@ jobs:
             echo "⚠️ curl.h not found, using system path"
           fi
 
-      - name: Setup environment
-        run: |
-          QT_ANDROID_PATH=$(dirname $(dirname $(dirname "${{ steps.find-qt.outputs.qt_cmake_dir }}")))
-          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
-          echo "Qt6_ANDROID_DIR=$QT_ANDROID_PATH" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=${{ steps.find-qt.outputs.qt_cmake_dir }}" >> $GITHUB_ENV
-          chmod +x gradlew
-          echo "✅ Environment configured"
-          echo "   Qt6_DIR: ${{ github.workspace }}/Qt/6.5.0/gcc_64"
-          echo "   Qt6_ANDROID_DIR: $QT_ANDROID_PATH"
-
       - name: Build
         run: |
           ./gradlew :app:assembleDebug \
-            -Pqt.android.path="${{ env.Qt6_ANDROID_DIR }}" \
-            -Pqt.host.path="${{ github.workspace }}/Qt/6.5.0/gcc_64" \
+            -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
+            -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
             -Pboost.root="${{ github.workspace }}/boost_1_83_0" \
             -Prapidjson.root="${{ github.workspace }}/rapidjson/include" \
             --stacktrace 2>&1 | tee build.log
