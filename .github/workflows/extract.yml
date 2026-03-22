@@ -9,12 +9,15 @@ on:
 jobs:
   assemble:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Assemble Qt5 bundle from parts
         run: |
@@ -26,9 +29,19 @@ jobs:
           echo "Архив собран:"
           ls -lh qt5-bundle.tar.gz
 
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: qt5-bundle
-          path: qt5-bundle.tar.gz
-          retention-days: 30
+      - name: Commit and push archive
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          
+          # Добавляем архив
+          git add qt5-bundle.tar.gz
+          
+          # Удаляем части
+          git rm qt5-bundle.part.* 2>/dev/null || true
+          
+          # Коммитим
+          git commit -m "Assemble Qt5 bundle from parts" || echo "Нет изменений"
+          
+          # Пушим
+          git push
