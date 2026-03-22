@@ -4,8 +4,6 @@ name: Extract Qt5 Bundle
 on:
   push:
     branches: [ main, master, develop ]
-    paths:
-      - 'qt5-bundle.tar.gz'
   workflow_dispatch:
 
 jobs:
@@ -21,20 +19,43 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check if archive exists
+        run: |
+          echo "Проверка наличия архива..."
+          if [ -f "qt5-bundle.tar.gz" ]; then
+            echo "✅ Архив найден"
+            ls -lh qt5-bundle.tar.gz
+          else
+            echo "❌ Архив не найден!"
+            ls -la
+            exit 1
+          fi
+
       - name: Extract Qt5 bundle
         run: |
           echo "Распаковка Qt5 бандла..."
           
-          # Создаем директорию для Qt5
+          # Проверяем содержимое архива
+          echo "Содержимое архива:"
+          tar -tzf qt5-bundle.tar.gz | head -20
+          
+          # Создаем директорию и распаковываем
           mkdir -p qt5-bundle
+          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/ --strip-components=1
           
-          # Распаковываем архив
-          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/
-          
+          echo ""
           echo "✅ Распаковано:"
           ls -la qt5-bundle/
+          
+          echo ""
+          echo "📚 Библиотеки:"
+          ls -la qt5-bundle/lib/ | head -10
+          
+          echo ""
+          echo "📁 Заголовки:"
+          ls -la qt5-bundle/include/ | head -10
 
-      - name: Remove archive
+      - name: Remove archive and commit
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
@@ -45,8 +66,11 @@ jobs:
           # Добавляем распакованную папку
           git add qt5-bundle/
           
+          # Проверяем изменения
+          git status
+          
           # Коммитим
-          git commit -m "Extract Qt5 bundle and remove archive" || echo "Нет изменений"
+          git commit -m "Extract Qt5 bundle from archive" || echo "Нет изменений"
           
           # Пушим
           git push
