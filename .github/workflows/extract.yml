@@ -1,13 +1,15 @@
-# .github/workflows/assemble-qt-bundle.yml
-name: Assemble Qt5 Bundle
+# .github/workflows/extract-qt-bundle.yml
+name: Extract Qt5 Bundle
 
 on:
   push:
     branches: [ main, master, develop ]
+    paths:
+      - 'qt5-bundle.tar.gz'
   workflow_dispatch:
 
 jobs:
-  assemble:
+  extract:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,29 +21,32 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble Qt5 bundle from parts
+      - name: Extract Qt5 bundle
         run: |
-          echo "Сборка Qt5 бандла из частей..."
+          echo "Распаковка Qt5 бандла..."
           
-          # Собираем архив из частей
-          cat qt5-bundle.part.* > qt5-bundle.tar.gz
+          # Создаем директорию для Qt5
+          mkdir -p qt5-bundle
           
-          echo "Архив собран:"
-          ls -lh qt5-bundle.tar.gz
+          # Распаковываем архив
+          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/
+          
+          echo "✅ Распаковано:"
+          ls -la qt5-bundle/
 
-      - name: Commit and push archive
+      - name: Remove archive
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           
-          # Добавляем архив
-          git add qt5-bundle.tar.gz
+          # Удаляем архив
+          git rm qt5-bundle.tar.gz
           
-          # Удаляем части
-          git rm qt5-bundle.part.* 2>/dev/null || true
+          # Добавляем распакованную папку
+          git add qt5-bundle/
           
           # Коммитим
-          git commit -m "Assemble Qt5 bundle from parts" || echo "Нет изменений"
+          git commit -m "Extract Qt5 bundle and remove archive" || echo "Нет изменений"
           
           # Пушим
           git push
