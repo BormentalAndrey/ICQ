@@ -24,14 +24,14 @@ jobs:
           echo "СБОРКА Qt5 БАНДЛА ИЗ ЧАСТЕЙ"
           echo "========================================="
           
-          # Находим все части архива
+          # Находим все части
           echo ""
           echo "📁 Найденные части:"
           ls -la qt5-bundle.part.*
           
-          # Собираем архив из частей
+          # Собираем архив
           echo ""
-          echo "🔧 Собираем архив..."
+          echo "🔧 Собираем архив из частей..."
           cat qt5-bundle.part.* > qt5-bundle.tar.gz
           
           # Проверяем
@@ -50,79 +50,46 @@ jobs:
             exit 1
           fi
 
-      - name: Extract Qt5 bundle
-        run: |
-          echo ""
-          echo "📦 Распаковываем Qt5..."
-          mkdir -p qt5-bundle
-          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/
-          
-          echo "✅ Распаковано:"
-          ls -la qt5-bundle/ | head -10
-          
-          echo ""
-          echo "📊 Размер:"
-          du -sh qt5-bundle/
-
-      - name: Set up Qt environment
-        run: |
-          QT_DIR="${{ github.workspace }}/qt5-bundle"
-          echo "Qt5_DIR=${QT_DIR}/cmake/Qt5" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=${QT_DIR}/cmake" >> $GITHUB_ENV
-          echo "PATH=${QT_DIR}/bin:$PATH" >> $GITHUB_ENV
-          
-          echo "✅ Qt environment configured"
-          echo "   Qt5_DIR: ${QT_DIR}/cmake/Qt5"
-
-      - name: Verify Qt installation
-        run: |
-          echo ""
-          echo "🔍 Проверка Qt5:"
-          
-          # Проверяем qmake
-          if [ -f "qt5-bundle/bin/qmake" ]; then
-            chmod +x qt5-bundle/bin/qmake
-            qt5-bundle/bin/qmake --version
-            echo "   ✅ qmake работает"
-          else
-            echo "   ❌ qmake не найден"
-          fi
-          
-          # Проверяем библиотеки
-          echo ""
-          echo "📚 Qt библиотеки:"
-          ls -la qt5-bundle/lib/libQt5*.so | head -10
-          
-          # Проверяем заголовки
-          echo ""
-          echo "📁 Qt заголовки:"
-          ls -la qt5-bundle/include/
-
-      - name: Upload assembled bundle
+      - name: Upload assembled archive
         uses: actions/upload-artifact@v4
         with:
           name: qt5-bundle-assembled
           path: qt5-bundle.tar.gz
-          retention-days: 7
+          retention-days: 30
+
+      - name: Create Release (if tag exists)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: qt5-bundle.tar.gz
+          name: Qt5 Bundle ${{ github.ref_name }}
+          body: |
+            Qt5 5.15.18 Bundle for Android/Termux builds
+            
+            ## Содержимое:
+            - QtCore, QtGui, QtWidgets, QtNetwork
+            - qmake, moc, rcc, uic
+            - CMake configuration
+            
+            ## Использование:
+            ```yaml
+            - name: Download Qt5 bundle
+              run: |
+                wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/qt5-bundle.tar.gz
+                tar -xzf qt5-bundle.tar.gz
+                echo "Qt5_DIR=$(pwd)/qt5-bundle/cmake/Qt5" >> $GITHUB_ENV
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up parts (optional)
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           echo ""
           echo "🧹 Очистка частей архива..."
-          rm -f qt5-bundle.part.*
-          echo "✅ Части удалены"
-
-      - name: Commit cleaned repository
-        if: github.event_name == 'push'
-        run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "🧹 Clean up Qt5 bundle parts after assembly"
-            git push
-            echo "✅ Очистка закоммичена"
-          else
-            echo "ℹ️ Нет изменений для коммита"
-          fi
+          git rm qt5-bundle.part.* || true
+          git commit -m "🧹 Clean up Qt5 bundle parts after assembly" || true
+          git push || true
+          echo "✅ Части удалены из репозитория"
