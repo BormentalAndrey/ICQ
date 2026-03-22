@@ -28,7 +28,7 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          # ИСПРАВЛЕНО: Пакеты указаны в одну строку через пробел для корректной передачи в sdkmanager
+          # Пакеты через пробел в одну строку для корректной работы sdkmanager
           packages: 'ndk;26.1.10909125 cmake;3.22.1 platform-tools platforms;android-33'
           cmdline-tools-version: 'latest'
 
@@ -50,7 +50,7 @@ jobs:
             libxcb-shape0-dev \
             libxcb-sync-dev \
             libxcb-xfixes0-dev \
-            libxcb-xkb1-dev \
+            libxcb-xkb-dev \
             libxkbcommon-x11-dev \
             libxkbcommon-dev \
             python3-pip \
@@ -63,7 +63,6 @@ jobs:
 
       - name: Install Qt 6.5.0
         run: |
-          # Установка Qt в выделенную директорию
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a \
             --autodesktop \
             --outputdir ${{ github.workspace }}/Qt_Root
@@ -76,26 +75,17 @@ jobs:
           ANDROID_PATH="$BASE_PATH/android_arm64_v8a"
           HOST_PATH="$BASE_PATH/gcc_64"
           
-          # Экспорт переменных для GITHUB_ENV
           echo "QT_ANDROID_PATH=$ANDROID_PATH" >> $GITHUB_ENV
           echo "QT_HOST_PATH=$HOST_PATH" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
           
-          # Настройка CMAKE_PREFIX_PATH
           echo "CMAKE_PREFIX_PATH=$ANDROID_PATH/lib/cmake:$HOST_PATH/lib/cmake" >> $GITHUB_ENV
-          
-          # Добавление инструментов Qt в PATH
           echo "$HOST_PATH/bin" >> $GITHUB_PATH
 
       - name: Verify Environment
         run: |
-          echo "=== Проверка путей ==="
-          echo "Android SDK: $ANDROID_SDK_ROOT"
-          echo "Android NDK: $ANDROID_NDK_ROOT"
-          echo "Qt Android: $QT_ANDROID_PATH"
-          echo "Qt Host: $QT_HOST_PATH"
-          
+          echo "=== Verification ==="
           test -d "$QT_ANDROID_PATH" || (echo "❌ Qt Android missing" && exit 1)
           test -d "$ANDROID_NDK_ROOT" || (echo "❌ NDK missing at $ANDROID_NDK_ROOT" && exit 1)
           echo "✅ Environment Ready"
@@ -109,7 +99,6 @@ jobs:
       - name: Fix permissions and Build APK
         run: |
           chmod +x gradlew
-          # Передаем пути к Qt и NDK напрямую в gradle
           ./gradlew :app:assembleDebug \
             -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
             -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
