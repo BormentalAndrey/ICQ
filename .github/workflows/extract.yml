@@ -1,4 +1,4 @@
-name: Build ICQ Mobile
+name: Build ICQ Mobile with Qt
 
 on:
   push:
@@ -28,79 +28,103 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;25.1.8937393' # Рекомендуется NDK 25 для Qt 6.5.0
+          packages: 'ndk;26.1.10909125;cmake;3.22.1;platform-tools;platforms;android-33'
           cmdline-tools-version: 'latest'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libcurl4-openssl-dev cmake ninja-build build-essential \
-            libgl1-mesa-dev libxcb-icccm4-dev libxcb-image0-dev \
-            libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
-            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev \
-            libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            python3-pip
-          pip3 install aqtinstall
+            libcurl4-openssl-dev \
+            cmake \
+            ninja-build \
+            build-essential \
+            libgl1-mesa-dev \
+            libxcb-xinerama0-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-render-util0-dev \
+            libxcb-shape0-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb1-dev \
+            libxkbcommon-x11-dev \
+            libxkbcommon-dev \
+            python3-pip \
+            zstd
 
-      - name: Install Qt 6.5.0 (Android & Desktop Tools)
+      - name: Install aqtinstall
         run: |
-          # Устанавливаем в отдельные подпапки внутри рабочей директории
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
+          python3 -m pip install --upgrade pip
+          python3 -m pip install aqtinstall==3.3.*
+
+      - name: Install Qt 6.5.0
+        run: |
+          # Установка Qt для Android и необходимых инструментов хоста (gcc_64) через --autodesktop
+          # Мы используем одну папку "Qt_Root", чтобы избежать вложенности Qt/Qt
+          python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a \
+            --autodesktop \
+            --outputdir ${{ github.workspace }}/Qt_Root
+
+      - name: Set Environment Variables
+        run: |
+          # Динамически определяем пути на основе установки aqt
+          QT_VERSION="6.5.0"
+          BASE_PATH="${{ github.workspace }}/Qt_Root/$QT_VERSION"
           
-          # Прописываем пути в GITHUB_ENV для последующих шагов
-          echo "QT_ANDROID_PATH=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
-          echo "QT_HOST_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
-          echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6" >> $GITHUB_ENV
+          ANDROID_PATH="$BASE_PATH/android_arm64_v8a"
+          HOST_PATH="$BASE_PATH/gcc_64"
+          
+          # Записываем в GITHUB_ENV для последующих шагов
+          echo "QT_ANDROID_PATH=$ANDROID_PATH" >> $GITHUB_ENV
+          echo "QT_HOST_PATH=$HOST_PATH" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          
+          # Пути для CMake
+          echo "CMAKE_PREFIX_PATH=$ANDROID_PATH/lib/cmake:$HOST_PATH/lib/cmake" >> $GITHUB_ENV
+          
+          # Добавляем инструменты в PATH
+          echo "$HOST_PATH/bin" >> $GITHUB_PATH
 
-      - name: Verify & Debug Paths
+      - name: Verify Qt Installation
         run: |
-          echo "Checking Qt Android config..."
-          ls -l ${{ env.QT_ANDROID_PATH }}/lib/cmake/Qt6/Qt6Config.cmake || exit 1
-          echo "Checking Qt Host tools..."
-          ls -l ${{ env.QT_HOST_PATH }}/bin/moc || exit 1
-          echo "✅ All Qt components verified"
-
-      - name: Setup Boost 1.83.0
-        run: |
-          if [ ! -d "boost_1_83_0" ]; then
-            echo "📦 Downloading Boost..."
-            wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
-            tar -xjf boost_1_83_0.tar.bz2
+          echo "=== Проверка окружения ==="
+          if [ -d "${{ env.QT_ANDROID_PATH }}" ]; then
+            echo "✅ Android Qt найден: ${{ env.QT_ANDROID_PATH }}"
+          else
+            echo "❌ Android Qt отсутствует!"
+            exit 1
           fi
-          echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
-
-      - name: Setup RapidJSON
-        run: |
-          if [ ! -d "rapidjson" ]; then
-            git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          
+          if [ -f "${{ env.QT_HOST_PATH }}/bin/qmake" ]; then
+            echo "✅ Desktop Tools (Host) найдены"
+          else
+            echo "❌ Desktop Tools отсутствуют по пути ${{ env.QT_HOST_PATH }}"
+            ls -R ${{ github.workspace }}/Qt_Root
+            exit 1
           fi
-          echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
 
-      - name: Setup libcurl for Android
+      - name: Download External Dependencies
         run: |
-          # Копируем заголовки в плоскую структуру для CMake
-          mkdir -p ${{ github.workspace }}/curl_flat
-          cp -r /usr/include/curl/* ${{ github.workspace }}/curl_flat/ 2>/dev/null || true
-          echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
+          # Пример для Boost и RapidJSON (убедитесь, что версии актуальны)
+          wget https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.gz -O boost.tar.gz
+          tar -xzf boost.tar.gz
+          
+          git clone --depth 1 https://github.com/Tencent/rapidjson.git
 
-      - name: Build Project
+      - name: Fix permissions and Build APK
         run: |
           chmod +x gradlew
-          # Передаем все пути через Project Properties (-P) для Gradle
-          ./gradlew :app:assembleDebug \
-            -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
-            -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
-            -Pboost.root="${{ env.BOOST_ROOT }}" \
-            -Prapidjson.root="${{ env.RAPIDJSON_ROOT }}" \
-            --stacktrace 2>&1 | tee build.log
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
         env:
-          # Пробрасываем переменные окружения в процесс Gradle
-          QT_ANDROID_PATH: ${{ env.QT_ANDROID_PATH }}
+          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
+          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson
+          QT_PATH: ${{ env.QT_ANDROID_PATH }}
           QT_HOST_PATH: ${{ env.QT_HOST_PATH }}
-          BOOST_ROOT: ${{ env.BOOST_ROOT }}
-          RAPIDJSON_ROOT: ${{ env.RAPIDJSON_ROOT }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
 
       - name: Save build log
         if: always()
@@ -108,7 +132,6 @@ jobs:
         with:
           name: build-log
           path: build.log
-          retention-days: 7
 
       - name: Upload APK
         if: success()
@@ -116,14 +139,16 @@ jobs:
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
 
-      - name: Upload build logs on failure
+      - name: Upload Debug Symbols and Logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: native-build-logs
+          name: build-failure-data
           path: |
-            app/.cxx/**/*.log
             app/build/reports/
+            app/.cxx/
+            build.log
           retention-days: 7
           
