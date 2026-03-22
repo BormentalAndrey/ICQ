@@ -756,7 +756,7 @@ namespace Features
         return config::get().string(config::values::custom_miniapps).data();
     }
 
-    // TODO: remove when deprecated in server configs
+    // Deprecated function
     [[deprecated("Use Logic::GetAppsContainer()->isAppEnabled(Utils::MiniApps::getOrgstructureId())")]]
     bool isContactsEnabled()
     {

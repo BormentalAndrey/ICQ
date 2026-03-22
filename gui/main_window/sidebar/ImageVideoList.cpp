@@ -140,7 +140,7 @@ void ImageVideoList::processUpdates(const QVector<Data::DialogGalleryEntry>& _en
 
 void ImageVideoList::clear()
 {
-    // TODO: clean memory
+    
     blocks_.clear();
     visitor_->reset();
 }

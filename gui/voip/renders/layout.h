@@ -176,7 +176,7 @@ typedef enum lay_layout_flags {
     LAY_FILL = 0x1e0,
     // When in a wrapping container, put this element on a new line. Wrapping
     // layout code auto-inserts LAY_BREAK flags as needed. See GitHub issues for
-    // TODO related to this.
+    
     //
     // Drawing routines can read this via item pointers as needed after
     // performing layout calculations.
@@ -191,7 +191,7 @@ enum {
     //
     // (In reality we have more free bits than this, TODO)
     //
-    // TODO fix int/unsigned size mismatch (clang issues warning for this),
+    
     // should be all bits as 1 instead of INT_MAX
     LAY_USERMASK = 0x7fff0000,
 
@@ -768,7 +768,7 @@ void lay_get_margins_ltrb(
     *b = margins[3];
 }
 
-// TODO restrict item ptrs correctly
+
 static LAY_FORCE_INLINE
 lay_scalar lay_calc_overlayed_size(
         lay_context *ctx, lay_id item, int dim)

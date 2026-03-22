@@ -29,7 +29,7 @@ namespace
 
     Utils::StyledPixmap getDefaultPixmap(bool _active)
     {
-        // TODO: replace icons when designed
+        
         const auto px = Utils::StyledPixmap(qsl(":/favorites_icon"), tabIconSize(), iconNormalColorKey());
         const auto pxActive = Utils::StyledPixmap(qsl(":/favorites_icon"), tabIconSize(), iconActiveColorKey());
         return _active ? pxActive : px;

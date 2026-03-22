@@ -338,7 +338,7 @@ bool external_url_config::config_p::unserialize(const rapidjson::Value& _node)
                 vcs_rooms_.emplace_back(std::exchange(url, {}));
         }
 
-        // TODO: remove when deprecated
+        
         get_url(iter_templ->value, "di", host_url_type::di);
         get_url(iter_templ->value, "di-dark", host_url_type::di_dark);
         get_url(iter_templ->value, "tasks", host_url_type::tasks);
@@ -481,7 +481,7 @@ bool external_url_config::config_p::unserialize(const rapidjson::Value& _node)
     unserialize_feature(config::features::mail_self_auth, "mail-self-auth");
     unserialize_feature(config::features::cloud_self_auth, "cloud-self-auth");
 
-    // TODO: remove node parsing when deprecated
+    
     if (!service_apps_overridden)
     {
         const auto iter_apps = _node.FindMember("mini-apps");

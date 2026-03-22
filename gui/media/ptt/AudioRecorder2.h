@@ -97,7 +97,7 @@ namespace ptt
         static constexpr bool isLoopRecordingAvailable() noexcept { return false; }
 
     private:
-        const QString contact_; // TODO remove me
+        const QString contact_; 
         const std::chrono::seconds maxDuration_;
         const std::chrono::seconds minDuration_;
         std::chrono::milliseconds currentDurationImpl_ = std::chrono::milliseconds::zero();

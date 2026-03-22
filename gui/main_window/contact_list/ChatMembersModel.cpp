@@ -426,7 +426,7 @@ namespace Logic
 
     bool ChatMembersModel::contains(const QString& _aimId) const
     {
-        // TODO : use hash-table here
+        
         return std::any_of(results_.cbegin(), results_.cend(), [&_aimId](const auto& x) { return x->getAimId() == _aimId; });
     }
 

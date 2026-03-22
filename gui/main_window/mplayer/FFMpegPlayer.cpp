@@ -1981,7 +1981,7 @@ namespace Ui
                     }
 
                     data.eof = eof;
-                    // TODO : do smth with this error
+                    
                     if (ctx_.isStreamError(media))
                         continue;
 
@@ -2616,7 +2616,7 @@ namespace Ui
     {
         static auto is_init = false;
 
-        if (!is_init && ffmpeg::av_lockmgr_register(lockmgr)) // TODO
+        if (!is_init && ffmpeg::av_lockmgr_register(lockmgr)) 
         {
         }
 
@@ -2709,7 +2709,7 @@ namespace Ui
 
     void FFMpegPlayer::onDataReady(uint32_t _videoId)
     {
-        // TODO : use signal mapper
+        
         if (_videoId != mediaId_)
             return;
 
@@ -2891,7 +2891,7 @@ namespace Ui
                 renderer->redraw();
             }
 
-//            // TODO : use another way
+//            
 //            if (!continius_ || mediaId_ != 0)
 //                play(true);
 

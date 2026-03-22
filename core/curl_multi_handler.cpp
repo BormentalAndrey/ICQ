@@ -57,6 +57,7 @@ namespace
 
 #ifdef _WIN32
         WSADATA wsaData = { 0 };
+        #ifdef PLATFORM_WIN
         WSAStartup(MAKEWORD(2, 2), &wsaData);
 
         for (auto i = 0; i < WSA_MAXIMUM_WAIT_EVENTS; ++i)

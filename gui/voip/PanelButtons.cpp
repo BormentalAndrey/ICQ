@@ -450,7 +450,7 @@ namespace Ui
                 _painter.drawRoundedRect(_rect, Utils::minSide(_rect) / 2, Utils::minSide(_rect) / 2);
                 break;
             case PanelToolButton::Rounded:
-                _painter.drawRoundedRect(_rect, buttonRadius(), buttonRadius()); // TODO: make it by design!
+                _painter.drawRoundedRect(_rect, buttonRadius(), buttonRadius()); 
                 break;
             case PanelToolButton::Rectangle:
             default:

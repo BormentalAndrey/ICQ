@@ -73,7 +73,7 @@ int32_t core::wim::get_thread_subscribers::parse_results(const rapidjson::Value&
 
 int32_t core::wim::get_thread_subscribers::on_response_error_code()
 {
-    // TODO: handle
+    
     return robusto_packet::on_response_error_code();
 }
 

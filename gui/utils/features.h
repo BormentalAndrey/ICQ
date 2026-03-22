@@ -174,7 +174,7 @@ namespace Features
     std::string getServiceAppsDesktopJson();
     std::string getCustomAppsJson();
 
-    // TODO: remove when deprecated
+    
     bool isContactsEnabled();
     bool isTasksEnabled();
     bool isCalendarEnabled();

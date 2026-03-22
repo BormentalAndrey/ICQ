@@ -1028,7 +1028,7 @@ namespace Ui
 
         globalLayout_->setSizeConstraint(QLayout::SetMaximumSize);
 
-        // TODO : use SetView here
+        
         auto dialogParent = isVideoModes() ? parentWidget() : Utils::InterConnector::instance().getMainWindow();
 
         GeneralDialog::Options opt;

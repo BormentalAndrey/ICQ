@@ -35,8 +35,8 @@
 #define __FILELINEA__ __FILE__ "(" __LINEA__ ")"
 #define __FILELINEW__ __FILEW__ L"(" __LINEW__ L")"
 
-#define __TODOA__ __FILELINEA__ ": "
-#define __TODOW__ __FILELINEW__ L": "
+#define __TODOA__ " [TODO]: "
+#define __TODOW__ L" [TODO]: "
 
 #ifdef __APPLE__
 #   undef __TODOA__

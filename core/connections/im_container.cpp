@@ -2628,7 +2628,7 @@ void im_container::on_get_logs_path(int64_t _seq, coll_helper& _params)
 
 void im_container::on_change_app_config(const int64_t _seq, coll_helper& _params)
 {
-    // TODO: normal serialize / deserialize into a struct
+    
 
     coll_helper cl_coll(g_core->create_collection(), true);
 

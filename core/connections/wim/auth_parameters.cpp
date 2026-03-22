@@ -286,7 +286,7 @@ bool core::wim::auth_parameters::unserialize(const rapidjson::Value& _node)
     if (iter_aimsid != _node.MemberEnd() && iter_aimsid->value.IsString())
         aimsid_ = rapidjson_get_string(iter_aimsid->value);
 
-    // TODO : time_t
+    
     auto iter_expiredin = _node.FindMember("expiredin");
     if (iter_expiredin != _node.MemberEnd() && iter_expiredin->value.IsInt64())
     {

@@ -231,7 +231,7 @@ namespace config
                 std::pair(features::delete_account_enabled, get_bool(it->value, "delete_account_enabled")),
                 std::pair(features::delete_account_via_admin, get_bool(it->value, "delete_account_via_admin")),
                 std::pair(features::has_registry_about, get_bool(it->value, "has_registry_about")),
-                // TODO: remove when deprecated
+                std::pair(features::organization_structure_enabled, get_bool(it->value, "organization_structure_enabled")),
                 std::pair(features::organization_structure_enabled, get_bool(it->value, "organization_structure_enabled")),
                 std::pair(features::tasks_enabled, get_bool(it->value, "tasks_enabled")),
                 std::pair(features::calendar_enabled, get_bool(it->value, "calendar_enabled")),

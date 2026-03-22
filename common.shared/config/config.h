@@ -118,7 +118,7 @@ namespace config
         delete_account_enabled,
         delete_account_via_admin,
         has_registry_about,
-        // TODO: remove when deprecated
+        // organization_structure_enabled
         organization_structure_enabled,
         tasks_enabled,
         calendar_enabled,

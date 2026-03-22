@@ -321,7 +321,7 @@ public:
     virtual VideoRenderCallback* AddIncomingRenderStream(unsigned streamId, VideoRenderFeedback *callback, const std::string& name) = 0;
     virtual void DeleteIncomingRenderStream(unsigned streamId) = 0;
 
-    // TODO(yudin): remove all getters
+    
     virtual int32_t GetOutputWindowResolution(unsigned& windowWidth, unsigned& windowHeight) const = 0;
 
     virtual void SetPostRenderEffectParams(const std::string &params_str) = 0;

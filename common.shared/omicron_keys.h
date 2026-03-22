@@ -207,7 +207,7 @@ namespace omicron
         constexpr auto oauth_scope = "oauth_scope";
         constexpr auto client_id = "client_id";
 
-        // TODO: remove when deprecated
+        
         constexpr auto organization_structure_enabled = "organization_structure_enabled";
         constexpr auto tasks_enabled = "tasks_enabled";
         constexpr auto calendar_enabled = "calendar_enabled";

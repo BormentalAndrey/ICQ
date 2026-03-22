@@ -239,7 +239,7 @@ void statistics::serialize_mytracker(tools::binary_stream& _bs) const
             tools::tlvpack value_tlv;
             value_tlv.reserve(4);
 
-            // TODO : push id, time, ..
+            
             value_tlv.push_child(tools::tlv(statistics_info_types::event_name, stat_event->get_name()));
             value_tlv.push_child(tools::tlv(statistics_info_types::event_time,
                                  (int64_t)std::chrono::system_clock::to_time_t(stat_event->get_time())));
@@ -649,7 +649,7 @@ std::string statistics::stats_event::to_log_string(time_t _start_time) const
     const auto event_name = stat_event_to_string(name_);
     if (!event_name.empty())
     {
-        // TODO : use actual params here
+        
         auto br = 0;
         result << "{\"ce\":" << event_id_
             << ",\"bp\":\"" << event_name

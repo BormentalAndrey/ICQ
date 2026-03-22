@@ -478,7 +478,7 @@ namespace core
 
             time_t now = time(0);
             std::stringstream log_stream;
-            // TODO (*) : use real info about app
+            
 
             im_assert(product_bundle_ != "");
 

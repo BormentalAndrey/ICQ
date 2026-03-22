@@ -1422,7 +1422,7 @@ namespace Ui
         }
 
         if (_params.forceUpdateItems)
-            updateItemsProps(); // TODO optimize me: fix jitter in chat: IMDESKTOP-9432. Now it's overhead.
+            updateItemsProps(); 
 
         return addedAfterLastReadHeight;
     }

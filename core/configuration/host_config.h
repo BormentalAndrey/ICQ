@@ -33,7 +33,7 @@ namespace config
             token_url,
             redirect_uri,
 
-            // TODO: remove when deprecated
+            
             di,
             di_dark,
             tasks,

@@ -1929,8 +1929,8 @@ void im::get_fs_stickers_by_ids(const int64_t _seq, std::vector<std::pair<int32_
 
                 try
                 {
-                    const auto pack_id = std::stoi(std::string(ids.substr(0, delim_pos))); // TODO use std::from_chars
-                    const auto sticker_id = std::stoi(std::string(ids.substr(delim_pos + 1))); // TODO use std::from_chars
+                    const auto pack_id = std::stoi(std::string(ids.substr(0, delim_pos))); 
+                    const auto sticker_id = std::stoi(std::string(ids.substr(delim_pos + 1))); 
                     const auto fs_id = rapidjson_get_string_view(sticker_it->value);
 
                     coll_helper coll_message(coll->create_collection(), true);

@@ -79,7 +79,7 @@ namespace Logic
         else
         {
             apps_ = getServiceApps();
-            // TODO: remove when deprecated
+            
             if (apps_.empty())
                 apps_ = createDefaultApps();
             for (const auto& id : appsOrder_)

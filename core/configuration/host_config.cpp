@@ -286,7 +286,7 @@ void config::hosts::send_config_to_gui()
         }
         coll.set_value_as_array("vcs_urls", arr.get());
 
-        // TODO: remove when deprecated
+        
         coll.set_value_as_string("di", get_value(host_url_type::di));
         coll.set_value_as_string("di_dark", get_value(host_url_type::di_dark));
         coll.set_value_as_string("tasks", get_value(host_url_type::tasks));

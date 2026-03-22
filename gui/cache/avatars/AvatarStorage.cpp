@@ -360,7 +360,7 @@ namespace Logic
         }
     }
 
-    // TODO : use two-step hash here
+    
     void AvatarStorage::CleanupSecondaryCaches(QStringView _aimId, bool _isRoundedAvatarsClean)
     {
         const auto cleanupSecondaryCache = [](CacheMap &cache, QStringView aimid)

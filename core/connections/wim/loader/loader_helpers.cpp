@@ -238,8 +238,8 @@ std::string sign_loader_uri(std::string_view _host, const wim_packet_params& _pa
     str_2_str_map p;
 
     p["aimsid"] = wim_packet::escape_symbols(_params.aimsid_);
-    p["k"] = _params.dev_id_; // TODO maybe drop
-    p["client"] = "icq"; // TODO maybe drop
+    p["k"] = _params.dev_id_; 
+    p["client"] = "icq"; 
 
     p.merge(std::move(_extra));
 

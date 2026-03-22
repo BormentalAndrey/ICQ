@@ -35,7 +35,7 @@ namespace Utils
         bool isAppUseMainAimsid(const QString& _miniAppId);
 
         QUrl composeAppUrl(const QString& _id, const QString& _url, bool _dark);
-        // TODO: remove when deprecated in server configs
+        
         QUrl composeDefaultAppUrl(const QString& _id, bool _dark);
         QString getDefaultName(const QString& _id);
 

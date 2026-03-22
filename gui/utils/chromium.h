@@ -260,7 +260,7 @@ namespace chromium
         // received a 302 (temporary redirect) response.  The response body might
         // include a description of why the request failed.
         //
-        // TODO(https://crbug.com/928551): This is deprecated and should not be used by
+        
         // new code.
         NET_ERROR(HTTPS_PROXY_TUNNEL_RESPONSE_REDIRECT, -140)
 
@@ -968,7 +968,7 @@ namespace chromium
 
         // The entry was not found in cache or other local sources, for lookups where
         // only local sources were queried.
-        // TODO(ericorth): Consider renaming to DNS_LOCAL_MISS or something like that as
+        
         // the cache is not necessarily queried either.
         NET_ERROR(DNS_CACHE_MISS, -804)
 

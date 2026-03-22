@@ -1,29 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
-
 #pragma once
 
-#include <stddef.h>
+#ifdef PLATFORM_WIN
 #include <winsock2.h>
+#else
+#include <sys/socket.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
 
-namespace core 
-{
-    namespace internal 
-    {
-
-        // Assert that the (manual-reset) event object is not signaled.
-        void assert_event_not_signaled(WSAEVENT _hEvent);
-
-        // If the (manual-reset) event object is signaled, resets it and returns true.
-        // Otherwise, does nothing and returns false.  Called after a Winsock function
-        // succeeds synchronously
-        //
-        // Our testing shows that except in rare cases (when running inside QEMU),
-        // the event object is already signaled at this point, so we call this method
-        // to avoid a context switch in common cases.  This is just a performance
-        // optimization.  The code still works if this function simply returns false.
-        bool reset_event_if_signaled(WSAEVENT _hEvent);
-
-        void ensure_winsock_init();
-
-    } // namespace internal
-}  // namespace core
+bool init_network();
+void set_socket_blocking(int fd, bool blocking);
+void set_socket_timeouts(int fd, int timeout_ms);

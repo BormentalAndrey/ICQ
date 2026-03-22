@@ -123,7 +123,7 @@ std::string core::tools::system::to_lower(std::string_view str)
 
 std::string core::tools::system::get_os_version_string()
 {
-    // TODO : use actual value here
+    
     return "Linux";
 }
 

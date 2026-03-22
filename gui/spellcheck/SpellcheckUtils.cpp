@@ -10,7 +10,7 @@ namespace utils
     {
         bool isAcuteAccentChar(QChar c) noexcept
         {
-            static const QChar list[] = { // TODO use constexpr after qt update
+            static const QChar list[] = { 
                 QChar(769),	QChar(833), QChar(714),	QChar(779),	QChar(733), QChar(758),	QChar(791),	QChar(719)
             };
 

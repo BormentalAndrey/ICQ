@@ -193,7 +193,7 @@ namespace Emoji
             renderer.render(&painter);
             return image;
         }
-        // TODO provide fallback
+        
         return image;
     }
 

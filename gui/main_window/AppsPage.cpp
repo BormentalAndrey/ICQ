@@ -639,7 +639,7 @@ void Ui::AppsNavigationBar::selectTab(AppsBar* _bar, int _index, bool _emitClick
         }
         else
         {
-            // TODO: Temporary, for the correct logic of work
+            
             _bar->itemAt(_index)->setHovered(false);
         }
     }

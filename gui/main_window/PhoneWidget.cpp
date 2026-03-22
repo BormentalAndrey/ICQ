@@ -279,7 +279,7 @@ namespace Ui
         countryCode_->setText(Utils::GetTranslator()->getCurrentPhoneCode());
         countryCode_->setFont(Fonts::appFontScaled(18));
         countryCode_->setFixedWidth(Utils::scale_value(COUNTRY_CODE_WIDTH));
-        // TODO: fix lineEdits
+        
         Utils::ApplyStyle(countryCode_, Styling::getParameters().getLineEditCommonQss());
         countryCode_->setAttribute(Qt::WA_MacShowFocusRect, false);
         countryCode_->setAlignment(Qt::AlignCenter);
@@ -329,7 +329,7 @@ namespace Ui
         connect(countryCode_, &Ui::LineEditEx::clicked, this, &PhoneWidget::codeFocused);
 
         phoneNumber_ = new LineEditEx(this);
-        // TODO: fix lineEdits
+        
         phoneNumber_->setPlaceholderText(QT_TRANSLATE_NOOP("phone_widget", "phone number"));
         phoneNumber_->setFont(Fonts::appFontScaled(18));
         phoneNumber_->setFixedWidth(Utils::scale_value(PHONE_EDIT_WIDTH));
