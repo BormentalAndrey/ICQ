@@ -1,35 +1,34 @@
-name: Download Dependencies Only
+name: Sync Dependencies to Repository
 
 on:
-  push:
-    branches: [ main, master, develop ]
-  workflow_dispatch:
+  workflow_dispatch: # Запуск вручную кнопкой в Actions
 
 jobs:
-  download-deps:
+  sync-deps:
     runs-on: ubuntu-latest
+    # Даем права на запись в репозиторий
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Полная история для корректного push
 
       - name: Install aqtinstall
         run: pip3 install aqtinstall
 
       - name: Download Qt 6.5.0
         run: |
-          mkdir -p ${{ github.workspace }}/Qt
-          
-          # Установка Android версии (библиотеки)
+          mkdir -p Qt
+          # Android компоненты
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          
-          # Установка Desktop версии (инструменты MOC, RCC)
-          # В Qt 6.5 инструменты хоста часто идут в комплекте с десктопной версией
+          # Desktop компоненты (инструменты хоста)
           python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
 
       - name: Download Boost 1.83.0
         run: |
-          # Используем более надежное зеркало
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz
           tar -xzf boost_1_83_0.tar.gz
           rm boost_1_83_0.tar.gz
@@ -38,26 +37,26 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Tencent/rapidjson.git
 
-      - name: Verify and Fix Paths
+      - name: Commit and Push Changes
         run: |
-          echo "--- Проверка структуры Qt ---"
-          find ${{ github.workspace }}/Qt -name "moc"
+          # Настройка бота
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Пытаемся найти, где на самом деле лежит moc и выводим это
-          MOC_PATH=$(find ${{ github.workspace }}/Qt -name "moc" -type f | head -n 1)
-          if [ -z "$MOC_PATH" ]; then
-            echo "❌ Ошибка: moc не найден!"
-            exit 1
+          # Удаляем папки из .gitignore, если они там были (чтобы git add сработал)
+          sed -i '/Qt\//d' .gitignore || true
+          sed -i '/boost_1_83_0\//d' .gitignore || true
+          sed -i '/rapidjson\//d' .gitignore || true
+          
+          # Добавляем все скачанные файлы
+          git add Qt/
+          git add boost_1_83_0/
+          git add rapidjson/
+          
+          # Фиксируем изменения, если они есть
+          if git diff --staged --quiet; then
+            echo "Нет изменений для коммита"
           else
-            echo "✅ moc найден по адресу: $MOC_PATH"
+            git commit -m "chore: add dependencies (Qt 6.5, Boost, RapidJSON)"
+            git push origin main
           fi
-
-      - name: Upload Dependencies
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-dependencies
-          path: |
-            ${{ github.workspace }}/Qt
-            ${{ github.workspace }}/boost_1_83_0
-            ${{ github.workspace }}/rapidjson
-          retention-days: 1
