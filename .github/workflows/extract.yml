@@ -28,19 +28,18 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;26.1.10909125'
+          # NDK 26.1.10909125 стабильна для Qt 6.5.0
+          packages: 'ndk;26.1.10909125 cmake;3.22.1'
           cmdline-tools-version: 'latest'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libcurl4-openssl-dev \
             cmake \
             ninja-build \
             build-essential \
             libgl1-mesa-dev \
-            libxcb-xinerama0-dev \
             libxcb-icccm4-dev \
             libxcb-image0-dev \
             libxcb-keysyms1-dev \
@@ -51,250 +50,90 @@ jobs:
             libxcb-xfixes0-dev \
             libxcb-xkb-dev \
             libxkbcommon-dev \
-            libxkbcommon-x11-dev
+            libxkbcommon-x11-dev \
+            python3-pip
 
       - name: Cache Qt
         id: cache-qt
         uses: actions/cache@v4
         with:
-          path: |
-            /home/runner/work/ICQ/Qt
-            ~/.aqt
-          key: ${{ runner.os }}-qt-6.5.0-android-full-${{ hashFiles('.qt-version') }}
-          restore-keys: |
-            ${{ runner.os }}-qt-6.5.0-android-full-
-            ${{ runner.os }}-qt-6.5.0-
+          path: /home/runner/work/ICQ/Qt
+          key: ${{ runner.os }}-qt-6.5.0-android-v2
 
-      - name: Install Qt
+      - name: Install Qt (aqt)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
-          pip install aqtinstall
-          echo "📦 Installing Qt desktop version..."
-          aqt install-qt linux desktop 6.5.0 gcc_64 \
-            --outputdir /home/runner/work/ICQ/Qt \
-            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
-    
-          echo "📦 Installing Qt android version..."
-          aqt install-qt linux android 6.5.0 android_arm64_v8a \
-            --outputdir /home/runner/work/ICQ/Qt \
-            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
-    
-          echo "✅ Qt installation complete"
+          pip3 install aqtinstall
+          # Установка Desktop версии для инструментов сборки (moc, rcc)
+          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /home/runner/work/ICQ/Qt
+          # Установка Android версии
+          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /home/runner/work/ICQ/Qt
 
       - name: Set Qt environment
         run: |
-          echo "Qt6_DIR=/home/runner/work/ICQ/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
-          echo "Qt6_ANDROID_DIR=/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=/home/runner/work/ICQ/Qt/6.5.0/gcc_64/lib/cmake:/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
-          echo "PATH=/home/runner/work/ICQ/Qt/Tools/QtCreator/bin:$PATH" >> $GITHUB_ENV
-          
-          echo "✅ Qt environment configured"
-          echo "Qt6_DIR: $Qt6_DIR"
-          echo "CMAKE_PREFIX_PATH: $CMAKE_PREFIX_PATH"
+          QT_ROOT="/home/runner/work/ICQ/Qt/6.5.0"
+          echo "QT_ANDROID_PATH=$QT_ROOT/android_arm64_v8a" >> $GITHUB_ENV
+          echo "QT_HOST_PATH=$QT_ROOT/gcc_64" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "PATH=$QT_ROOT/gcc_64/bin:$PATH" >> $GITHUB_PATH
 
-      - name: Fix Environment and Case Sensitivity
+      - name: Download Boost (Stable Mirror)
         run: |
+          # Используем официальный архивный сервер Boost
+          URL="https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2"
+          curl -L $URL -o boost.tar.bz2
+          tar -xjf boost.tar.bz2
+          echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
+
+      - name: Setup RapidJSON
+        run: |
+          git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
+
+      - name: Fix Source Header Conflicts (Case Sensitivity & Path)
+        run: |
+          # Исправление путей для VoIP и прокси, которые часто ломаются в CI
           mkdir -p core/voip
-          if [ -d "core/Voip" ]; then
-            if [ ! -f "core/voip/voip3.h" ]; then
-              echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
-            fi
-          fi
+          [ -d "core/Voip" ] && echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
           
-          mkdir -p common.shared/config
-          cat > common.shared/config/config_data.h << 'EOF'
-          #pragma once
-          #include <string>
-          namespace config {
-              std::string config_json();
-          }
-          EOF
+          # Очистка конфликтующих интерфейсов
+          rm -f core/icore_interface.h 2>/dev/null || true
           
-          cat > common.shared/loader_errors.h << 'EOF'
-          #pragma once
-          enum class loader_errors {
-              success = 0,
-              network_error,
-              load_failure,
-              parse_failure,
-              invalid_json,
-              come_back_later,
-              http_client_error,
-              file_error,
-              cancelled
-          };
-          EOF
-          
-          echo "✅ Environment fixed"
+          # Нормализация заголовочных файлов (исправление регистра для Linux)
+          find . -type f -name "*.h" -exec sed -i 's/#include "StdAfx.h"/#include "stdafx.h"/g' {} +
 
-      - name: Fix includes in proxy_settings.h
-        run: |
-          if [ -f "core/proxy_settings.h" ]; then
-            if ! grep -q "tools/binary_stream.h" "core/proxy_settings.h"; then
-              sed -i '1i#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/proxy_settings.h
-              echo "✅ Added includes to proxy_settings.h"
-            else
-              echo "✅ Includes already present in proxy_settings.h"
-            fi
-          else
-            echo "⚠️ proxy_settings.h not found"
-          fi
-
-      - name: Fix includes in im_stats.h
-        run: |
-          if [ -f "core/stats/im/im_stats.h" ]; then
-            if ! grep -q "rapidjson/document.h" "core/stats/im/im_stats.h"; then
-              sed -i '1i#include <rapidjson/document.h>\n#include <rapidjson/writer.h>\n#include <rapidjson/stringbuffer.h>\n#include "tools/binary_stream.h"\n#include "tools/tlv.h"' core/stats/im/im_stats.h
-              echo "✅ Added includes to im_stats.h"
-            else
-              echo "✅ Includes already present in im_stats.h"
-            fi
-          else
-            echo "⚠️ im_stats.h not found"
-          fi
-
-      - name: Fix voip includes
-        run: |
-          if [ -f "core/Voip/libvoip/src/CallStateInternal.h" ]; then
-            if ! grep -q "#include <voip/voip3.h>" "core/Voip/libvoip/src/CallStateInternal.h"; then
-              sed -i '1i#include <voip/voip3.h>' core/Voip/libvoip/src/CallStateInternal.h
-              echo "✅ Added voip3.h to CallStateInternal.h"
-            fi
-          fi
-          
-          if [ -f "core/Voip/libvoip/include/sigconv/SignallingConverter.h" ]; then
-            if ! grep -q "#include <voip/voip3.h>" "core/Voip/libvoip/include/sigconv/SignallingConverter.h"; then
-              sed -i '1i#include <voip/voip3.h>' core/Voip/libvoip/include/sigconv/SignallingConverter.h
-              echo "✅ Added voip3.h to SignallingConverter.h"
-            fi
-          fi
-
-      - name: Setup libcurl for Android
-        run: |
-          CURL_H_PATH=$(find /usr/include -name "curl.h" | head -n 1)
-          CURL_DIR=$(dirname "$CURL_H_PATH")
-          
-          echo "Found curl.h at: $CURL_H_PATH"
-          echo "Curl directory: $CURL_DIR"
-          
-          mkdir -p ${{ github.workspace }}/curl_flat
-          cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
-          
-          echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
-          echo "✅ Created flat curl include structure at: ${{ github.workspace }}/curl_flat"
-
-      - name: Cache Boost
-        id: cache-boost
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/boost_1_83_0
-          key: ${{ runner.os }}-boost-1.83.0-${{ hashFiles('boost-version.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-boost-1.83.0-
-
-      - name: Download Boost 1.83.0
-        if: steps.cache-boost.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
-          tar -xjf boost_1_83_0.tar.bz2
-          echo "1.83.0" > boost-version.txt
-
-      - name: Cache RapidJSON
-        id: cache-rapidjson
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/rapidjson
-          key: ${{ runner.os }}-rapidjson
-          restore-keys: |
-            ${{ runner.os }}-rapidjson
-
-      - name: Download RapidJSON
-        if: steps.cache-rapidjson.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
-
-      - name: Fix CMakeLists.txt
+      - name: Configure CMakeLists.txt
         run: |
           cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
-          # app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.22.1)
-          project("icq_mobile_core")
+          project(icq_mobile_core)
 
-          # --- Настройка путей ---
           set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
-
-          # === ЖЕСТКАЯ ПРИВЯЗКА ПУТЕЙ К QT ДЛЯ GITHUB ACTIONS ===
-          # Переопределяем параметры от Gradle, чтобы обойти изоляцию среды
-          set(QT_ANDROID_PATH "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
-          set(QT_HOST_PATH "/home/runner/work/ICQ/Qt/6.5.0/gcc_64")
           
-          set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
+          # Принудительная настройка путей Qt для Android
+          set(QT_ANDROID_PATH "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
           set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
+          
+          find_package(Qt6 REQUIRED COMPONENTS Core Network)
 
-          find_package(Qt6 CONFIG REQUIRED Core Network)
-          message(STATUS "✅ Qt6 found: ${Qt6_VERSION}")
+          add_compile_definitions(ANDROID LINUX __linux__ QT_CORE_LIB QT_NETWORK_LIB)
 
-          # --- Глобальные дефайны ---
-          add_compile_definitions(
-              LINUX
-              __linux__
-              ANDROID
-              STRIP_CRASH_HANDLER
-              SUPPORT_EXTERNAL_CONFIG
-              HAVE_SECURE_GETENV=1
-              _FORTIFY_SOURCE=2
-              QT_CORE_LIB
-              QT_NETWORK_LIB
-          )
-
-          # --- Поиск исходников ---
-          file(GLOB_RECURSE CORE_SOURCES
+          file(GLOB_RECURSE SOURCES 
               "${ICQ_ROOT}/core/*.cpp"
               "${ICQ_ROOT}/common.shared/*.cpp"
-              "${ICQ_ROOT}/corelib/*.cpp"
-              "${ICQ_ROOT}/gui.shared/*.cpp"
           )
+          # Исключаем специфичные для десктопа файлы
+          list(FILTER SOURCES EXCLUDE REGEX ".*win32.*|.*macos.*|.*_mac\\.cpp")
 
-          # Исключаем лишнее
-          list(FILTER CORE_SOURCES EXCLUDE REGEX 
-              ".*win32.*|.*macos.*|.*apple.*|.*linux_desktop.*|.*test.*|.*stdafx\\.cpp|.*unittests.*|.*_mac\\.cpp|.*_ios\\.cpp"
-          )
+          add_library(icq_core SHARED jni_bridge.cpp ${SOURCES})
 
-          add_library(icq_core SHARED
-              jni_bridge.cpp
-              ${CORE_SOURCES}
-          )
-
-          # --- Настройка путей инклудов ---
           target_include_directories(icq_core PRIVATE
               ${CMAKE_CURRENT_SOURCE_DIR}
-              ${ICQ_ROOT}                                
-              ${ICQ_ROOT}/core                           
-              ${ICQ_ROOT}/core/Voip/libvoip/include
-              ${ICQ_ROOT}/core/Voip/libvoip/src
-              ${ICQ_ROOT}/corelib
+              ${ICQ_ROOT}
+              ${ICQ_ROOT}/core
               ${ICQ_ROOT}/common.shared
-              ${ICQ_ROOT}/gui.shared
-              ${ICQ_ROOT}/boost_1_83_0
-              ${ICQ_ROOT}/rapidjson/include
-              $ENV{CURL_INCLUDE_PATH}
-              ${Qt6Core_INCLUDE_DIRS}
-              ${Qt6Network_INCLUDE_DIRS}
-          )
-
-          # --- Свойства таргета ---
-          set_target_properties(icq_core PROPERTIES
-              CXX_STANDARD 17
-              CXX_STANDARD_REQUIRED ON
-              POSITION_INDEPENDENT_CODE ON
-              CXX_VISIBILITY_PRESET hidden
-              VISIBILITY_INLINES_HIDDEN ON
-          )
-
-          target_compile_options(icq_core PRIVATE 
-              -fexceptions -frtti -fPIC -Wall 
-              -Wno-unused-parameter -Wno-unused-variable
-              -Wno-mismatched-tags
-              -fdata-sections -ffunction-sections
+              $ENV{BOOST_ROOT}
+              $ENV{RAPIDJSON_ROOT}
           )
 
           find_library(log-lib log)
@@ -307,369 +146,42 @@ jobs:
               ${log-lib}
               ${z-lib}
               ${android-lib}
-              -Wl,--gc-sections
           )
-
-          # Для Android добавляем специфичные флаги и финализацию Qt
+          
+          # Важно для упаковки Qt библиотек в APK
           if(ANDROID)
-              target_link_options(icq_core PRIVATE -u JNI_OnLoad)
               qt_finalize_target(icq_core)
           endif()
-
-          message(STATUS "========================================")
-          message(STATUS "ICQ Mobile Core Build Configuration")
-          message(STATUS "========================================")
-          message(STATUS "  ICQ_ROOT: ${ICQ_ROOT}")
-          message(STATUS "  Qt Version: ${Qt6_VERSION}")
-          message(STATUS "  CURL_INC: $ENV{CURL_INCLUDE_PATH}")
-          message(STATUS "========================================")
           EOF
-          
-          echo "✅ Updated CMakeLists.txt"
 
-      - name: Fix jni_bridge.cpp
+      - name: Create JNI Bridge
         run: |
           cat > app/src/main/cpp/jni_bridge.cpp << 'EOF'
           #include <jni.h>
-          #include <string>
-          #include <memory>
-          #include <mutex>
-          #include <thread>
-          #include <vector>
           #include <android/log.h>
-
           #include "core/stdafx.h"
-          #include "gui/core_dispatcher.h"
-
-          #define LOG_TAG "IcqCoreJNI"
-          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-          #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-
-          JavaVM* g_jvm = nullptr;
-          static std::unique_ptr<Ui::core_dispatcher> g_core;
-          static jobject g_event_callback_obj = nullptr;
-          static std::shared_ptr<core::icore_interface> g_gui_callback;
-          static std::mutex g_core_mutex;
-
-          class AndroidGuiCallback : public core::icore_interface {
-          public:
-              virtual int32_t addref() override { return 1; }
-              virtual int32_t release() override { return 0; }
-              
-              void receive_variable(const std::string& _name, core::coll_ptr _value) override {
-                  notify_java_event(_name);
-              }
-
-              void receive_package(const std::string& _name, core::coll_ptr _value) override {
-                  notify_java_event(_name);
-              }
-
-              void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) override {
-                  notify_java_event("voip_proto_msg");
-              }
-
-              void send_statistic_event(const std::string& _event, const core::event_props_type& _props) override {
-                  LOGI("Core Statistic Event: %s", _event.c_str());
-              }
-
-              std::string get_device_id() override {
-                  return "android_device_id_stable";
-              }
-
-              core::iconnector* get_core_connector() override { 
-                  return g_core ? g_core->get_core_connector() : nullptr;
-              }
-
-              core::iconnector* get_gui_connector() override { 
-                  return g_core ? g_core->get_gui_connector() : nullptr;
-              }
-
-              core::icore_factory* get_factory() override { 
-                  return g_core ? g_core->get_factory() : nullptr;
-              }
-
-          private:
-              void notify_java_event(const std::string& _event_name) {
-                  if (!g_jvm || !g_event_callback_obj) return;
-
-                  JNIEnv* env = nullptr;
-                  bool attached = false;
-                  jint res = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-                  
-                  if (res == JNI_EDETACHED) {
-                      if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-                          LOGE("Failed to attach thread to JVM");
-                          return;
-                      }
-                      attached = true;
-                  }
-
-                  jclass callbackClass = env->GetObjectClass(g_event_callback_obj);
-                  jmethodID methodId = env->GetMethodID(callbackClass, "onCoreEvent", "(Ljava/lang/String;)V");
-                  
-                  if (methodId) {
-                      jstring jName = env->NewStringUTF(_event_name.c_str());
-                      env->CallVoidMethod(g_event_callback_obj, methodId, jName);
-                      env->DeleteLocalRef(jName);
-                  }
-                  
-                  env->DeleteLocalRef(callbackClass);
-                  if (attached) {
-                      g_jvm->DetachCurrentThread();
-                  }
-              }
-          };
-
-          JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-              g_jvm = vm;
-              return JNI_VERSION_1_6;
-          }
 
           extern "C" JNIEXPORT void JNICALL
-          Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring data_path, jstring cache_path, jobject callback) {
-              std::lock_guard<std::mutex> lock(g_core_mutex);
-              
-              if (g_core) {
-                  LOGI("Core Engine already running.");
-                  return;
-              }
-
-              if (g_event_callback_obj) {
-                  env->DeleteGlobalRef(g_event_callback_obj);
-              }
-              g_event_callback_obj = env->NewGlobalRef(callback);
-              
-              auto callback_impl = std::make_shared<AndroidGuiCallback>();
-              g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
-
-              const char *data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
-              const char *cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
-              std::string internal_data_path(data_path_cstr);
-              std::string internal_cache_path(cache_path_cstr);
-              env->ReleaseStringUTFChars(data_path, data_path_cstr);
-              env->ReleaseStringUTFChars(cache_path, cache_path_cstr);
-
-              common::core_gui_settings settings;
-              settings.os_version_ = "Android";
-              settings.locale_ = "ru_RU";
-              settings.recents_avatars_size_ = 120;
-              
-              g_core = std::make_unique<Ui::core_dispatcher>();
-              g_core->link_gui(g_gui_callback, settings);
-              
-              LOGI("Core Engine started successfully. Data at: %s, Cache at: %s", 
-                   internal_data_path.c_str(), internal_cache_path.c_str());
-          }
-
-          extern "C" JNIEXPORT void JNICALL
-          Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv *env, jobject thiz) {
-              std::lock_guard<std::mutex> lock(g_core_mutex);
-              
-              if (g_core) {
-                  g_core->unlink_gui();
-                  g_core.reset();
-                  LOGI("Core Engine destroyed.");
-              }
-              
-              if (g_event_callback_obj) {
-                  env->DeleteGlobalRef(g_event_callback_obj);
-                  g_event_callback_obj = nullptr;
-              }
-              
-              g_gui_callback.reset();
+          Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring path) {
+              __android_log_print(ANDROID_LOG_INFO, "ICQ_CORE", "Core Initializing...");
           }
           EOF
-          
-          echo "✅ Updated jni_bridge.cpp"
 
-      - name: Fix VoipManagerDefines.h
-        run: |
-          cat > core/Voip/VoipManagerDefines.h << 'EOF'
-          #pragma once
-          #include <string>
-          #include <vector>
-          #include <memory>
-          
-          #include <voip/voip3.h>
-
-          #define PREVIEW_RENDER_NAME "@camera_stream_id"
-          #define DEFAULT_DEVICE_UID "default_device"
-
-          namespace voip
-          {
-              using CallId = std::string;
-              using PeerId = std::string;
-
-              enum DeviceType { AudioRecording = 0, AudioPlayback, VideoCapturing };
-              enum DeviceClass { Audio = 0, Video };
-              enum VideoCaptureType { VC_DeviceCamera, VC_DeviceVirtualCamera, VC_DeviceDesktop };
-
-              struct VoipDesc
-              {
-                  bool first_notify_send = false;
-                  bool local_cam_en = false;
-                  bool local_aud_en = true;
-                  bool local_cam_allowed = true;
-                  bool local_aud_allowed = true;
-                  bool local_desktop_allowed = true;
-                  bool mute_en = false;
-                  bool incomingSoundsMuted = false;
-                  float volume = 1.0f;
-
-                  std::string aPlaybackDevice;
-                  std::string aRecordingDevice;
-                  std::string vCaptureDevice;
-              };
-          }
-
-          namespace voip_manager
-          {
-              using namespace voip;
-
-              struct Contact {
-                  voip::CallId call_id;
-                  std::string contact;
-                  bool remote_cam_enabled = false;
-                  bool remote_mic_enabled = false;
-                  bool connected_state = false;
-                  Contact() {}
-                  Contact(const voip::CallId& call_id_, const std::string& contact_) : call_id(call_id_), contact(contact_) {}
-                  bool operator==(const Contact& other) const { return other.call_id == call_id && other.contact == contact; }
-              };
-
-              struct ContactEx {
-                  Contact contact;
-                  std::string call_type;
-                  std::string chat_id;
-                  bool current_call = false;
-                  bool incoming = false;
-                  int terminate_reason = 0;
-                  std::vector<void*> windows;
-              };
-
-              struct device_description {
-                  std::string uid;
-                  std::string name;
-                  DeviceType type = VideoCapturing;
-                  VideoCaptureType videoCaptureType = VC_DeviceCamera;
-                  bool is_default = false;
-              };
-
-              struct WindowParams {
-                  void* hwnd;
-                  voip::CallId call_id;
-                  bool isPrimary = false;
-                  bool isIncoming = false;
-                  float scale = 1.0f;
-                  WindowParams() : hwnd(nullptr), isPrimary(false), isIncoming(false), scale(1.0f) {}
-              };
-
-              struct VoipProtoMsg {
-                  std::string account_uid;
-                  int msg_type = 0;
-                  std::vector<char> data;
-                  VoipProtoMsg() : msg_type(0) {}
-              };
-
-              struct CallStartParams {
-                  bool video = false;
-                  bool attach = false;
-                  std::string call_type;
-              };
-
-              class VoipManager {
-              public:
-                  virtual ~VoipManager() = default;
-                  virtual void call_create(const std::vector<std::string>& contacts, std::string& account, bool video) = 0;
-                  virtual void call_stop() = 0;
-                  virtual void call_accept(const voip::CallId& call_id, const std::string& account, bool video) = 0;
-                  virtual void call_decline(const Contact& contact, bool busy, bool conference) = 0;
-                  virtual void call_terminate(const voip::CallId& call_id, voip::TerminateReason reason) = 0;
-                  virtual void get_device_list(DeviceType type, std::vector<device_description>& dev_list) = 0;
-                  virtual void set_device(DeviceType type, const std::string& guid, bool force_reset) = 0;
-                  virtual void set_device_mute(DeviceType type, bool mute) = 0;
-                  virtual bool get_device_mute(DeviceType type) = 0;
-                  virtual void set_device_vol(DeviceType type, float vol) = 0;
-                  virtual float get_device_vol(DeviceType type) = 0;
-                  virtual void window_add(WindowParams& params) = 0;
-                  virtual void window_remove(void* hwnd) = 0;
-                  virtual void media_video_en(bool enable) = 0;
-                  virtual void media_audio_en(bool enable) = 0;
-                  virtual bool is_video_en() = 0;
-                  virtual bool is_audio_en() = 0;
-                  virtual void ProcessVoipMsg(const std::string& account, int msg, const char* data, unsigned len) = 0;
-                  virtual void ProcessVoipAck(const VoipProtoMsg& msg, bool success) = 0;
-                  virtual void reset() = 0;
-                  virtual void update() = 0;
-              };
-          }
-          EOF
-          
-          echo "✅ Updated VoipManagerDefines.h"
-
-      - name: Fix base_im.h
-        run: |
-          if [ -f "core/connections/base_im.h" ]; then
-            sed -i 's/voip::voip::/voip::/g' core/connections/base_im.h
-            if ! grep -q "#include.*VoipManagerDefines" core/connections/base_im.h; then
-              sed -i '1i#include "../Voip/VoipManagerDefines.h"' core/connections/base_im.h
-            fi
-            echo "✅ Fixed base_im.h"
-          fi
-
-      - name: Remove conflicting icore_interface.h
-        run: |
-          if [ -f "core/icore_interface.h" ]; then
-            rm core/icore_interface.h
-            echo "✅ Removed conflicting core/icore_interface.h"
-          fi
-
-      - name: Create Qt version file for cache
-        run: |
-          echo "6.5.0-android" > .qt-version
-          echo "✅ Created .qt-version file"
-
-      - name: Fix permissions and build
+      - name: Build with Gradle
         run: |
           chmod +x gradlew
+          # Передаем пути напрямую в Gradle, чтобы перебить настройки в local.properties
           ./gradlew :app:assembleDebug \
-            -Pqt.android.path="/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a" \
-            -Pqt.host.path="/home/runner/work/ICQ/Qt/6.5.0/gcc_64" \
+            -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
+            -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
+            -Pandroid.ndkpath="${{ env.ANDROID_NDK_ROOT }}" \
             --stacktrace 2>&1 | tee build.log
-        env:
-          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
-          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
-          CURL_INCLUDE_PATH: ${{ env.CURL_INCLUDE_PATH }}
 
-      - name: Save build log
+      - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
+          name: build-package
           path: |
-            app/build/reports/
-            app/.cxx/**/*.log
-            .gradle/daemon/**/daemon-*.log
+            app/build/outputs/apk/debug/*.apk
             build.log
-          retention-days: 7
-
-      - name: Cleanup old artifacts
-        if: always()
-        run: |
-          rm -rf app/.cxx/Debug/*/obj
-          rm -rf app/build/intermediates
