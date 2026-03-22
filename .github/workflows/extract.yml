@@ -28,7 +28,12 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;26.1.10909125;cmake;3.22.1;platform-tools;platforms;android-33'
+          # ИСПРАВЛЕНО: пакеты разделены пробелами/переносами строк
+          packages: |
+            ndk;26.1.10909125
+            cmake;3.22.1
+            platform-tools
+            platforms;android-33
           cmdline-tools-version: 'latest'
 
       - name: Install system dependencies
@@ -62,57 +67,52 @@ jobs:
 
       - name: Install Qt 6.5.0
         run: |
-          # Установка Qt для Android и необходимых инструментов хоста (gcc_64) через --autodesktop
-          # Мы используем одну папку "Qt_Root", чтобы избежать вложенности Qt/Qt
+          # Устанавливаем в чистую папку Qt_Root без лишней вложенности
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a \
             --autodesktop \
             --outputdir ${{ github.workspace }}/Qt_Root
 
       - name: Set Environment Variables
         run: |
-          # Динамически определяем пути на основе установки aqt
           QT_VERSION="6.5.0"
           BASE_PATH="${{ github.workspace }}/Qt_Root/$QT_VERSION"
           
           ANDROID_PATH="$BASE_PATH/android_arm64_v8a"
           HOST_PATH="$BASE_PATH/gcc_64"
           
-          # Записываем в GITHUB_ENV для последующих шагов
           echo "QT_ANDROID_PATH=$ANDROID_PATH" >> $GITHUB_ENV
           echo "QT_HOST_PATH=$HOST_PATH" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          # Путь к конкретной версии NDK, установленной выше
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
           
-          # Пути для CMake
+          # Настройка префиксов для CMake
           echo "CMAKE_PREFIX_PATH=$ANDROID_PATH/lib/cmake:$HOST_PATH/lib/cmake" >> $GITHUB_ENV
           
-          # Добавляем инструменты в PATH
+          # Добавляем бинарники Qt в PATH
           echo "$HOST_PATH/bin" >> $GITHUB_PATH
 
-      - name: Verify Qt Installation
+      - name: Verify Installation
         run: |
-          echo "=== Проверка окружения ==="
-          if [ -d "${{ env.QT_ANDROID_PATH }}" ]; then
-            echo "✅ Android Qt найден: ${{ env.QT_ANDROID_PATH }}"
-          else
-            echo "❌ Android Qt отсутствует!"
+          echo "=== Android SDK: $ANDROID_HOME"
+          echo "=== Android NDK: $ANDROID_NDK_ROOT"
+          echo "=== Qt Android: $QT_ANDROID_PATH"
+          
+          if [ ! -d "$QT_ANDROID_PATH" ]; then
+            echo "❌ Qt Android не найден!"
             exit 1
           fi
           
-          if [ -f "${{ env.QT_HOST_PATH }}/bin/qmake" ]; then
-            echo "✅ Desktop Tools (Host) найдены"
-          else
-            echo "❌ Desktop Tools отсутствуют по пути ${{ env.QT_HOST_PATH }}"
-            ls -R ${{ github.workspace }}/Qt_Root
+          if [ ! -d "$ANDROID_NDK_ROOT" ]; then
+            echo "❌ NDK не найден по пути $ANDROID_NDK_ROOT"
+            ls -d $ANDROID_HOME/ndk/* || true
             exit 1
           fi
 
       - name: Download External Dependencies
         run: |
-          # Пример для Boost и RapidJSON (убедитесь, что версии актуальны)
           wget https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.gz -O boost.tar.gz
           tar -xzf boost.tar.gz
-          
           git clone --depth 1 https://github.com/Tencent/rapidjson.git
 
       - name: Fix permissions and Build APK
@@ -141,11 +141,11 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      - name: Upload Debug Symbols and Logs on failure
+      - name: Upload Debug Data on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-failure-data
+          name: build-failure-context
           path: |
             app/build/reports/
             app/.cxx/
