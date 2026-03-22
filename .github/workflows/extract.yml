@@ -65,20 +65,19 @@ jobs:
             ${{ runner.os }}-qt-6.5.0-android-full-
             ${{ runner.os }}-qt-6.5.0-
 
-      - name: Install Qt (if not cached)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
+      - name: Install Qt
         run: |
-          pip3 install aqtinstall
-          
+          pip install aqtinstall
           echo "📦 Installing Qt desktop version..."
-          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /home/runner/work/ICQ/Qt
-          
+          aqt install-qt linux desktop 6.5.0 gcc_64 \
+            --outputdir /home/runner/work/ICQ/Qt \
+            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
+    
           echo "📦 Installing Qt android version..."
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /home/runner/work/ICQ/Qt
-          
-          echo "📦 Installing Qt Creator tools..."
-          aqt install-tool linux desktop tools_qtcreator --outputdir /home/runner/work/ICQ/Qt || true
-          
+          aqt install-qt linux android 6.5.0 android_arm64_v8a \
+            --outputdir /home/runner/work/ICQ/Qt \
+            --modules qtbase qtnetwork qtdeclarative qtmultimedia qtsvg
+    
           echo "✅ Qt installation complete"
 
       - name: Set Qt environment
