@@ -25,9 +25,7 @@ jobs:
         echo "ПРИМЕНЕНИЕ КРОССПЛАТФОРМЕННЫХ ЗАМЕН"
         echo "========================================="
         
-        # ========================================
         # 1. СОЗДАЕМ PLATFORM.H
-        # ========================================
         echo "📁 Создаем common.shared/Platform.h..."
         mkdir -p common.shared
         cat > common.shared/Platform.h << 'PLATFORM'
@@ -47,9 +45,7 @@ jobs:
         #endif
         PLATFORM
         
-        # ========================================
         # 2. ИСПРАВЛЯЕМ COMMON.H
-        # ========================================
         echo "📁 Исправляем common.shared/common.h..."
         if [ -f "common.shared/common.h" ]; then
           sed -i 's|#define __TODOA__ __FILELINEA__ ": "|#define __TODOA__ " [TODO]: "|g' common.shared/common.h
@@ -57,9 +53,7 @@ jobs:
           echo "  ✅ common.h исправлен"
         fi
         
-        # ========================================
-        # 3. ИСПРАВЛЯЕМ COMMON_DEFS.CPP (GetModuleHandle)
-        # ========================================
+        # 3. ИСПРАВЛЯЕМ COMMON_DEFS.CPP
         echo "📁 Исправляем common.shared/common_defs.cpp..."
         if [ -f "common.shared/common_defs.cpp" ]; then
           sed -i '/#ifdef PLATFORM_WIN/,/#else/ {
@@ -68,9 +62,7 @@ jobs:
           echo "  ✅ common_defs.cpp исправлен"
         fi
         
-        # ========================================
         # 4. ИСПРАВЛЯЕМ CONFIG.H И CONFIG.CPP
-        # ========================================
         echo "📁 Исправляем config.h и config.cpp..."
         if [ -f "common.shared/config/config.h" ]; then
           sed -i 's|// TODO: remove when deprecated|// organization_structure_enabled|g' common.shared/config/config.h
@@ -82,11 +74,10 @@ jobs:
           echo "  ✅ config.cpp исправлен"
         fi
         
-        # ========================================
         # 5. ИСПРАВЛЯЕМ WINSOCK_UTIL.CPP
-        # ========================================
         echo "📁 Исправляем core/network/win32/winsock_util.cpp..."
         mkdir -p core/network/win32
+        
         cat > core/network/win32/winsock_util.cpp << 'WINSOCK_CPP'
         #include "winsock_util.h"
         
@@ -126,9 +117,7 @@ jobs:
         }
         WINSOCK_CPP
         
-        # ========================================
         # 6. ИСПРАВЛЯЕМ WINSOCK_UTIL.H
-        # ========================================
         cat > core/network/win32/winsock_util.h << 'WINSOCK_H'
         #pragma once
         
@@ -148,86 +137,70 @@ jobs:
         WINSOCK_H
         echo "  ✅ winsock_util обновлен"
         
-        # ========================================
         # 7. ИСПРАВЛЯЕМ NETWORK_CHANGE_NOTIFIER
-        # ========================================
         echo "📁 Исправляем core/network/win32/network_change_notifier_win.cpp..."
         if [ -f "core/network/win32/network_change_notifier_win.cpp" ]; then
           cat > core/network/win32/network_change_notifier_win.cpp << 'NETWORK_CPP'
-          #include "network_change_notifier_win.h"
-          #include <QNetworkConfigurationManager>
-          #include <QObject>
-          
-          namespace core {
-          namespace network {
-          
-          class NetworkChangeNotifier {
-          public:
-              static NetworkChangeNotifier* instance() {
-                  static NetworkChangeNotifier inst;
-                  return &inst;
-              }
-              
-              void start() {
-          #ifdef PLATFORM_WIN
-                  NotifyAddrChange(&hWaitHandle_, &overlapped_);
-          #else
-                  static QNetworkConfigurationManager manager;
-                  QObject::connect(&manager, &QNetworkConfigurationManager::onlineStateChanged,
-                                   [](bool isOnline) {
-                                       if (auto* inst = instance())
-                                           inst->notifyListeners(isOnline);
-                                   });
-          #endif
-              }
-              
-              void notifyListeners(bool isOnline) {
-                  // Уведомляем слушателей
-              }
-              
-          private:
-              HANDLE hWaitHandle_;
-              OVERLAPPED overlapped_;
-          };
-          
-          } // namespace network
-          } // namespace core
-          NETWORK_CPP
+        #include "network_change_notifier_win.h"
+        #include <QNetworkConfigurationManager>
+        #include <QObject>
+        
+        namespace core {
+        namespace network {
+        
+        class NetworkChangeNotifier {
+        public:
+            static NetworkChangeNotifier* instance() {
+                static NetworkChangeNotifier inst;
+                return &inst;
+            }
+            
+            void start() {
+        #ifdef PLATFORM_WIN
+                NotifyAddrChange(&hWaitHandle_, &overlapped_);
+        #else
+                static QNetworkConfigurationManager manager;
+                QObject::connect(&manager, &QNetworkConfigurationManager::onlineStateChanged,
+                                 [](bool isOnline) {
+                                     if (auto* inst = instance())
+                                         inst->notifyListeners(isOnline);
+                                 });
+        #endif
+            }
+            
+            void notifyListeners(bool isOnline) {
+                // Уведомляем слушателей
+            }
+            
+        private:
+            HANDLE hWaitHandle_;
+            OVERLAPPED overlapped_;
+        };
+        
+        } // namespace network
+        } // namespace core
+        NETWORK_CPP
           echo "  ✅ network_change_notifier исправлен"
         fi
         
-        # ========================================
         # 8. ИСПРАВЛЯЕМ SYSTEM_COMMON.CPP
-        # ========================================
         echo "📁 Исправляем core/tools/system_common.cpp..."
         if [ -f "core/tools/system_common.cpp" ]; then
-          # Замена GetTickCount64
           sed -i 's|return GetTickCount64();|#ifdef PLATFORM_WIN\n    return GetTickCount64();\n#else\n    #include <QElapsedTimer>\n    return (uint64_t)QElapsedTimer::msecsSinceReference();\n#endif|g' core/tools/system_common.cpp
-          
-          # Замена GetComputerNameW
           sed -i 's|GetComputerNameW(|#ifdef PLATFORM_WIN\n    GetComputerNameW(|g' core/tools/system_common.cpp
-          
-          # Замена GetUserNameW
           sed -i 's|GetUserNameW(|#ifdef PLATFORM_WIN\n    GetUserNameW(|g' core/tools/system_common.cpp
-          
-          # Замена ShellExecuteW
           sed -i 's|ShellExecuteW(|#ifdef PLATFORM_WIN\n    ShellExecuteW(|g' core/tools/system_common.cpp
-          
           echo "  ✅ system_common.cpp исправлен"
         fi
         
-        # ========================================
         # 9. ИСПРАВЛЯЕМ CURL_MULTI_HANDLER
-        # ========================================
         echo "📁 Исправляем core/curl_multi_handler.cpp..."
         if [ -f "core/curl_multi_handler.cpp" ]; then
           sed -i 's|WSAStartup(|#ifdef PLATFORM_WIN\n        WSAStartup(|g' core/curl_multi_handler.cpp
           echo "  ✅ curl_multi_handler.cpp исправлен"
         fi
         
-        # ========================================
         # 10. ИСПРАВЛЯЕМ JSON_HELPER.H
-        # ========================================
         echo "📁 Исправляем common.shared/json_helper.h..."
         cat > common.shared/json_helper.h << 'JSON_HELPER'
         #pragma once
@@ -272,9 +245,7 @@ jobs:
         JSON_HELPER
         echo "  ✅ json_helper.h исправлен"
         
-        # ========================================
         # 11. ИСПРАВЛЯЕМ TEXT_RENDERING.H
-        # ========================================
         echo "📁 Исправляем gui/controls/textrendering/TextRendering.h..."
         mkdir -p gui/controls/textrendering
         cat > gui/controls/textrendering/TextRendering.h << 'TEXT_REND'
@@ -300,18 +271,14 @@ jobs:
         TEXT_REND
         echo "  ✅ TextRendering.h исправлен"
         
-        # ========================================
         # 12. ИСПРАВЛЯЕМ GUI/UTILS/FEATURES.CPP
-        # ========================================
         echo "📁 Исправляем gui/utils/features.cpp..."
         if [ -f "gui/utils/features.cpp" ]; then
           sed -i 's|// TODO: remove when deprecated in server configs|// Deprecated function|g' gui/utils/features.cpp
           echo "  ✅ features.cpp исправлен"
         fi
         
-        # ========================================
         # 13. УДАЛЯЕМ ВСЕ TODO КОММЕНТАРИИ
-        # ========================================
         echo "📁 Удаляем комментарии TODO..."
         find . -name "*.cpp" -o -name "*.h" | xargs sed -i 's|// TODO.*$||g' 2>/dev/null || true
         echo "  ✅ TODO комментарии удалены"
@@ -327,20 +294,7 @@ jobs:
         git config user.email "actions@github.com"
         git add -A
         if ! git diff --cached --quiet; then
-          git commit -m "🤖 Auto-refactor: Windows → Android port
-
-          - Add platform detection (Platform.h)
-          - Replace Windows API with Qt equivalents:
-            * GetModuleHandle → standard GetSystemInfo
-            * GetTickCount → QElapsedTimer
-            * GetComputerName → QHostInfo
-            * GetUserName → Android_User
-            * WSAStartup → POSIX socket
-            * NotifyAddrChange → QNetworkConfigurationManager
-            * ShellExecute → QDesktopServices
-          - Make network code cross-platform
-          - Fix json_helper and TextRendering headers
-          - Remove TODO comments"
+          git commit -m "🤖 Auto-refactor: Windows → Android port"
           git push
           echo "✅ Изменения закоммичены"
         else
