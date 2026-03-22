@@ -1,72 +1,130 @@
-Name: Build ICQ Mobile Production
+# .github/workflows/android_build.yml
+name: Android Build
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 33
+        build-tools: 33.0.2
+        ndk: 25.2.9519653
+        cmake: 3.22.1
+    
+    - name: Install Qt for Android
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.5.3'
+        host: 'linux'
+        target: 'android'
+        arch: 'armv7'
+        modules: 'qtmultimedia qtnetworkauth qtsvg qt5compat'
+        tools: 'tools_qtcreator,cmake'
+    
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+    
+    - name: Configure CMake for Android
+      run: |
+        mkdir -p build-android
+        cd build-android
+        cmake .. \
+          -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+          -DANDROID_ABI=arm64-v8a \
+          -DANDROID_PLATFORM=android-21 \
+          -DANDROID_STL=c++_shared \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DQT_DEFAULT_MAJOR_VERSION=6 \
+          -DCMAKE_PREFIX_PATH=${{ env.Qt6_DIR }} \
+          -DCMAKE_FIND_ROOT_PATH=${{ env.Qt6_DIR }}
+    
+    - name: Build
+      run: |
+        cd build-android
+        cmake --build . --parallel 4
+    
+    - name: Create Android APK
+      run: |
+        cd build-android
+        # Если проект использует Qt Android Deploy
+        if [ -f "android-deploy-qt" ]; then
+          android-deploy-qt --input android-deployment-settings.json --output android-build --apk
+        fi
+        
+        # Поиск APK файлов
+        find . -name "*.apk" -exec cp {} ../messenger.apk \; 2>/dev/null || true
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: messenger-android
+        path: |
+          build-android/*.apk
+          messenger.apk
+        if-no-files-found: ignore
+    
+    - name: Upload build logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: build-android/CMakeFiles/*.log
+        if-no-files-found: ignore
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK & NDK
-        uses: android-actions/setup-android@v3
-        with:
-          # NDK 26.1.10909125 — проверенная версия для Qt 6.5.0
-          packages: 'ndk;26.1.10909125 cmake;3.22.1'
-
-      - name: Install Qt (aqt)
-        run: |
-          pip3 install aqtinstall
-          # Устанавливаем Desktop Qt (нужен для инструментов сборки)
-          aqt install-qt linux desktop 6.5.0 gcc_64 -O /home/runner/work/Qt
-          # Устанавливаем Android Qt (сами бинарники для приложения)
-          aqt install-qt linux android 6.5.0 android_arm64_v8a -O /home/runner/work/Qt
-
-      - name: Download Dependencies (Boost & RapidJSON)
-        run: |
-          # Boost (header-only использование)
-          curl -L https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 -o boost.tar.bz2
-          tar -xjf boost.tar.bz2
+  create-release:
+    needs: build-android
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download APK
+      uses: actions/download-artifact@v4
+      with:
+        name: messenger-android
+        path: artifacts
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/*.apk
+        draft: false
+        prerelease: false
+        name: Messenger ${{ github.ref_name }}
+        body: |
+          ## Android APK
           
-          # RapidJSON
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          Автоматическая сборка мессенджера для Android.
           
-          echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
-          echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
-
-      - name: Fix Case Sensitivity (Linux Fix)
-        run: |
-          # Исправляем регистр заголовочных файлов для Linux
-          find . -type f \( -name "*.cpp" -o -name "*.h" \) -exec sed -i 's/#include "StdAfx.h"/#include "stdafx.h"/g' {} +
-          # Создаем пустой stdafx.h если его нет в core, чтобы сборка не падала
-          mkdir -p core
-          touch core/stdafx.h
-
-      - name: Build APK
-        run: |
-          chmod +x gradlew
-          # Пробрасываем пути к Qt и NDK напрямую в Gradle
-          ./gradlew :app:assembleDebug \
-            -Pqt.android.path=/home/runner/work/Qt/6.5.0/android_arm64_v8a \
-            -Pqt.host.path=/home/runner/work/Qt/6.5.0/gcc_64 \
-            -Pandroid.ndkpath=$ANDROID_HOME/ndk/26.1.10909125 \
-            --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ICQ-Mobile-Debug
-          path: app/build/outputs/apk/debug/*.apk
+          ### Что нового:
+          - Портирование с Windows на Android
+          - Замена Windows API на Qt
+          - Кроссплатформенная работа с сетью
+          
+          ### Установка:
+          1. Скачайте APK
+          2. Разрешите установку из неизвестных источников
+          3. Установите и запустите
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
