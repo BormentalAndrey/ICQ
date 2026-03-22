@@ -38,16 +38,142 @@ jobs:
       - name: Set Qt5 environment
         run: |
           QT_DIR="${{ github.workspace }}/qt5-bundle"
-          echo "Qt5_DIR=${QT_DIR}/cmake/Qt5" >> $GITHUB_ENV
+          echo "QT5_DIR=${QT_DIR}/cmake/Qt5" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=${QT_DIR}/cmake" >> $GITHUB_ENV
-          echo "PATH=${QT_DIR}/bin:$PATH" >> $GITHUB_ENV
+          echo "✅ Qt5_DIR: ${QT_DIR}/cmake/Qt5"
+
+      - name: Verify Qt5
+        run: |
+          echo "Проверка Qt5:"
+          ls -la ${{ github.workspace }}/qt5-bundle/cmake/Qt5/
+          ls -la ${{ github.workspace }}/qt5-bundle/lib/ | head -5
+
+      - name: Create CMakeLists.txt
+        run: |
+          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.22.1)
+          project("icq_mobile_core" LANGUAGES CXX C)
+          
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          
+          # Путь к Qt5 из окружения
+          if(DEFINED ENV{QT5_DIR})
+              set(CMAKE_PREFIX_PATH $ENV{QT5_DIR})
+              message(STATUS "Qt5_DIR from env: $ENV{QT5_DIR}")
+          endif()
+          
+          # Поиск Qt5
+          find_package(Qt5 REQUIRED COMPONENTS Core Network)
+          message(STATUS "Qt5 found: ${Qt5_VERSION}")
+          
+          # Корень проекта
+          if(NOT ICQ_PROJECT_ROOT)
+              get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
+          else()
+              set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
+          endif()
+          
+          message(STATUS "ICQ_ROOT: ${ICQ_ROOT}")
+          
+          # Глобальные определения
+          add_compile_definitions(
+              ANDROID
+              PLATFORM_ANDROID
+              __ANDROID__
+              QT_CORE_LIB
+              QT_NETWORK_LIB
+          )
+          
+          # Поиск исходников
+          file(GLOB_RECURSE CORE_SOURCES
+              "${ICQ_ROOT}/core/*.cpp"
+              "${ICQ_ROOT}/common.shared/*.cpp"
+              "${ICQ_ROOT}/corelib/*.cpp"
+          )
+          
+          # Исключаем Windows
+          list(FILTER CORE_SOURCES EXCLUDE REGEX 
+              ".*win32.*|.*macos.*|.*_win\\.cpp|.*stdafx\\.cpp"
+          )
+          
+          # Создаем библиотеку
+          add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
+          
+          # Пути заголовков
+          target_include_directories(icq_core PRIVATE
+              ${CMAKE_CURRENT_SOURCE_DIR}
+              ${ICQ_ROOT}
+              ${ICQ_ROOT}/core
+              ${ICQ_ROOT}/corelib
+              ${ICQ_ROOT}/common.shared
+              ${ICQ_ROOT}/boost_1_83_0
+              ${ICQ_ROOT}/rapidjson/include
+              ${Qt5Core_INCLUDE_DIRS}
+              ${Qt5Network_INCLUDE_DIRS}
+          )
+          
+          # Флаги компиляции
+          target_compile_options(icq_core PRIVATE 
+              -fexceptions -frtti -fPIC -Wall -Wno-unused-parameter
+          )
+          
+          # Линковка
+          find_library(log-lib log)
+          find_library(z-lib z)
+          find_library(android-lib android)
+          
+          target_link_libraries(icq_core
+              Qt5::Core
+              Qt5::Network
+              ${log-lib}
+              ${z-lib}
+              ${android-lib}
+          )
+          
+          message(STATUS "Configuration complete")
+          EOF
+
+      - name: Create jni_bridge.cpp
+        run: |
+          mkdir -p app/src/main/cpp
+          cat > app/src/main/cpp/jni_bridge.cpp << 'EOF'
+          #include <jni.h>
+          #include <android/log.h>
+          
+          #define LOG_TAG "IcqCore"
+          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+          
+          JavaVM* g_jvm = nullptr;
+          
+          JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+              g_jvm = vm;
+              LOGI("JNI_OnLoad called");
+              return JNI_VERSION_1_6;
+          }
+          
+          extern "C" JNIEXPORT jstring JNICALL
+          Java_com_icq_mobile_core_IcqCoreEngine_nativeGetVersion(JNIEnv *env, jobject thiz) {
+              return env->NewStringUTF("1.0.0");
+          }
+          
+          extern "C" JNIEXPORT void JNICALL
+          Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, 
+                                                            jstring data_path, jstring cache_path) {
+              const char* data = env->GetStringUTFChars(data_path, nullptr);
+              const char* cache = env->GetStringUTFChars(cache_path, nullptr);
+              LOGI("Core init with data: %s, cache: %s", data, cache);
+              env->ReleaseStringUTFChars(data_path, data);
+              env->ReleaseStringUTFChars(cache_path, cache);
+          }
+          EOF
 
       - name: Build APK
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
         env:
-          Qt5_DIR: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
+          QT5_DIR: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
           BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
           RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
 
