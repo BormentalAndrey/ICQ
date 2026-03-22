@@ -13,56 +13,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Install aqtinstall
         run: pip3 install aqtinstall
 
-      - name: Download Qt 6.5.0 (Android & Desktop Tools)
+      - name: Download Qt 6.5.0
         run: |
-          # Создаем папку Qt в корне репозитория
           mkdir -p ${{ github.workspace }}/Qt
           
-          # Скачиваем библиотеки для Android (arm64-v8a)
+          # Установка Android версии (библиотеки)
           python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
           
-          # Скачиваем инструменты для Linux (moc, rcc, uic)
+          # Установка Desktop версии (инструменты MOC, RCC)
+          # В Qt 6.5 инструменты хоста часто идут в комплекте с десктопной версией
           python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
-          
-          echo "✅ Qt 6.5.0 скачан в папку ${{ github.workspace }}/Qt"
 
       - name: Download Boost 1.83.0
         run: |
-          # Скачиваем и распаковываем Boost в корень
+          # Используем более надежное зеркало
           wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz
           tar -xzf boost_1_83_0.tar.gz
           rm boost_1_83_0.tar.gz
-          echo "✅ Boost 1.83.0 скачан в папку ${{ github.workspace }}/boost_1_83_0"
 
       - name: Download RapidJSON
         run: |
-          # Клонируем RapidJSON в корень
           git clone --depth 1 https://github.com/Tencent/rapidjson.git
-          echo "✅ RapidJSON скачан в папку ${{ github.workspace }}/rapidjson"
 
-      - name: Verify Downloads
+      - name: Verify and Fix Paths
         run: |
-          echo "--- Содержимое репозитория после загрузки ---"
-          ls -d Qt/6.5.0/*
-          ls -d boost_1_83_0
-          ls -d rapidjson
-          echo "--- Проверка инструментов Qt (MOC) ---"
-          ls -la ${{ github.workspace }}/Qt/6.5.0/gcc_64/bin/moc
+          echo "--- Проверка структуры Qt ---"
+          find ${{ github.workspace }}/Qt -name "moc"
+          
+          # Пытаемся найти, где на самом деле лежит moc и выводим это
+          MOC_PATH=$(find ${{ github.workspace }}/Qt -name "moc" -type f | head -n 1)
+          if [ -z "$MOC_PATH" ]; then
+            echo "❌ Ошибка: moc не найден!"
+            exit 1
+          else
+            echo "✅ moc найден по адресу: $MOC_PATH"
+          fi
 
-      # Опционально: загрузить всё скачанное как артефакт, чтобы вы могли скачать это архивом из GitHub
-      - name: Upload Dependencies as Artifact
+      - name: Upload Dependencies
         uses: actions/upload-artifact@v4
         with:
-          name: project-dependencies
+          name: icq-dependencies
           path: |
             ${{ github.workspace }}/Qt
             ${{ github.workspace }}/boost_1_83_0
