@@ -1,11 +1,9 @@
 # .github/workflows/assemble-qt-bundle.yml
-name: Assemble Qt5 Bundle from Parts
+name: Assemble Qt5 Bundle
 
 on:
   push:
     branches: [ main, master, develop ]
-    paths:
-      - 'qt5-bundle.part.*'
   workflow_dispatch:
 
 jobs:
@@ -20,140 +18,17 @@ jobs:
 
       - name: Assemble Qt5 bundle from parts
         run: |
-          echo "========================================="
-          echo "СБОРКА Qt5 БАНДЛА ИЗ ЧАСТЕЙ"
-          echo "========================================="
-          
-          # Показываем все найденные части
-          echo ""
-          echo "📁 Найденные части:"
-          ls -la qt5-bundle.part.* 2>/dev/null || echo "❌ Части не найдены!"
-          
-          # Проверяем количество частей
-          PART_COUNT=$(ls qt5-bundle.part.* 2>/dev/null | wc -l)
-          echo ""
-          echo "📊 Найдено частей: $PART_COUNT"
-          
-          if [ $PART_COUNT -eq 0 ]; then
-            echo "❌ Ошибка: части архива не найдены!"
-            exit 1
-          fi
+          echo "Сборка Qt5 бандла из частей..."
           
           # Собираем архив из частей
-          echo ""
-          echo "🔧 Собираем архив из частей..."
           cat qt5-bundle.part.* > qt5-bundle.tar.gz
           
-          # Проверяем размер
-          echo ""
-          echo "📦 Размер собранного архива:"
+          echo "Архив собран:"
           ls -lh qt5-bundle.tar.gz
-          
-          # Проверяем целостность
-          echo ""
-          echo "🔍 Проверяем целостность архива..."
-          if tar -tzf qt5-bundle.tar.gz > /dev/null 2>&1; then
-            FILE_COUNT=$(tar -tzf qt5-bundle.tar.gz | wc -l)
-            echo "   ✅ Архив корректный"
-            echo "   📄 Файлов в архиве: $FILE_COUNT"
-          else
-            echo "   ❌ Архив поврежден!"
-            echo ""
-            echo "📋 Первые 20 байт архива (hex):"
-            xxd -l 20 qt5-bundle.tar.gz || hexdump -C qt5-bundle.tar.gz | head -5
-            exit 1
-          fi
 
-      - name: Extract and verify content
-        run: |
-          echo ""
-          echo "📦 Распаковываем для проверки..."
-          mkdir -p qt5-check
-          tar -xzf qt5-bundle.tar.gz -C qt5-check/
-          
-          echo ""
-          echo "📁 Содержимое распакованного бандла:"
-          ls -la qt5-check/
-          
-          echo ""
-          echo "📚 Библиотеки:"
-          ls -la qt5-check/lib/ | head -15
-          
-          echo ""
-          echo "📁 Заголовки:"
-          ls -la qt5-check/include/ | head -10
-          
-          echo ""
-          echo "🔧 Утилиты:"
-          ls -la qt5-check/bin/ 2>/dev/null || echo "   bin/ не найдена"
-          
-          echo ""
-          echo "⚙️ CMake конфигурация:"
-          ls -la qt5-check/cmake/ 2>/dev/null || echo "   cmake/ не найдена"
-
-      - name: Upload assembled archive
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: qt5-bundle-assembled
+          name: qt5-bundle
           path: qt5-bundle.tar.gz
           retention-days: 30
-
-      - name: Create Release (if tag exists)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: qt5-bundle.tar.gz
-          name: Qt5 Bundle ${{ github.ref_name }}
-          body: |
-            ## Qt5 5.15.18 Bundle for Android/Termux
-            
-            Собран из частей:
-            - qt5-bundle.part.aa
-            - qt5-bundle.part.ab
-            - qt5-bundle.part.ac
-            - qt5-bundle.part.ad
-            
-            ### Содержимое:
-            - QtCore, QtGui, QtWidgets, QtNetwork
-            - qmake, moc, rcc, uic
-            - CMake configuration
-            
-            ### Использование в CI:
-            ```yaml
-            - name: Download Qt5 bundle
-              run: |
-                wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/qt5-bundle.tar.gz
-                tar -xzf qt5-bundle.tar.gz
-                echo "Qt5_DIR=$(pwd)/qt5-bundle/cmake/Qt5" >> $GITHUB_ENV
-            ```
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clean up parts (optional)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          echo ""
-          echo "🧹 Очистка частей архива из репозитория..."
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          git rm qt5-bundle.part.* 2>/dev/null || echo "Части уже удалены"
-          git commit -m "🧹 Clean up Qt5 bundle parts after assembly" || echo "Нет изменений для коммита"
-          git push || echo "Push не требуется"
-          echo "✅ Части удалены"
-
-      - name: Show summary
-        run: |
-          echo ""
-          echo "========================================="
-          echo "✅ СБОРКА ЗАВЕРШЕНА"
-          echo "========================================="
-          echo ""
-          echo "📦 Архив: qt5-bundle.tar.gz"
-          echo "📏 Размер: $(du -h qt5-bundle.tar.gz | cut -f1)"
-          echo "📄 Файлов: $(tar -tzf qt5-bundle.tar.gz 2>/dev/null | wc -l)"
-          echo ""
-          echo "📥 Скачать артефакт:"
-          echo "   https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo ""
-          echo "🏷️ Для создания релиза создайте тег:"
-          echo "   git tag qt5-bundle-v1.0 && git push --tags"
