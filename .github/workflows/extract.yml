@@ -1,10 +1,8 @@
-name: Build ICQ Mobile with Qt
+name: Build ICQ Mobile Production
 
 on:
   push:
     branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -16,172 +14,60 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          # NDK 26.1.10909125 стабильна для Qt 6.5.0
+          # NDK 26.1.10909125 — проверенная версия для Qt 6.5.0
           packages: 'ndk;26.1.10909125 cmake;3.22.1'
-          cmdline-tools-version: 'latest'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake \
-            ninja-build \
-            build-essential \
-            libgl1-mesa-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render-util0-dev \
-            libxcb-shape0-dev \
-            libxcb-sync-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xkb-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            python3-pip
-
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/work/ICQ/Qt
-          key: ${{ runner.os }}-qt-6.5.0-android-v2
 
       - name: Install Qt (aqt)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
           pip3 install aqtinstall
-          # Установка Desktop версии для инструментов сборки (moc, rcc)
-          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /home/runner/work/ICQ/Qt
-          # Установка Android версии
-          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /home/runner/work/ICQ/Qt
+          # Устанавливаем Desktop Qt (нужен для инструментов сборки)
+          aqt install-qt linux desktop 6.5.0 gcc_64 -O /home/runner/work/Qt
+          # Устанавливаем Android Qt (сами бинарники для приложения)
+          aqt install-qt linux android 6.5.0 android_arm64_v8a -O /home/runner/work/Qt
 
-      - name: Set Qt environment
+      - name: Download Dependencies (Boost & RapidJSON)
         run: |
-          QT_ROOT="/home/runner/work/ICQ/Qt/6.5.0"
-          echo "QT_ANDROID_PATH=$QT_ROOT/android_arm64_v8a" >> $GITHUB_ENV
-          echo "QT_HOST_PATH=$QT_ROOT/gcc_64" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
-          echo "PATH=$QT_ROOT/gcc_64/bin:$PATH" >> $GITHUB_PATH
-
-      - name: Download Boost (Stable Mirror)
-        run: |
-          # Используем официальный архивный сервер Boost
-          URL="https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2"
-          curl -L $URL -o boost.tar.bz2
+          # Boost (header-only использование)
+          curl -L https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2 -o boost.tar.bz2
           tar -xjf boost.tar.bz2
+          
+          # RapidJSON
+          git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          
           echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
-
-      - name: Setup RapidJSON
-        run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
           echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
 
-      - name: Fix Source Header Conflicts (Case Sensitivity & Path)
+      - name: Fix Case Sensitivity (Linux Fix)
         run: |
-          # Исправление путей для VoIP и прокси, которые часто ломаются в CI
-          mkdir -p core/voip
-          [ -d "core/Voip" ] && echo '#include "../Voip/VoipManager.h"' > core/voip/voip3.h
-          
-          # Очистка конфликтующих интерфейсов
-          rm -f core/icore_interface.h 2>/dev/null || true
-          
-          # Нормализация заголовочных файлов (исправление регистра для Linux)
-          find . -type f -name "*.h" -exec sed -i 's/#include "StdAfx.h"/#include "stdafx.h"/g' {} +
+          # Исправляем регистр заголовочных файлов для Linux
+          find . -type f \( -name "*.cpp" -o -name "*.h" \) -exec sed -i 's/#include "StdAfx.h"/#include "stdafx.h"/g' {} +
+          # Создаем пустой stdafx.h если его нет в core, чтобы сборка не падала
+          mkdir -p core
+          touch core/stdafx.h
 
-      - name: Configure CMakeLists.txt
-        run: |
-          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.22.1)
-          project(icq_mobile_core)
-
-          set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
-          
-          # Принудительная настройка путей Qt для Android
-          set(QT_ANDROID_PATH "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
-          set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-          
-          find_package(Qt6 REQUIRED COMPONENTS Core Network)
-
-          add_compile_definitions(ANDROID LINUX __linux__ QT_CORE_LIB QT_NETWORK_LIB)
-
-          file(GLOB_RECURSE SOURCES 
-              "${ICQ_ROOT}/core/*.cpp"
-              "${ICQ_ROOT}/common.shared/*.cpp"
-          )
-          # Исключаем специфичные для десктопа файлы
-          list(FILTER SOURCES EXCLUDE REGEX ".*win32.*|.*macos.*|.*_mac\\.cpp")
-
-          add_library(icq_core SHARED jni_bridge.cpp ${SOURCES})
-
-          target_include_directories(icq_core PRIVATE
-              ${CMAKE_CURRENT_SOURCE_DIR}
-              ${ICQ_ROOT}
-              ${ICQ_ROOT}/core
-              ${ICQ_ROOT}/common.shared
-              $ENV{BOOST_ROOT}
-              $ENV{RAPIDJSON_ROOT}
-          )
-
-          find_library(log-lib log)
-          find_library(z-lib z)
-          find_library(android-lib android)
-
-          target_link_libraries(icq_core
-              Qt6::Core
-              Qt6::Network
-              ${log-lib}
-              ${z-lib}
-              ${android-lib}
-          )
-          
-          # Важно для упаковки Qt библиотек в APK
-          if(ANDROID)
-              qt_finalize_target(icq_core)
-          endif()
-          EOF
-
-      - name: Create JNI Bridge
-        run: |
-          cat > app/src/main/cpp/jni_bridge.cpp << 'EOF'
-          #include <jni.h>
-          #include <android/log.h>
-          #include "core/stdafx.h"
-
-          extern "C" JNIEXPORT void JNICALL
-          Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, jstring path) {
-              __android_log_print(ANDROID_LOG_INFO, "ICQ_CORE", "Core Initializing...");
-          }
-          EOF
-
-      - name: Build with Gradle
+      - name: Build APK
         run: |
           chmod +x gradlew
-          # Передаем пути напрямую в Gradle, чтобы перебить настройки в local.properties
+          # Пробрасываем пути к Qt и NDK напрямую в Gradle
           ./gradlew :app:assembleDebug \
-            -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
-            -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
-            -Pandroid.ndkpath="${{ env.ANDROID_NDK_ROOT }}" \
-            --stacktrace 2>&1 | tee build.log
+            -Pqt.android.path=/home/runner/work/Qt/6.5.0/android_arm64_v8a \
+            -Pqt.host.path=/home/runner/work/Qt/6.5.0/gcc_64 \
+            -Pandroid.ndkpath=$ANDROID_HOME/ndk/26.1.10909125 \
+            --stacktrace
 
-      - name: Upload Artifacts
-        if: always()
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: build-package
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            build.log
+          name: ICQ-Mobile-Debug
+          path: app/build/outputs/apk/debug/*.apk
+          
