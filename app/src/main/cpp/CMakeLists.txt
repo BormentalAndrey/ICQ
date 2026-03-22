@@ -1,14 +1,15 @@
-// app/src/main/cpp/CMakeLists.txt
+# app/src/main/cpp/CMakeLists.txt
 cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core" LANGUAGES CXX C)
 
 # CMP0074: find_package() использует переменные <PackageName>_ROOT
 cmake_policy(SET CMP0074 NEW)
 
-# --- Поиск Qt (Qt5 или Qt6) ---
-# Приоритет: Qt6 -> Qt5
+# -----------------------------------------------------------------------------
+# Поиск Qt (Qt5 или Qt6)
+# -----------------------------------------------------------------------------
+
 if(QT_ANDROID_PATH)
-    # Путь из Gradle
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
     find_package(Qt6 QUIET COMPONENTS Core Network)
     if(NOT Qt6_FOUND)
@@ -18,17 +19,14 @@ if(QT_ANDROID_PATH)
         set(QT_VERSION_MAJOR 6)
     endif()
 elseif(DEFINED ENV{Qt5_DIR})
-    # Qt5 из бандла
     set(CMAKE_PREFIX_PATH $ENV{Qt5_DIR})
     find_package(Qt5 REQUIRED COMPONENTS Core Network)
     set(QT_VERSION_MAJOR 5)
 elseif(DEFINED ENV{Qt6_ANDROID_DIR})
-    # Qt6 из окружения
     set(CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
     find_package(Qt6 REQUIRED COMPONENTS Core Network)
     set(QT_VERSION_MAJOR 6)
 else()
-    # Автоматический поиск
     find_package(Qt6 QUIET COMPONENTS Core Network)
     if(NOT Qt6_FOUND)
         find_package(Qt5 REQUIRED COMPONENTS Core Network)
@@ -38,16 +36,22 @@ else()
     endif()
 endif()
 
-message(STATUS "✅ Using Qt${QT_VERSION_MAJOR}: ${Qt${QT_VERSION_MAJOR}_VERSION}")
+message(STATUS "Using Qt${QT_VERSION_MAJOR}: ${Qt${QT_VERSION_MAJOR}_VERSION}")
 
-# --- Настройка путей проекта ---
+# -----------------------------------------------------------------------------
+# Настройка путей проекта
+# -----------------------------------------------------------------------------
+
 if(NOT ICQ_PROJECT_ROOT)
     get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
 else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
 
-# --- Глобальные определения ---
+# -----------------------------------------------------------------------------
+# Глобальные определения
+# -----------------------------------------------------------------------------
+
 add_compile_definitions(
     ANDROID
     PLATFORM_ANDROID
@@ -68,7 +72,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_definitions(QT_NO_DEBUG NDEBUG)
 endif()
 
-# --- Сбор исходных файлов ---
+# -----------------------------------------------------------------------------
+# Сбор исходных файлов
+# -----------------------------------------------------------------------------
+
 file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
@@ -76,18 +83,24 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Фильтр: исключаем платформозависимый код Windows и macOS
+# Исключаем платформозависимый код
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
     ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp"
 )
 
-# --- Создание библиотеки ---
+# -----------------------------------------------------------------------------
+# Создание библиотеки
+# -----------------------------------------------------------------------------
+
 add_library(icq_core SHARED
     jni_bridge.cpp
     ${CORE_SOURCES}
 )
 
-# --- Пути заголовков ---
+# -----------------------------------------------------------------------------
+# Пути заголовков
+# -----------------------------------------------------------------------------
+
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
@@ -98,22 +111,18 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
 )
 
-# Boost (опционально)
 if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
 endif()
 
-# RapidJSON (опционально)
 if(EXISTS "${ICQ_ROOT}/rapidjson/include")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
 endif()
 
-# CURL (опционально)
 if(DEFINED ENV{CURL_INCLUDE_PATH})
     target_include_directories(icq_core PRIVATE $ENV{CURL_INCLUDE_PATH})
 endif()
 
-# Qt инклуды
 if(${QT_VERSION_MAJOR} EQUAL 5)
     target_include_directories(icq_core PRIVATE
         ${Qt5Core_INCLUDE_DIRS}
@@ -126,7 +135,10 @@ else()
     )
 endif()
 
-# --- Свойства компиляции ---
+# -----------------------------------------------------------------------------
+# Свойства компиляции
+# -----------------------------------------------------------------------------
+
 set_target_properties(icq_core PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
@@ -134,7 +146,10 @@ set_target_properties(icq_core PROPERTIES
     OUTPUT_NAME "icq_core"
 )
 
-# --- Флаги компилятора ---
+# -----------------------------------------------------------------------------
+# Флаги компилятора
+# -----------------------------------------------------------------------------
+
 target_compile_options(icq_core PRIVATE 
     -fexceptions -frtti -fPIC -Wall -Wextra
     -Wno-unused-parameter -Wno-unused-variable
@@ -142,7 +157,10 @@ target_compile_options(icq_core PRIVATE
     -fdata-sections -ffunction-sections
 )
 
-# --- Линковка ---
+# -----------------------------------------------------------------------------
+# Линковка
+# -----------------------------------------------------------------------------
+
 find_library(log-lib log REQUIRED)
 find_library(z-lib z REQUIRED)
 find_library(android-lib android REQUIRED)
@@ -167,7 +185,10 @@ else()
     )
 endif()
 
-# --- Android специфика ---
+# -----------------------------------------------------------------------------
+# Android специфика
+# -----------------------------------------------------------------------------
+
 if(ANDROID)
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
     
@@ -176,13 +197,15 @@ if(ANDROID)
     endif()
     target_compile_definitions(icq_core PRIVATE __ANDROID_API__=${ANDROID_NATIVE_API_LEVEL})
     
-    # Для Qt6
     if(${QT_VERSION_MAJOR} EQUAL 6)
         qt_finalize_target(icq_core)
     endif()
 endif()
 
-# --- Итоговый лог ---
+# -----------------------------------------------------------------------------
+# Итоговый лог
+# -----------------------------------------------------------------------------
+
 message(STATUS "")
 message(STATUS "========================================")
 message(STATUS "ICQ Mobile Core Build Configuration")
