@@ -1,76 +1,67 @@
-# .github/workflows/extract-qt-bundle.yml
-name: Extract Qt5 Bundle
+# .github/workflows/android-build.yml
+name: Android Build
 
 on:
   push:
     branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  extract:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if archive exists
-        run: |
-          echo "Проверка наличия архива..."
-          if [ -f "qt5-bundle.tar.gz" ]; then
-            echo "✅ Архив найден"
-            ls -lh qt5-bundle.tar.gz
-          else
-            echo "❌ Архив не найден!"
-            ls -la
-            exit 1
-          fi
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;26.1.10909125'
+          cmdline-tools-version: 'latest'
 
-      - name: Extract Qt5 bundle
+      - name: Install system dependencies
         run: |
-          echo "Распаковка Qt5 бандла..."
-          
-          # Проверяем содержимое архива
-          echo "Содержимое архива:"
-          tar -tzf qt5-bundle.tar.gz | head -20
-          
-          # Создаем директорию и распаковываем
-          mkdir -p qt5-bundle
-          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/ --strip-components=1
-          
-          echo ""
-          echo "✅ Распаковано:"
-          ls -la qt5-bundle/
-          
-          echo ""
-          echo "📚 Библиотеки:"
-          ls -la qt5-bundle/lib/ | head -10
-          
-          echo ""
-          echo "📁 Заголовки:"
-          ls -la qt5-bundle/include/ | head -10
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            cmake \
+            ninja-build \
+            build-essential \
+            libgl1-mesa-dev
 
-      - name: Remove archive and commit
+      - name: Set Qt5 environment
         run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          
-          # Удаляем архив
-          git rm qt5-bundle.tar.gz
-          
-          # Добавляем распакованную папку
-          git add qt5-bundle/
-          
-          # Проверяем изменения
-          git status
-          
-          # Коммитим
-          git commit -m "Extract Qt5 bundle from archive" || echo "Нет изменений"
-          
-          # Пушим
-          git push
+          QT_DIR="${{ github.workspace }}/qt5-bundle"
+          echo "Qt5_DIR=${QT_DIR}/cmake/Qt5" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${QT_DIR}/cmake" >> $GITHUB_ENV
+          echo "PATH=${QT_DIR}/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
+        env:
+          Qt5_DIR: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
+          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
+          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: icq-mobile-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
