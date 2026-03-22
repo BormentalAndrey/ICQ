@@ -1,19 +1,83 @@
-    - name: Restore Missing Qt5 Files
-      run: |
-        pip3 install aqtinstall
-        
-        # 1. Скачиваем официальный SDK во временную папку
-        python3 -m aqt install-qt linux android 5.15.2 android_arm64_v8a -O ./temp_qt
-        
-        # 2. Копируем недостающие cmake-конфигурации в ваш бандл
-        # Это создаст папки Qt5Core, Qt5Network и т.д., которых у вас нет
-        cp -r ./temp_qt/5.15.2/android_arm64_v8a/lib/cmake/* ./qt5-bundle/cmake/
-        
-        # 3. Копируем инструменты хоста (moc, rcc), без которых сборка невозможна
-        python3 -m aqt install-qt linux desktop 5.15.2 gcc_64 -O ./temp_qt
-        mkdir -p ./qt5-bundle/bin
-        cp ./temp_qt/5.15.2/gcc_64/bin/* ./qt5-bundle/bin/
-        
-        # Удаляем временные файлы
-        rm -rf ./temp_qt
-        echo "✅ Недостающие файлы (CMake configs & MOC) добавлены в qt5-bundle"
+name: Android Production Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java & Python
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          
+      - name: Install Python dependencies
+        run: pip3 install aqtinstall
+
+      - name: Restore Missing Qt5 Files
+        run: |
+          # 1. Скачиваем официальный SDK во временную директорию (версия 5.15.2 наиболее стабильна для портирования)
+          # Нам нужен Android-пакет для CMake-файлов и Desktop-пакет для инструментов (MOC/RCC)
+          python3 -m aqt install-qt linux android 5.15.2 android_arm64_v8a -O ./temp_qt
+          python3 -m aqt install-qt linux desktop 5.15.2 gcc_64 -O ./temp_qt
+          
+          # 2. Копируем недостающие CMake-модули (Qt5CoreConfig.cmake, Qt5NetworkConfig.cmake и др.)
+          # По вашему списку файлов их не было в qt5-bundle/cmake
+          echo "Copying CMake configuration files..."
+          cp -r ./temp_qt/5.15.2/android_arm64_v8a/lib/cmake/* ./qt5-bundle/cmake/
+          
+          # 3. Копируем инструменты хоста (MOC, RCC, UIC)
+          # Без них компиляция C++ классов с Q_OBJECT невозможна
+          mkdir -p ./qt5-bundle/bin
+          cp ./temp_qt/5.15.2/gcc_64/bin/moc ./qt5-bundle/bin/
+          cp ./temp_qt/5.15.2/gcc_64/bin/rcc ./qt5-bundle/bin/
+          cp ./temp_qt/5.15.2/gcc_64/bin/uic ./qt5-bundle/bin/
+          chmod +x ./qt5-bundle/bin/*
+          
+          # 4. Удаляем временные данные для экономии места
+          rm -rf ./temp_qt
+          echo "✅ Докачка недостающих компонентов Qt5 завершена"
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;26.1.10909125'
+
+      - name: Run Windows-to-Android Refactor
+        run: |
+          # Запуск вашего скрипта автоматического рефакторинга
+          if [ -f "auto_refactor.py" ]; then
+            python3 auto_refactor.py --apply
+          fi
+        env:
+          PROJECT_ROOT: ${{ github.workspace }}
+
+      - name: Build APK with Gradle
+        run: |
+          chmod +x gradlew
+          # Пробрасываем путь к дополненному бандлу в Gradle
+          ./gradlew :app:assembleDebug \
+            -Pqt.android.path=${{ github.workspace }}/qt5-bundle \
+            -Pandroid.ndkpath=$ANDROID_HOME/ndk/26.1.10909125 \
+            --stacktrace
+        env:
+          # Указываем CMake, где теперь лежат все файлы (включая докачанные)
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
+          Qt5_DIR: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
+          PATH: ${{ github.workspace }}/qt5-bundle/bin:$PATH
+
+      - name: Upload Production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: icq-mobile-production
+          path: app/build/outputs/apk/debug/*.apk
