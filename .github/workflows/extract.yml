@@ -84,15 +84,13 @@ jobs:
 
       - name: Download External Dependencies (Boost & RapidJSON)
         run: |
-          # Используем зеркало GitHub для Boost, так как jfrog часто отдает 302 на HTML
-          BOOST_VERSION="1.83.0"
-          BOOST_DIR="boost_1_83_0"
-          URL="https://github.com/boostorg/boost/releases/download/boost-$BOOST_VERSION/$BOOST_DIR.tar.gz"
+          # Официальный стабильный архив Boost
+          URL="https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz"
           
           echo "Downloading Boost from $URL..."
           curl -L $URL -o boost.tar.gz
           
-          # Проверка: если файл меньше 1МБ, значит скачалась ошибка
+          # Проверка: если файл меньше 1МБ, значит скачалась ошибка (HTML заглушка)
           FILESIZE=$(stat -c%s "boost.tar.gz")
           if [ $FILESIZE -lt 1000000 ]; then
             echo "❌ Error: Boost download failed (file too small). Check URL."
