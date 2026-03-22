@@ -28,131 +28,79 @@ jobs:
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;26.1.10909125'
+          packages: 'ndk;25.1.8937393' # Рекомендуется NDK 25 для Qt 6.5.0
           cmdline-tools-version: 'latest'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libcurl4-openssl-dev \
-            cmake \
-            ninja-build \
-            build-essential \
-            libgl1-mesa-dev \
-            libxcb-xinerama0-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render-util0-dev \
-            libxcb-shape0-dev \
-            libxcb-sync-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xkb-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
+            libcurl4-openssl-dev cmake ninja-build build-essential \
+            libgl1-mesa-dev libxcb-icccm4-dev libxcb-image0-dev \
+            libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render-util0-dev \
+            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev \
+            libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev \
             python3-pip
+          pip3 install aqtinstall
 
-      # ==================== ПРОДАКШН БЛОК Qt (с кэшем) ====================
-      - name: Install & Cache Qt 6.5.0 desktop (tools)
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.5.0'
-          host: 'linux'
-          target: 'desktop'
-          arch: 'gcc_64'
-          dir: '${{ github.workspace }}/Qt'
-          cache: 'true'
-          cache-key-prefix: 'qt-6.5-icq'
-
-      - name: Install & Cache Qt 6.5.0 Android arm64_v8a
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.5.0'
-          host: 'linux'
-          target: 'android'
-          arch: 'android_arm64_v8a'
-          dir: '${{ github.workspace }}/Qt'
-          cache: 'true'
-          cache-key-prefix: 'qt-6.5-icq'
-
-      - name: Verify Qt installation
+      - name: Install Qt 6.5.0 (Android & Desktop Tools)
         run: |
-          echo "=== Qt Desktop ==="
-          if [ -f "${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake/Qt6/Qt6Config.cmake" ]; then
-            echo "✅ Desktop Qt OK"
-          else
-            echo "❌ Desktop Qt missing"
-            exit 1
-          fi
+          # Устанавливаем в отдельные подпапки внутри рабочей директории
+          aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
+          aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
           
-          echo "=== Qt Android ==="
-          if [ -f "${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6/Qt6Config.cmake" ]; then
-            echo "✅ Android Qt OK"
-          else
-            echo "❌ Android Qt missing"
-            exit 1
-          fi
-          
-          echo "Qt structure ready for CMake"
-
-      - name: Set Qt environment variables
-        run: |
+          # Прописываем пути в GITHUB_ENV для последующих шагов
           echo "QT_ANDROID_PATH=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
           echo "QT_HOST_PATH=${{ github.workspace }}/Qt/6.5.0/gcc_64" >> $GITHUB_ENV
           echo "Qt6_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake/Qt6" >> $GITHUB_ENV
-          echo "Qt6_ANDROID_DIR=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/Qt/6.5.0/android_arm64_v8a/lib/cmake:${{ github.workspace }}/Qt/6.5.0/gcc_64/lib/cmake" >> $GITHUB_ENV
-          chmod +x gradlew
-          echo "✅ Qt environment configured for production"
 
-      # ==================== ОСТАВШИЕСЯ ШАГИ ====================
-      - name: Setup Boost
+      - name: Verify & Debug Paths
+        run: |
+          echo "Checking Qt Android config..."
+          ls -l ${{ env.QT_ANDROID_PATH }}/lib/cmake/Qt6/Qt6Config.cmake || exit 1
+          echo "Checking Qt Host tools..."
+          ls -l ${{ env.QT_HOST_PATH }}/bin/moc || exit 1
+          echo "✅ All Qt components verified"
+
+      - name: Setup Boost 1.83.0
         run: |
           if [ ! -d "boost_1_83_0" ]; then
-            echo "📦 Downloading Boost 1.83.0..."
+            echo "📦 Downloading Boost..."
             wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
             tar -xjf boost_1_83_0.tar.bz2
-            rm boost_1_83_0.tar.bz2
           fi
           echo "BOOST_ROOT=${{ github.workspace }}/boost_1_83_0" >> $GITHUB_ENV
-          echo "✅ Boost ready"
 
       - name: Setup RapidJSON
         run: |
           if [ ! -d "rapidjson" ]; then
-            echo "📦 Cloning RapidJSON..."
             git clone --depth 1 https://github.com/Tencent/rapidjson.git
           fi
           echo "RAPIDJSON_ROOT=${{ github.workspace }}/rapidjson/include" >> $GITHUB_ENV
-          echo "✅ RapidJSON ready"
 
       - name: Setup libcurl for Android
         run: |
-          CURL_H_PATH=$(find /usr/include -name "curl.h" | head -n 1)
-          if [ -n "$CURL_H_PATH" ]; then
-            CURL_DIR=$(dirname "$CURL_H_PATH")
-            mkdir -p ${{ github.workspace }}/curl_flat
-            cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
-            echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
-            echo "✅ Curl include configured"
-          else
-            echo "⚠️ curl.h not found, using system path"
-          fi
+          # Копируем заголовки в плоскую структуру для CMake
+          mkdir -p ${{ github.workspace }}/curl_flat
+          cp -r /usr/include/curl/* ${{ github.workspace }}/curl_flat/ 2>/dev/null || true
+          echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
 
-      - name: Build
+      - name: Build Project
         run: |
+          chmod +x gradlew
+          # Передаем все пути через Project Properties (-P) для Gradle
           ./gradlew :app:assembleDebug \
             -Pqt.android.path="${{ env.QT_ANDROID_PATH }}" \
             -Pqt.host.path="${{ env.QT_HOST_PATH }}" \
-            -Pboost.root="${{ github.workspace }}/boost_1_83_0" \
-            -Prapidjson.root="${{ github.workspace }}/rapidjson/include" \
+            -Pboost.root="${{ env.BOOST_ROOT }}" \
+            -Prapidjson.root="${{ env.RAPIDJSON_ROOT }}" \
             --stacktrace 2>&1 | tee build.log
         env:
-          CURL_INCLUDE_PATH: ${{ github.workspace }}/curl_flat
-          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
-          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
+          # Пробрасываем переменные окружения в процесс Gradle
+          QT_ANDROID_PATH: ${{ env.QT_ANDROID_PATH }}
+          QT_HOST_PATH: ${{ env.QT_HOST_PATH }}
+          BOOST_ROOT: ${{ env.BOOST_ROOT }}
+          RAPIDJSON_ROOT: ${{ env.RAPIDJSON_ROOT }}
 
       - name: Save build log
         if: always()
@@ -168,15 +116,14 @@ jobs:
         with:
           name: icq-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
 
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs
+          name: native-build-logs
           path: |
-            build.log
             app/.cxx/**/*.log
             app/build/reports/
           retention-days: 7
+          
