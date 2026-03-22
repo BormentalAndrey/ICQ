@@ -1,295 +1,128 @@
-# .github/workflows/android_build.yml
-name: Build ICQ Mobile with Qt
+# .github/workflows/assemble-qt-bundle.yml
+name: Assemble Qt5 Bundle from Parts
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
+    paths:
+      - 'qt5-bundle.part.*'
   workflow_dispatch:
 
 jobs:
-  build:
+  assemble:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Setup Android SDK & NDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'ndk;26.1.10909125'
-          cmdline-tools-version: 'latest'
-
-      - name: Install system dependencies
+      - name: Assemble Qt5 bundle from parts
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libcurl4-openssl-dev \
-            cmake \
-            ninja-build \
-            build-essential \
-            libgl1-mesa-dev \
-            libxcb-xinerama0-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render-util0-dev \
-            libxcb-shape0-dev \
-            libxcb-sync-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xkb-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev
-
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
-        with:
-          path: |
-            /home/runner/work/ICQ/Qt
-            ~/.aqt
-          key: ${{ runner.os }}-qt-6.5.3-android-${{ hashFiles('.qt-version') }}
-          restore-keys: |
-            ${{ runner.os }}-qt-6.5.3-android-
-            ${{ runner.os }}-qt-6.5.0-
-
-      - name: Install Qt (if not cached)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          pip3 install aqtinstall
+          echo "========================================="
+          echo "СБОРКА Qt5 БАНДЛА ИЗ ЧАСТЕЙ"
+          echo "========================================="
           
-          # Устанавливаем desktop версию Qt (необходима для сборки под Android)
-          echo "📦 Installing Qt desktop version..."
-          aqt install-qt linux desktop 6.5.3 gcc_64 --outputdir /home/runner/work/ICQ/Qt
+          # Находим все части архива
+          echo ""
+          echo "📁 Найденные части:"
+          ls -la qt5-bundle.part.*
           
-          # Устанавливаем android версию Qt
-          echo "📦 Installing Qt android version..."
-          aqt install-qt linux android 6.5.3 android_arm64_v8a --outputdir /home/runner/work/ICQ/Qt
+          # Собираем архив из частей
+          echo ""
+          echo "🔧 Собираем архив..."
+          cat qt5-bundle.part.* > qt5-bundle.tar.gz
           
-          echo "✅ Qt installation complete"
-
-      - name: Set Qt environment
-        run: |
-          echo "Qt6_DIR=/home/runner/work/ICQ/Qt/6.5.3/gcc_64" >> $GITHUB_ENV
-          echo "Qt6_ANDROID_DIR=/home/runner/work/ICQ/Qt/6.5.3/android_arm64_v8a" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=/home/runner/work/ICQ/Qt/6.5.3/gcc_64/lib/cmake:/home/runner/work/ICQ/Qt/6.5.3/android_arm64_v8a/lib/cmake" >> $GITHUB_ENV
+          # Проверяем
+          echo ""
+          echo "✅ Архив собран!"
+          ls -lh qt5-bundle.tar.gz
           
-          echo "✅ Qt environment configured"
-
-      - name: Cache Boost
-        id: cache-boost
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/boost_1_83_0
-          key: ${{ runner.os }}-boost-1.83.0
-
-      - name: Download Boost 1.83.0
-        if: steps.cache-boost.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2
-          tar -xjf boost_1_83_0.tar.bz2
-          echo "1.83.0" > boost-version.txt
-
-      - name: Cache RapidJSON
-        id: cache-rapidjson
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/rapidjson
-          key: ${{ runner.os }}-rapidjson
-
-      - name: Download RapidJSON
-        if: steps.cache-rapidjson.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git ${{ github.workspace }}/rapidjson
-
-      - name: Setup libcurl for Android
-        run: |
-          CURL_H_PATH=$(find /usr/include -name "curl.h" 2>/dev/null | head -n 1)
-          if [ -n "$CURL_H_PATH" ]; then
-            CURL_DIR=$(dirname "$CURL_H_PATH")
-            mkdir -p ${{ github.workspace }}/curl_flat
-            cp -r $CURL_DIR/* ${{ github.workspace }}/curl_flat/
-            echo "CURL_INCLUDE_PATH=${{ github.workspace }}/curl_flat" >> $GITHUB_ENV
-            echo "✅ Created flat curl include structure"
+          # Проверяем целостность
+          echo ""
+          echo "🔍 Проверяем архив..."
+          if tar -tzf qt5-bundle.tar.gz > /dev/null 2>&1; then
+            echo "   ✅ Архив корректный"
+            echo "   📄 Файлов: $(tar -tzf qt5-bundle.tar.gz | wc -l)"
           else
-            echo "⚠️ curl.h not found, continuing without"
+            echo "   ❌ Архив поврежден!"
+            exit 1
           fi
 
-      - name: Create Qt version file for cache
+      - name: Extract Qt5 bundle
         run: |
-          echo "6.5.3-android" > .qt-version
-
-      - name: Fix CMakeLists.txt
-        run: |
-          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.22.1)
-          project("icq_mobile_core")
-
-          set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-          # Поиск Qt
-          if(DEFINED ENV{CMAKE_PREFIX_PATH})
-              set(CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH})
-          endif()
+          echo ""
+          echo "📦 Распаковываем Qt5..."
+          mkdir -p qt5-bundle
+          tar -xzf qt5-bundle.tar.gz -C qt5-bundle/
           
-          find_package(Qt6 CONFIG REQUIRED Core Network)
-          message(STATUS "✅ Qt6 found: ${Qt6_VERSION}")
+          echo "✅ Распаковано:"
+          ls -la qt5-bundle/ | head -10
+          
+          echo ""
+          echo "📊 Размер:"
+          du -sh qt5-bundle/
 
-          # Глобальные дефайны
-          add_compile_definitions(
-              ANDROID
-              PLATFORM_ANDROID
-              __ANDROID__
-              _FORTIFY_SOURCE=2
-              QT_CORE_LIB
-              QT_NETWORK_LIB
-          )
-
-          # Поиск исходников
-          file(GLOB_RECURSE CORE_SOURCES
-              "${ICQ_ROOT}/core/*.cpp"
-              "${ICQ_ROOT}/common.shared/*.cpp"
-              "${ICQ_ROOT}/corelib/*.cpp"
-          )
-
-          # Исключаем Windows и другие платформы
-          list(FILTER CORE_SOURCES EXCLUDE REGEX 
-              ".*win32.*|.*macos.*|.*apple.*|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp"
-          )
-
-          add_library(icq_core SHARED
-              jni_bridge.cpp
-              ${CORE_SOURCES}
-          )
-
-          # Пути инклудов
-          target_include_directories(icq_core PRIVATE
-              ${CMAKE_CURRENT_SOURCE_DIR}
-              ${ICQ_ROOT}
-              ${ICQ_ROOT}/core
-              ${ICQ_ROOT}/core/Voip/libvoip/include
-              ${ICQ_ROOT}/corelib
-              ${ICQ_ROOT}/common.shared
-              ${ICQ_ROOT}/boost_1_83_0
-              ${ICQ_ROOT}/rapidjson/include
-              $ENV{CURL_INCLUDE_PATH}
-              ${Qt6Core_INCLUDE_DIRS}
-              ${Qt6Network_INCLUDE_DIRS}
-          )
-
-          # Флаги компиляции
-          target_compile_options(icq_core PRIVATE 
-              -fexceptions -frtti -fPIC -Wall 
-              -Wno-unused-parameter -Wno-unused-variable
-              -Wno-mismatched-tags
-              -Wno-deprecated-declarations
-              -fdata-sections -ffunction-sections
-          )
-
-          # Линковка
-          find_library(log-lib log)
-          find_library(z-lib z)
-          find_library(android-lib android)
-
-          target_link_libraries(icq_core
-              Qt6::Core
-              Qt6::Network
-              ${log-lib}
-              ${z-lib}
-              ${android-lib}
-              -Wl,--gc-sections
-          )
-
-          message(STATUS "========================================")
-          message(STATUS "ICQ Mobile Core Build Configuration")
-          message(STATUS "========================================")
-          message(STATUS "  ICQ_ROOT: ${ICQ_ROOT}")
-          message(STATUS "  Qt Version: ${Qt6_VERSION}")
-          message(STATUS "========================================")
-          EOF
-
-      - name: Create jni_bridge.cpp
+      - name: Set up Qt environment
         run: |
-          mkdir -p app/src/main/cpp
-          cat > app/src/main/cpp/jni_bridge.cpp << 'EOF'
-          #include <jni.h>
-          #include <string>
-          #include <memory>
-          #include <android/log.h>
+          QT_DIR="${{ github.workspace }}/qt5-bundle"
+          echo "Qt5_DIR=${QT_DIR}/cmake/Qt5" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${QT_DIR}/cmake" >> $GITHUB_ENV
+          echo "PATH=${QT_DIR}/bin:$PATH" >> $GITHUB_ENV
+          
+          echo "✅ Qt environment configured"
+          echo "   Qt5_DIR: ${QT_DIR}/cmake/Qt5"
 
-          #define LOG_TAG "IcqCore"
-          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-          #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-
-          JavaVM* g_jvm = nullptr;
-
-          JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-              g_jvm = vm;
-              LOGI("JNI_OnLoad called");
-              return JNI_VERSION_1_6;
-          }
-
-          extern "C" JNIEXPORT jstring JNICALL
-          Java_com_icq_mobile_core_IcqCoreEngine_nativeGetVersion(JNIEnv *env, jobject thiz) {
-              return env->NewStringUTF("1.0.0");
-          }
-
-          extern "C" JNIEXPORT void JNICALL
-          Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv *env, jobject thiz, 
-                                                            jstring data_path, jstring cache_path) {
-              const char* data = env->GetStringUTFChars(data_path, nullptr);
-              const char* cache = env->GetStringUTFChars(cache_path, nullptr);
-              LOGI("Core init with data: %s, cache: %s", data, cache);
-              env->ReleaseStringUTFChars(data_path, data);
-              env->ReleaseStringUTFChars(cache_path, cache);
-          }
-          EOF
-
-      - name: Fix permissions and build
+      - name: Verify Qt installation
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee build.log
-        env:
-          BOOST_ROOT: ${{ github.workspace }}/boost_1_83_0
-          RAPIDJSON_ROOT: ${{ github.workspace }}/rapidjson/include
+          echo ""
+          echo "🔍 Проверка Qt5:"
+          
+          # Проверяем qmake
+          if [ -f "qt5-bundle/bin/qmake" ]; then
+            chmod +x qt5-bundle/bin/qmake
+            qt5-bundle/bin/qmake --version
+            echo "   ✅ qmake работает"
+          else
+            echo "   ❌ qmake не найден"
+          fi
+          
+          # Проверяем библиотеки
+          echo ""
+          echo "📚 Qt библиотеки:"
+          ls -la qt5-bundle/lib/libQt5*.so | head -10
+          
+          # Проверяем заголовки
+          echo ""
+          echo "📁 Qt заголовки:"
+          ls -la qt5-bundle/include/
 
-      - name: Save build log
-        if: always()
+      - name: Upload assembled bundle
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-mobile-debug
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
-
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            app/build/reports/
-            app/.cxx/**/*.log
-            build.log
+          name: qt5-bundle-assembled
+          path: qt5-bundle.tar.gz
           retention-days: 7
+
+      - name: Clean up parts (optional)
+        if: github.event_name == 'push'
+        run: |
+          echo ""
+          echo "🧹 Очистка частей архива..."
+          rm -f qt5-bundle.part.*
+          echo "✅ Части удалены"
+
+      - name: Commit cleaned repository
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "🧹 Clean up Qt5 bundle parts after assembly"
+            git push
+            echo "✅ Очистка закоммичена"
+          else
+            echo "ℹ️ Нет изменений для коммита"
+          fi
