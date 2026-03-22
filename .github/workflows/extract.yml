@@ -1,4 +1,4 @@
-name: Android Production Build
+name: Download Dependencies Only
 
 on:
   push:
@@ -6,90 +6,65 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  download-deps:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Setup Java & Python
+      - name: Setup Python
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          
+
       - name: Install aqtinstall
         run: pip3 install aqtinstall
 
-      - name: Restore Missing Qt5 Files
+      - name: Download Qt 6.5.0 (Android & Desktop Tools)
         run: |
-          mkdir -p ./temp_qt
+          # Создаем папку Qt в корне репозитория
+          mkdir -p ${{ github.workspace }}/Qt
           
-          # 1. Загружаем официальный SDK. 
-          # В 5.15.2 архитектура для aqt называется 'android_arm64_v8a' (через подчеркивание)
-          # Используем флаг -m (module), чтобы избежать ошибки qt_base
-          echo "Downloading Android SDK components..."
-          python3 -m aqt install-qt linux android 5.15.2 android_arm64_v8a -O ./temp_qt -m qtbase qtdeclarative
+          # Скачиваем библиотеки для Android (arm64-v8a)
+          python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
           
-          # 2. Загружаем инструменты Хоста (MOC, RCC)
-          echo "Downloading Desktop tools..."
-          python3 -m aqt install-qt linux desktop 5.15.2 gcc_64 -O ./temp_qt -m qtbase
+          # Скачиваем инструменты для Linux (moc, rcc, uic)
+          python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
           
-          # 3. Интеграция в ваш qt5-bundle
-          echo "Integrating CMake configurations..."
-          # Копируем всё содержимое из скачанной папки cmake в ваш бандл
-          # Путь в aqt: <output>/<version>/<arch>/lib/cmake
-          cp -r ./temp_qt/5.15.2/android_arm64_v8a/lib/cmake/* ./qt5-bundle/cmake/
-          
-          # 4. Копируем инструменты сборки
-          mkdir -p ./qt5-bundle/bin
-          cp ./temp_qt/5.15.2/gcc_64/bin/moc ./qt5-bundle/bin/
-          cp ./temp_qt/5.15.2/gcc_64/bin/rcc ./qt5-bundle/bin/
-          cp ./temp_qt/5.15.2/gcc_64/bin/uic ./qt5-bundle/bin/
-          chmod +x ./qt5-bundle/bin/*
-          
-          # Проверка результата
-          ls -la ./qt5-bundle/cmake/Qt5Core/Qt5CoreConfig.cmake || echo "Warning: Core config not found"
-          
-          rm -rf ./temp_qt
-          echo "✅ Missing Qt5 components integrated successfully"
+          echo "✅ Qt 6.5.0 скачан в папку ${{ github.workspace }}/Qt"
 
-      - name: Setup Android SDK & NDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'ndk;26.1.10909125'
-
-      - name: Run Windows-to-Android Refactor
+      - name: Download Boost 1.83.0
         run: |
-          if [ -f "auto_refactor.py" ]; then
-            python3 auto_refactor.py --apply
-          fi
-        env:
-          PROJECT_ROOT: ${{ github.workspace }}
+          # Скачиваем и распаковываем Boost в корень
+          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz
+          tar -xzf boost_1_83_0.tar.gz
+          rm boost_1_83_0.tar.gz
+          echo "✅ Boost 1.83.0 скачан в папку ${{ github.workspace }}/boost_1_83_0"
 
-      - name: Build APK with Gradle
+      - name: Download RapidJSON
         run: |
-          chmod +x gradlew
-          
-          # Добавляем наш bin с MOC в системный PATH
-          export PATH=${{ github.workspace }}/qt5-bundle/bin:$PATH
-          
-          # Сборка
-          ./gradlew :app:assembleDebug \
-            -Pqt.android.path=${{ github.workspace }}/qt5-bundle \
-            -Pandroid.ndkpath=$ANDROID_HOME/ndk/26.1.10909125 \
-            --stacktrace
-        env:
-          # Явные указатели для CMake внутри Gradle
-          CMAKE_PREFIX_PATH: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
-          Qt5_DIR: ${{ github.workspace }}/qt5-bundle/cmake/Qt5
+          # Клонируем RapidJSON в корень
+          git clone --depth 1 https://github.com/Tencent/rapidjson.git
+          echo "✅ RapidJSON скачан в папку ${{ github.workspace }}/rapidjson"
 
-      - name: Upload Production APK
+      - name: Verify Downloads
+        run: |
+          echo "--- Содержимое репозитория после загрузки ---"
+          ls -d Qt/6.5.0/*
+          ls -d boost_1_83_0
+          ls -d rapidjson
+          echo "--- Проверка инструментов Qt (MOC) ---"
+          ls -la ${{ github.workspace }}/Qt/6.5.0/gcc_64/bin/moc
+
+      # Опционально: загрузить всё скачанное как артефакт, чтобы вы могли скачать это архивом из GitHub
+      - name: Upload Dependencies as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: icq-mobile-production
-          path: app/build/outputs/apk/debug/*.apk
-          
+          name: project-dependencies
+          path: |
+            ${{ github.workspace }}/Qt
+            ${{ github.workspace }}/boost_1_83_0
+            ${{ github.workspace }}/rapidjson
+          retention-days: 1
