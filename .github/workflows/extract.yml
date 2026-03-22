@@ -8,6 +8,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   refactor:
     runs-on: ubuntu-latest
@@ -295,11 +299,13 @@ jobs:
         git add -A
         if ! git diff --cached --quiet; then
           git commit -m "🤖 Auto-refactor: Windows → Android port"
-          git push
+          git push origin HEAD:${{ github.ref_name }}
           echo "✅ Изменения закоммичены"
         else
           echo "ℹ️ Нет изменений"
         fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
