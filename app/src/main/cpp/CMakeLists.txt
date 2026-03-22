@@ -1,73 +1,46 @@
 cmake_minimum_required(VERSION 3.22.1)
 
-# Указываем политику для корректной обработки путей (важно для новых версий CMake)
+# CMP0074: find_package() использует переменные <PackageName>_ROOT
 cmake_policy(SET CMP0074 NEW)
 
-project("icq_mobile_core")
+project("icq_mobile_core" LANGUAGES CXX C)
 
-# --- Настройка путей ---
-# ICQ_PROJECT_ROOT может приходить из Gradle (-DICQ_PROJECT_ROOT=...)
+# --- Настройка путей проекта ---
 if(NOT ICQ_PROJECT_ROOT)
-    set(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
+    # Если корень не задан через Gradle, вычисляем его относительно текущего файла
+    get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
 else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
 
-# --- Поиск Qt для Android ---
-# Приоритет: Аргументы из Gradle -> Переменные окружения -> Хардкод CI
-set(QT_FOUND FALSE)
+# --- Поиск Qt 6 для Android ---
+# Принудительно устанавливаем способ поиска для Android
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
+message(STATUS "Configuring Qt for Android...")
 
-if(QT_ANDROID_PATH AND QT_HOST_PATH)
+# 1. Приоритет аргументам из Gradle (через -DQT_ANDROID_PATH)
+if(QT_ANDROID_PATH)
     set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-    set(QT_HOST_PATH "${QT_HOST_PATH}")
-    message(STATUS "✅ Using Qt paths from Gradle arguments")
-    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
-    if(Qt6_FOUND)
-        set(QT_FOUND TRUE)
-    endif()
-elseif(DEFINED ENV{Qt6_ANDROID_DIR} AND DEFINED ENV{Qt6_DIR})
+    message(STATUS "Using Qt from Gradle: ${QT_ANDROID_PATH}")
+# 2. Переменные окружения (для CI или локальных скриптов)
+elseif(DEFINED ENV{Qt6_ANDROID_DIR})
     set(QT_ANDROID_PATH "$ENV{Qt6_ANDROID_DIR}")
-    set(QT_HOST_PATH "$ENV{Qt6_DIR}")
-    set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-    message(STATUS "✅ Using Qt paths from environment")
-    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
-    if(Qt6_FOUND)
-        set(QT_FOUND TRUE)
-    endif()
+    message(STATUS "Using Qt from Environment: ${QT_ANDROID_PATH}")
+# 3. Стандартный путь в GitHub Actions
 elseif(EXISTS "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
-    # Резервный путь для GitHub Actions
     set(QT_ANDROID_PATH "/home/runner/work/ICQ/Qt/6.5.0/android_arm64_v8a")
     set(QT_HOST_PATH "/home/runner/work/ICQ/Qt/6.5.0/gcc_64")
-    set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-    message(STATUS "✅ Using GitHub Actions Qt paths")
-    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
-    if(Qt6_FOUND)
-        set(QT_FOUND TRUE)
-    endif()
-else()
-    message(STATUS "⚠️ Qt not found via configured paths, checking system...")
-    find_package(Qt6 CONFIG QUIET COMPONENTS Core Network)
-    if(Qt6_FOUND)
-        set(QT_FOUND TRUE)
-        message(STATUS "✅ Qt6 found in system: ${Qt6_VERSION}")
-    endif()
+    message(STATUS "Using GitHub Actions fallback path")
 endif()
 
-if(NOT QT_FOUND)
-    message(FATAL_ERROR "❌ Qt6 is REQUIRED for this project but was not found.\n"
-        "   Please install Qt 6.5.0 with:\n"
-        "   aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir /path/to/Qt\n"
-        "   aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir /path/to/Qt")
-endif()
+# Поиск необходимых модулей Qt
+find_package(Qt6 REQUIRED COMPONENTS Core Network)
+list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-message(STATUS "✅ Qt6 found. Version: ${Qt6_VERSION}")
-message(STATUS "✅ Qt6 Path: ${Qt6_DIR}")
-message(STATUS "✅ Qt6 Host Path: ${QT_HOST_PATH}")
-
-# --- Глобальные дефайны ---
+# --- Глобальные определения (Definitions) ---
 add_compile_definitions(
     LINUX
     __linux__
@@ -78,12 +51,15 @@ add_compile_definitions(
     _FORTIFY_SOURCE=2
     QT_CORE_LIB
     QT_NETWORK_LIB
-    # Отключаем отладочный вывод в релизе
-    $<$<CONFIG:Release>:QT_NO_DEBUG>
-    $<$<CONFIG:Release>:NDEBUG>
 )
 
-# --- Поиск исходников ---
+# Настройки для специфических сборок
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_definitions(QT_NO_DEBUG NDEBUG)
+endif()
+
+# --- Сбор исходных файлов ---
+# ВАЖНО: GLOB_RECURSE удобен, но CMake не всегда видит новые файлы без переконфигурации.
 file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
@@ -91,17 +67,16 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Фильтр исключений (убираем всё, что относится к другим ОС и тестам)
+# Фильтр: исключаем платформозависимый код других ОС и тесты
 list(FILTER CORE_SOURCES EXCLUDE REGEX ".*(win32|macos|apple|linux_desktop|test|stdafx\\.cpp|unittests|_mac|_ios).*")
 
-# --- Создание библиотеки ---
+# --- Создание целевой библиотеки ---
 add_library(icq_core SHARED
     jni_bridge.cpp
     ${CORE_SOURCES}
 )
 
-# --- Настройка инклудов ---
-# Используем PRIVATE, так как это конечная библиотека
+# --- Настройка путей заголовочных файлов (Includes) ---
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}                                
@@ -113,25 +88,28 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
     ${ICQ_ROOT}/boost_1_83_0
     ${ICQ_ROOT}/rapidjson/include
-    $ENV{CURL_INCLUDE_PATH}
 )
 
-# Добавляем Qt инклуды
-target_include_directories(icq_core PRIVATE
-    ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
-)
+# Обработка внешнего пути CURL из окружения
+if(DEFINED ENV{CURL_INCLUDE_PATH})
+    target_include_directories(icq_core PRIVATE $ENV{CURL_INCLUDE_PATH})
+endif()
 
-# --- Свойства таргета ---
+# Qt инклуды добавляются автоматически через линковку с таргетами Qt6::...
+# Но для ясности можно оставить поиск библиотек
+
+# --- Свойства компиляции ---
 set_target_properties(icq_core PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+    # Имя библиотеки в APK будет libicq_core.so
+    OUTPUT_NAME "icq_core"
 )
 
-# --- Опции компиляции ---
+# --- Флаги компилятора ---
 target_compile_options(icq_core PRIVATE 
     -fexceptions 
     -frtti 
@@ -145,54 +123,56 @@ target_compile_options(icq_core PRIVATE
     -ffunction-sections
 )
 
-# --- Поиск системных библиотек Android ---
+# --- Линковка системных библиотек Android ---
 find_library(log-lib log REQUIRED)
 find_library(z-lib z REQUIRED)
 find_library(android-lib android REQUIRED)
 
-# --- Линковка ---
 target_link_libraries(icq_core
     Qt6::Core
     Qt6::Network
     ${log-lib}
     ${z-lib}
     ${android-lib}
+    # Очистка неиспользуемых секций для уменьшения размера
     -Wl,--gc-sections
 )
 
-# --- Специфичные настройки для Android & Qt ---
+# --- Специфические настройки для Android & Qt 6 ---
 if(ANDROID)
-    # Гарантируем, что JNI_OnLoad не будет вырезан оптимизатором
+    # 1. Предотвращаем удаление JNI_OnLoad при линковке
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
     
-    # Финализация таргета Qt (генерация json-описаний зависимостей для развертывания)
+    # 2. Установка API Level (обычно пробрасывается из Gradle, но подстрахуем)
+    if(NOT ANDROID_NATIVE_API_LEVEL)
+        set(ANDROID_NATIVE_API_LEVEL 24)
+    endif()
+    target_compile_definitions(icq_core PRIVATE __ANDROID_API__=${ANDROID_NATIVE_API_LEVEL})
+
+    # 3. КРИТИЧЕСКИ ВАЖНО ДЛЯ Qt 6:
+    # Эта команда генерирует deployment-settings.json, без которого Qt библиотеки не попадут в APK.
+    # Должна вызываться ПОСЛЕ target_link_libraries.
     qt_finalize_target(icq_core)
-    
-    target_compile_definitions(icq_core PRIVATE __ANDROID_API__=24)
 endif()
 
-# --- Глобальные оптимизации (LTO) ---
+# --- Межпроцедурная оптимизация (LTO/IPO) ---
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     include(CheckIPOSupported)
     check_ipo_supported(RESULT ipo_supported OUTPUT error)
     if(ipo_supported)
         set_property(TARGET icq_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-        message(STATUS "✅ LTO (IPO) is enabled for release build")
-    else()
-        message(STATUS "⚠️ LTO not supported: ${error}")
+        message(STATUS "✅ LTO (IPO) is enabled")
     endif()
 endif()
 
-# --- Вывод диагностической информации ---
-message(STATUS "")
+# --- Итоговый лог конфигурации ---
 message(STATUS "---------------------------------------------------------")
-message(STATUS "  Project:          ${PROJECT_NAME}")
-message(STATUS "  ICQ_ROOT:         ${ICQ_ROOT}")
-message(STATUS "  Build Type:       ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Android API:      ${ANDROID_NATIVE_API_LEVEL}")
-message(STATUS "  Qt6 Version:      ${Qt6_VERSION}")
-message(STATUS "  Qt6 Path:         ${Qt6_DIR}")
-message(STATUS "  Qt6 Host Path:    ${QT_HOST_PATH}")
-message(STATUS "  LTO Supported:    ${ipo_supported}")
+message(STATUS "  Configuration Summary:")
+message(STATUS "  Project:           ${PROJECT_NAME}")
+message(STATUS "  ICQ_ROOT:          ${ICQ_ROOT}")
+message(STATUS "  Build Type:        ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Qt6 Version:       ${Qt6_VERSION}")
+message(STATUS "  Qt6 Path:          ${QT_ANDROID_PATH}")
+message(STATUS "  Android API:       ${ANDROID_NATIVE_API_LEVEL}")
+message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "---------------------------------------------------------")
-message(STATUS "")
