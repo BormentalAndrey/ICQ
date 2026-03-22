@@ -67,8 +67,10 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Фильтр: исключаем платформозависимый код других ОС и тесты
-list(FILTER CORE_SOURCES EXCLUDE REGEX ".*(win32|macos|apple|linux_desktop|test|stdafx\\.cpp|unittests|_mac|_ios).*")
+# Фильтр: исключаем платформозависимый код других ОС, тесты и проблемные файлы
+list(FILTER CORE_SOURCES EXCLUDE REGEX 
+    ".*(win32|macos|apple|linux_desktop|test|stdafx\\.cpp|unittests|_mac|_ios|VoipProxy|crash_reporter).*"
+)
 
 # --- Создание целевой библиотеки ---
 add_library(icq_core SHARED
@@ -96,7 +98,11 @@ if(DEFINED ENV{CURL_INCLUDE_PATH})
 endif()
 
 # Qt инклуды добавляются автоматически через линковку с таргетами Qt6::...
-# Но для ясности можно оставить поиск библиотек
+# Но для ясности добавим их явно
+target_include_directories(icq_core PRIVATE
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Network_INCLUDE_DIRS}
+)
 
 # --- Свойства компиляции ---
 set_target_properties(icq_core PROPERTIES
@@ -161,11 +167,14 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     check_ipo_supported(RESULT ipo_supported OUTPUT error)
     if(ipo_supported)
         set_property(TARGET icq_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-        message(STATUS "✅ LTO (IPO) is enabled")
+        message(STATUS "✅ LTO (IPO) is enabled for release build")
+    else()
+        message(STATUS "⚠️ LTO not supported: ${error}")
     endif()
 endif()
 
 # --- Итоговый лог конфигурации ---
+message(STATUS "")
 message(STATUS "---------------------------------------------------------")
 message(STATUS "  Configuration Summary:")
 message(STATUS "  Project:           ${PROJECT_NAME}")
@@ -173,6 +182,10 @@ message(STATUS "  ICQ_ROOT:          ${ICQ_ROOT}")
 message(STATUS "  Build Type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Qt6 Version:       ${Qt6_VERSION}")
 message(STATUS "  Qt6 Path:          ${QT_ANDROID_PATH}")
+if(DEFINED QT_HOST_PATH)
+    message(STATUS "  Qt6 Host Path:     ${QT_HOST_PATH}")
+endif()
 message(STATUS "  Android API:       ${ANDROID_NATIVE_API_LEVEL}")
 message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "  LTO Supported:     ${ipo_supported}")
 message(STATUS "---------------------------------------------------------")
