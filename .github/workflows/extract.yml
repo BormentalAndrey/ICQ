@@ -1,43 +1,26 @@
-# .github/workflows/extract-zip-archives.yml
-name: Extract ZIP Archives
+name: Unzip All Archives
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Позволяет запускать вручную
 
 jobs:
-  extract:
+  unzip-files:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List all files
+      - name: Unzip all archives in their locations
         run: |
-          echo "Все файлы в репозитории:"
-          ls -la
-          echo ""
-          echo "Поиск zip файлов:"
-          find . -name "*.zip" -type f
+          # Ищем все файлы .zip и распаковываем их в их же директории
+          find . -name "*.zip" -type f -exec sh -c '
+            zip_file="$1"
+            dest_dir=$(dirname "$zip_file")
+            echo "Распаковка $zip_file в $dest_dir..."
+            unzip -o "$zip_file" -d "$dest_dir"
+          ' _ {} \;
 
-      - name: Extract zip files
-        run: |
-          # Находим и распаковываем
-          for file in $(find . -name "*.zip" -type f); do
-            echo "Распаковка: $file"
-            unzip -o "$file" -d "$(dirname "$file")"
-            rm -f "$file"
-          done
-
-      - name: Push changes
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add -A
-          git commit -m "Extract zip archives" || echo "No changes"
-          git push
+      - name: Check results
+        run: ls -R
