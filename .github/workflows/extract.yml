@@ -2,10 +2,6 @@
 name: Extract ZIP Archives
 
 on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - '**.zip'
   workflow_dispatch:
 
 jobs:
@@ -21,42 +17,27 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract ZIP files
+      - name: List all files
         run: |
-          echo "========================================="
-          echo "РАСПАКОВКА ZIP АРХИВОВ"
-          echo "========================================="
-          
-          # Находим все zip файлы
-          for archive in $(find . -name "*.zip" -type f); do
-            echo ""
-            echo "📦 Распаковка: $archive"
-            echo "   Размер: $(du -h "$archive" | cut -f1)"
-            
-            # Получаем директорию
-            dir=$(dirname "$archive")
-            cd "$dir"
-            
-            # Распаковываем
-            unzip -q -o "$(basename "$archive")"
-            
-            # Проверяем результат
-            if [ $? -eq 0 ]; then
-              echo "   ✅ Успешно"
-              # Удаляем архив
-              rm -f "$(basename "$archive")"
-            else
-              echo "   ❌ Ошибка распаковки"
-            fi
-            
-            cd - > /dev/null
+          echo "Все файлы в репозитории:"
+          ls -la
+          echo ""
+          echo "Поиск zip файлов:"
+          find . -name "*.zip" -type f
+
+      - name: Extract zip files
+        run: |
+          # Находим и распаковываем
+          for file in $(find . -name "*.zip" -type f); do
+            echo "Распаковка: $file"
+            unzip -o "$file" -d "$(dirname "$file")"
+            rm -f "$file"
           done
 
-      - name: Commit changes
+      - name: Push changes
         run: |
-          git config user.name "GitHub Actions Bot"
+          git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          
           git add -A
-          git commit -m "Extract ZIP archives" || echo "Нет изменений"
+          git commit -m "Extract zip archives" || echo "No changes"
           git push
