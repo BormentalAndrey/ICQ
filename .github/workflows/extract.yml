@@ -1,66 +1,61 @@
-name: Auto-fix Compilation Errors
+name: Android Build
 
 on:
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
-  fix-and-push:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          
-      - name: Setup Git config
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-      - name: Setup Clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format-14
-          sudo ln -sf /usr/bin/clang-format-14 /usr/bin/clang-format
-          
-      - name: 🛠 Fix config.cpp
-        run: |
-          FILE="common.shared/config/config.cpp"
-          if [ -f "$FILE" ]; then
-            sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/' "$FILE"
-            sed -i '/features::report_messages_enabled/s/)),/},/' "$FILE"
-          fi
-          
-      - name: 🛠 Fix curl_handler.h
-        run: |
-          FILE="core/curl_handler.h"
-          if [ -f "$FILE" ]; then
-            sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#  include <curl\/curl.h>\n#else\n#  include <curl.h>\n#endif/' "$FILE"
-          fi
-          
-      - name: 🛠 Fix binary_stream.h
-        run: |
-          FILE="core/tools/binary_stream.h"
-          if [ -f "$FILE" ]; then
-            sed -i 's/buffer_.size() < _size/buffer_.size() < static_cast<size_t>(_size)/g' "$FILE"
-            sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
-          fi
+          submodules: recursive # Подгружаем сабмодули, если они есть
 
-      - name: Apply Formatting
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build with Gradle
+        # Если в корне есть gradlew, собираем через него
+        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
         run: |
-          git diff --name-only | grep -E '\.(cpp|h|hpp)$' | xargs -r clang-format -i
-          git add .
-          
-      - name: Push directly to main
-        run: |
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-          else
-            git commit -m "build: auto-fix compilation errors (Direct Push)"
-            # Делаем pull, чтобы избежать конфликтов, если BormentalAndrey что-то изменил
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease 2>&1 | tee build.log
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload build logs
+        if: always()  # Загружаем логи даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            app/build/reports/
+            app/build/outputs/logs/
+            ~/.gradle/daemon/*/daemon-*.out.log
+          if-no-files-found: warn
+
+      - name: Upload Gradle reports
+        if: always()  # Загружаем отчеты даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/
+            **/build/outputs/logs/
+            **/build/test-results/
+          if-no-files-found: warn
