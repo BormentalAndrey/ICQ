@@ -3,7 +3,7 @@ name: Unzip All Archives
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Позволяет запускать вручную
+  workflow_dispatch:
 
 jobs:
   unzip-files:
@@ -12,15 +12,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Unzip all archives in their locations
+      - name: Unzip all archives in their own directories
         run: |
-          # Ищем все файлы .zip и распаковываем их в их же директории
-          find . -name "*.zip" -type f -exec sh -c '
-            zip_file="$1"
-            dest_dir=$(dirname "$zip_file")
-            echo "Распаковка $zip_file в $dest_dir..."
-            unzip -o "$zip_file" -d "$dest_dir"
-          ' _ {} \;
+          # Используем цикл while, чтобы корректно обрабатывать пути
+          find . -name "*.zip" -type f | while read -r zip_path; do
+            # Определяем абсолютный путь к папке и имя файла
+            dir=$(dirname "$zip_path")
+            file=$(basename "$zip_path")
+            
+            echo "Переходим в $dir и распаковываем $file..."
+            
+            # Переходим в директорию архива и распаковываем его там
+            # Это гарантирует, что содержимое не улетит в корень
+            (cd "$dir" && unzip -o "$file")
+          done
 
-      - name: Check results
-        run: ls -R
+      - name: Check if files are unzipped
+        run: |
+          echo "Структура файлов после распаковки:"
+          ls -R
+
+      # ВАЖНО: Если вы хотите увидеть изменения в репозитории, их нужно закоммитить
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          # Проверяем, есть ли изменения, чтобы не упасть с ошибкой
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-unzip archives" && git push)
