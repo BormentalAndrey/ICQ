@@ -156,9 +156,10 @@ namespace core
         {
             std::string interval;
 
-            if (_bytes > 1500 * MEGABYTE)
+            // FIX: Added LL to prevent -Wsign-compare warnings
+            if (_bytes > 1500LL * MEGABYTE)
                 interval = "1500mb +";
-            else if (_bytes < 100 * MEGABYTE)
+            else if (_bytes < 100LL * MEGABYTE)
                 interval = "< 100mb";
             else
                 interval = round_interval(100, _bytes / MEGABYTE, 100, 1500) + MEGABYTE_STR;
@@ -218,4 +219,3 @@ namespace core
         }
     }
 }
-
