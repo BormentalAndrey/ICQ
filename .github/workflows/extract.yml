@@ -43,7 +43,6 @@ jobs:
         run: |
           FILE="common.shared/config/config.cpp"
           if [ -f "$FILE" ]; then
-            # Замена std::pair на инициализацию через фигурные скобки для совместимости с Qt6/C++17
             sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/' "$FILE"
             sed -i '/features::report_messages_enabled/s/)),/},/' "$FILE"
             echo "✓ Fixed config.cpp struct initializer"
@@ -60,26 +59,19 @@ jobs:
           
       - name: Fix MemoryStats macros
         run: |
-          # Исправление макросов во всех хедерах папки gui/memory_stats
           find gui/memory_stats -name "*.h" -type f | while read -r file; do
             if ! grep -q "#define MEMSTATS_NS_BEGIN" "$file"; then
               sed -i '1i#ifndef MEMSTATS_NS_BEGIN\n#define MEMSTATS_NS_BEGIN namespace memory_stats {\n#define MEMSTATS_NS_END }\n#endif\n' "$file"
-              echo "✓ Added macros to $file"
             fi
           done
-          
-          # Создание общего заголовочного файла для макросов
           mkdir -p gui/memory_stats
           cat > gui/memory_stats/memory_stats_macros.h << 'EOF'
 #ifndef MEMORY_STATS_MACROS_H
 #define MEMORY_STATS_MACROS_H
-
 #define MEMSTATS_NS_BEGIN namespace memory_stats {
 #define MEMSTATS_NS_END }
-
-#endif // MEMORY_STATS_MACROS_H
+#endif
 EOF
-          echo "✓ Created memory_stats_macros.h"
           
       - name: Fix curl.h include
         run: |
@@ -87,133 +79,65 @@ EOF
           if [ -f "$FILE" ]; then
             if ! grep -q "#ifdef __ANDROID__" "$FILE"; then
               sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#include <curl\/curl.h>\n#else\n#include <curl.h>\n#endif/' "$FILE"
-              echo "✓ Fixed curl.h include path for Android"
             fi
           fi
           
-      - name: Fix Qt6 includes for QRect and QStringRef
+      - name: Fix Qt6 includes
         run: |
           FILE="gui/types/message.h"
-          if [ -f "$FILE" ]; then
-            if ! grep -q "#include <QRect>" "$FILE"; then
-              sed -i '/#include <QString>/a #include <QRect>' "$FILE"
-              echo "✓ Added QRect include to message.h"
-            fi
-          fi
+          [ -f "$FILE" ] && ! grep -q "#include <QRect>" "$FILE" && sed -i '/#include <QString>/a #include <QRect>' "$FILE"
           
           FILE="gui/utils/StringComparator.h"
           if [ -f "$FILE" ]; then
-            if ! grep -q "#include <QStringRef>" "$FILE"; then
-              sed -i '1i#include <QStringRef>\n#include <QLatin1String>' "$FILE"
-              echo "✓ Added QStringRef include to StringComparator.h"
-            fi
+            ! grep -q "#include <QStringRef>" "$FILE" && sed -i '1i#include <QStringRef>\n#include <QLatin1String>' "$FILE"
             sed -i 's/\bql1s\b/QLatin1String/g' "$FILE"
-            echo "✓ Fixed ql1s to QLatin1String"
           fi
           
-      - name: Fix iarray interface issues
+      - name: Fix iarray interface
         run: |
           FILE="gui/utils/gui_coll_helper.h"
-          if [ -f "$FILE" ]; then
-            if ! grep -q "inline size_t array_size" "$FILE"; then
-              cat >> "$FILE" << 'EOF'
-
-// Helper functions for iarray compatibility (Qt6/Dzin)
+          if [ -f "$FILE" ] && ! grep -q "inline size_t array_size" "$FILE"; then
+            cat >> "$FILE" << 'EOF'
 namespace core {
-    template<typename T>
-    inline size_t array_size(iarray* arr) {
-        return arr ? arr->size() : 0;
-    }
-    
-    template<typename T>
-    inline void array_reserve(iarray* arr, size_t size) {
-        if (arr) arr->reserve(size);
-    }
-    
-    template<typename T>
-    inline void array_push_back(iarray* arr, T* value) {
-        if (arr) arr->push_back(value);
-    }
+    template<typename T> inline size_t array_size(iarray* arr) { return arr ? arr->size() : 0; }
+    template<typename T> inline void array_reserve(iarray* arr, size_t size) { if (arr) arr->reserve(size); }
+    template<typename T> inline void array_push_back(iarray* arr, T* value) { if (arr) arr->push_back(value); }
 }
 EOF
-              echo "✓ Added iarray compatibility helpers"
-            fi
           fi
           
       - name: Fix patch_version.h namespace
         run: |
           FILE="common.shared/patch_version.h"
-          if [ -f "$FILE" ]; then
-            if grep -q "^namespace common$" "$FILE"; then
-              sed -i 's/^namespace common$/namespace common {/' "$FILE"
-              echo "} // namespace common" >> "$FILE"
-              echo "✓ Fixed patch_version.h namespace braces"
-            fi
+          if [ -f "$FILE" ] && grep -q "^namespace common$" "$FILE"; then
+            sed -i 's/^namespace common$/namespace common {/' "$FILE"
+            echo "} // namespace common" >> "$FILE"
           fi
           
-      - name: Fix sign-compare warnings in common.h
+      - name: Fix sign-compare warnings
         run: |
-          FILE="common.shared/common.h"
-          if [ -f "$FILE" ]; then
-            sed -i 's/if (_bytes > \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<long long>(_bytes) > \1LL * MEGABYTE)/g' "$FILE"
-            sed -i 's/if (_bytes < \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<long long>(_bytes) < \1LL * MEGABYTE)/g' "$FILE"
-            echo "✓ Fixed sign-compare warnings in common.h"
-          fi
-          
-      - name: Fix sign-compare warnings in binary_stream.h
-        run: |
+          [ -f "common.shared/common.h" ] && sed -i 's/if (_bytes [<>]/if (static_cast<long long>(_bytes) /g' "common.shared/common.h"
           FILE="core/tools/binary_stream.h"
           if [ -f "$FILE" ]; then
-            # Исправление сравнений size_t и int64_t
             sed -i 's/buffer_.size() < _size/buffer_.size() < static_cast<size_t>(_size)/g' "$FILE"
             sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
-            echo "✓ Fixed sign-compare warnings in binary_stream.h"
           fi
           
-      - name: Apply clang-format to all modified files
+      - name: Apply clang-format
         run: |
-          set -euo pipefail
           MODIFIED_FILES=$(git diff --name-only | grep -E '\.(cpp|h|hpp)$' || true)
           if [ -n "$MODIFIED_FILES" ]; then
             echo "$MODIFIED_FILES" | xargs clang-format -i
             git add $MODIFIED_FILES
-            echo "✓ Clang-format applied"
-          else
-            echo "No C++ files modified"
           fi
-          
-      - name: Verify syntax - check brace balance
-        run: |
-          echo "Checking for potential syntax issues..."
-          git diff --name-only --cached | grep -E '\.(cpp|h|hpp)$' | while read -r file; do
-            if [ -f "$file" ]; then
-              opens=$(grep -o '{' "$file" | wc -l)
-              closes=$(grep -o '}' "$file" | wc -l)
-              if [ "$opens" != "$closes" ]; then
-                echo "::warning file=$file::Unbalanced braces: opens=$opens, closes=$closes"
-              fi
-            fi
-          done
-          echo "✓ Syntax verification completed"
           
       - name: Commit changes
         id: commit
         run: |
           if git diff --cached --quiet; then
-            echo "No changes to commit"
             echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
           else
-            git commit -m "build: auto-fix compilation errors and warnings (Android/Qt6)
-
-- Исправлена инициализация struct в config.cpp (pair -> {})
-- Исправлены namespace в antivirus_types.cpp (tools -> common::json)
-- Добавлены MEMSTATS макросы и заголовочный файл
-- Путь curl.h адаптирован под Android NDK
-- Добавлены QRect и QStringRef для Qt6
-- ql1s заменен на QLatin1String
-- Добавлены iarray хелперы в gui_coll_helper.h
-- Исправлен namespace в patch_version.h
-- Устранены sign-compare предупреждения"
+            git commit -m "build: auto-fix compilation errors (Android/Qt6)"
             git push origin "${{ env.BRANCH_NAME }}"
             echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
           fi
@@ -224,23 +148,13 @@ EOF
         with:
           script: |
             const branch = process.env.BRANCH_NAME;
-            const target = context.payload.inputs ? context.payload.inputs.target_branch : 'main';
-            
-            const { data: pr } = await github.rest.pulls.create({
+            const target = "${{ github.event.inputs.target_branch }}" || 'main';
+            await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: 'Auto-fix: Compilation errors and warnings (C++/Qt6/Android)',
-              body: `## 🛠️ Автоматическое исправление ошибок сборки (Dzin Rebrand)
-
-Исправлены критические ошибки, блокировавшие сборку под Android с использованием Qt6:
-- **config.cpp**: Исправлен \`excess elements in struct initializer\`.
-- **Qt6 Compatibility**: Добавлены пропущенные инклуды и заменены устаревшие типы.
-- **NDK Fixes**: Исправлены пути к заголовочным файлам (curl).
-- **Warnings**: Исправлены \`sign-compare\` в базовых инструментах.
-
-*Автоматически создано GitHub Actions.*`,
+              title: 'Auto-fix: Compilation errors (C++/Qt6/Android)',
+              body: 'Автоматическое исправление ошибок сборки из логов.',
               head: branch,
               base: target
             });
-            console.log(`Created PR #${pr.number}`);
             
