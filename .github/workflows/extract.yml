@@ -4,10 +4,6 @@ name: Extract All Archives
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - '**/*.zip'
-      - '**/*.tar.gz'
-      - '**/*.tar.bz2'
   workflow_dispatch:
 
 jobs:
@@ -25,48 +21,34 @@ jobs:
 
       - name: Find and extract all archives
         run: |
-          echo "========================================="
           echo "ПОИСК И РАСПАКОВКА АРХИВОВ"
-          echo "========================================="
           
           # Находим все архивы
-          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) | while read archive; do
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) 2>/dev/null | while read archive; do
             echo ""
-            echo "📦 Найден архив: $archive"
-            echo "   Размер: $(du -h "$archive" | cut -f1)"
+            echo "Архив: $archive"
             
-            # Получаем директорию архива
             dir=$(dirname "$archive")
-            echo "   Распаковка в: $dir"
-            
-            # Распаковываем в ту же папку
             cd "$dir"
             
-            case "$archive" in
-              *.zip)
-                unzip -o "$(basename "$archive")"
-                ;;
-              *.tar.gz)
-                tar -xzf "$(basename "$archive")"
-                ;;
-              *.tar.bz2)
-                tar -xjf "$(basename "$archive")"
-                ;;
-            esac
+            if [[ "$archive" == *.zip ]]; then
+              unzip -o "$(basename "$archive")" 2>/dev/null
+            elif [[ "$archive" == *.tar.gz ]]; then
+              tar -xzf "$(basename "$archive")" 2>/dev/null
+            elif [[ "$archive" == *.tar.bz2 ]]; then
+              tar -xjf "$(basename "$archive")" 2>/dev/null
+            fi
             
-            # Возвращаемся обратно
             cd - > /dev/null
-            
-            echo "   ✅ Распаковано"
+            echo "✅ Распаковано: $archive"
           done
 
-      - name: Remove archives after extraction
+      - name: Remove archives
         run: |
           git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
+          git config.user.email "actions@github.com"
           
-          # Удаляем все архивы после распаковки
-          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) -exec git rm {} \;
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) -exec git rm {} \; 2>/dev/null || true
           
           git add -A
           git commit -m "Extract and remove archives" || echo "No changes"
