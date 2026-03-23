@@ -4,8 +4,6 @@ name: Assemble ICQ Dependencies
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - 'icq-dependencies.part.*'
   workflow_dispatch:
 
 jobs:
@@ -21,32 +19,49 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble from parts
+      - name: List all files
         run: |
-          echo "========================================="
-          echo "СБОРКА АРХИВА ИЗ ЧАСТЕЙ"
-          echo "========================================="
-          
+          echo "Все файлы в репозитории:"
+          ls -la
           echo ""
-          echo "📁 Найденные части:"
-          ls -la icq-dependencies.part.*
+          echo "Поиск частей архива:"
+          find . -name "*.part.*" -o -name "icq-dependencies*" | head -20
+
+      - name: Find and assemble parts
+        run: |
+          # Ищем все части
+          PARTS=$(find . -name "icq-dependencies.part.*" -type f 2>/dev/null | sort)
           
+          if [ -z "$PARTS" ]; then
+            echo "❌ Части архива не найдены!"
+            echo "Проверьте, что файлы загружены с правильными именами:"
+            echo "  icq-dependencies.part.aa"
+            echo "  icq-dependencies.part.ab"
+            echo "  и т.д."
+            exit 1
+          fi
+          
+          echo "✅ Найдены части:"
+          echo "$PARTS"
           echo ""
           echo "🔧 Собираем архив..."
-          cat icq-dependencies.part.* > icq-dependencies.zip
+          cat $PARTS > icq-dependencies.zip
           
           echo ""
           echo "✅ Архив собран:"
           ls -lh icq-dependencies.zip
-          
-          echo ""
+
+      - name: Verify archive
+        run: |
           echo "🔍 Проверка архива:"
-          if unzip -t icq-dependencies.zip > /dev/null 2>&1; then
-            echo "   ✅ Архив корректный"
+          if file icq-dependencies.zip | grep -q "Zip archive"; then
+            echo "   ✅ Это ZIP архив"
+            unzip -t icq-dependencies.zip 2>&1 | head -10
             SIZE=$(du -h icq-dependencies.zip | cut -f1)
             echo "   📦 Размер: $SIZE"
           else
-            echo "   ❌ Архив поврежден!"
+            echo "   ❌ Не ZIP архив!"
+            file icq-dependencies.zip
             exit 1
           fi
 
@@ -54,8 +69,8 @@ jobs:
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git rm icq-dependencies.part.*
-          git add icq-dependencies.zip
+          rm -f icq-dependencies.part.*
+          git add -A
           git commit -m "Assemble ICQ dependencies archive from parts" || echo "Нет изменений"
           git push
 
@@ -65,29 +80,3 @@ jobs:
           name: icq-dependencies
           path: icq-dependencies.zip
           retention-days: 30
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: icq-dependencies.zip
-          name: ICQ Dependencies ${{ github.ref_name }}
-          body: |
-            ## ICQ Dependencies Bundle
-            
-            Полный архив зависимостей ICQ.
-            
-            ### Размер: 551 MB
-            ### Содержимое:
-            - Qt5 libraries
-            - Boost
-            - RapidJSON
-            - curl
-            - Другие зависимости
-            
-            ### Использование:
-            ```bash
-            unzip icq-dependencies.zip
-            ```
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
