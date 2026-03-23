@@ -135,16 +135,7 @@ EOF
           if git diff --cached --quiet; then
             echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
           else
-            git commit -m "build: auto-fix compilation errors (Android/Qt6)
-            
-            - Fixed config.cpp struct initializer
-            - Fixed antivirus namespaces
-            - Added memory_stats macros
-            - Patched curl.h for Android
-            - Updated Qt6 types and includes
-            - Fixed iarray and patch_version
-            - Resolved sign-compare warnings"
-            
+            git commit -m "build: auto-fix compilation errors (Android/Qt6)"
             git push origin "${{ env.BRANCH_NAME }}"
             echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
           fi
@@ -155,7 +146,7 @@ EOF
         with:
           script: |
             const branch = process.env.BRANCH_NAME;
-            const target = `${{ github.event.inputs.target_branch || 'main' }}`;
+            const target = `${{ github.event.inputs.target_branch }}` || 'main';
             await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -164,3 +155,4 @@ EOF
               head: branch,
               base: target
             });
+            
