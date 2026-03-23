@@ -1,5 +1,10 @@
 #pragma once
 
+#include <QString>
+#include <QDateTime>
+#include <chrono>
+#include <utility>
+
 namespace Logic
 {
     struct TypingFires
