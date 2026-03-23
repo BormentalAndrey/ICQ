@@ -1,5 +1,5 @@
-# .github/workflows/assemble-dependencies.yml
-name: Assemble ICQ Dependencies
+# .github/workflows/assemble-6-archives.yml
+name: Assemble 6 Archives from Parts
 
 on:
   push:
@@ -21,43 +21,75 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble from parts
+      - name: Assemble 6 different archives
         run: |
-          echo "Сборка архива из частей..."
-          cat icq-dependencies.part.* > icq-dependencies.zip
-          ls -lh icq-dependencies.zip
+          echo "========================================="
+          echo "СБОРКА 6 АРХИВОВ ИЗ ЧАСТЕЙ"
+          echo "========================================="
+          
+          # Список всех частей
+          echo "Найденные части:"
+          ls -la icq-dependencies.part.*
+          
+          # Архив 1: Части 1-5 (Qt5 Core)
+          echo ""
+          echo "📦 Сборка архива 1: qt5-core.zip"
+          cat icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae > qt5-core.zip
+          
+          # Архив 2: Части 6-10 (Qt5 GUI)
+          echo "📦 Сборка архива 2: qt5-gui.zip"
+          cat icq-dependencies.part.af icq-dependencies.part.ag icq-dependencies.part.ah icq-dependencies.part.ai icq-dependencies.part.aj > qt5-gui.zip
+          
+          # Архив 3: Части 11-15 (Qt5 Network)
+          echo "📦 Сборка архива 3: qt5-network.zip"
+          cat icq-dependencies.part.ak icq-dependencies.part.al icq-dependencies.part.am icq-dependencies.part.an icq-dependencies.part.ao > qt5-network.zip
+          
+          # Архив 4: Части 16-20 (Qt5 Tools)
+          echo "📦 Сборка архива 4: qt5-tools.zip"
+          cat icq-dependencies.part.ap icq-dependencies.part.aq icq-dependencies.part.ar icq-dependencies.part.as icq-dependencies.part.at > qt5-tools.zip
+          
+          # Архив 5: Части 21-25 (Boost)
+          echo "📦 Сборка архива 5: boost.zip"
+          cat icq-dependencies.part.au icq-dependencies.part.av icq-dependencies.part.aw icq-dependencies.part.ax icq-dependencies.part.ay > boost.zip
+          
+          # Архив 6: Оставшиеся части (RapidJSON, curl)
+          echo "📦 Сборка архива 6: rapidjson-curl.zip"
+          cat icq-dependencies.part.az icq-dependencies.part.ba > rapidjson-curl.zip
+          
+          echo ""
+          echo "✅ 6 архивов собраны:"
+          ls -lh *.zip
 
-      - name: Remove parts
+      - name: Commit archives to repository
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
+          
+          # Добавляем архивы
+          git add qt5-core.zip qt5-gui.zip qt5-network.zip qt5-tools.zip boost.zip rapidjson-curl.zip
+          
+          # Удаляем части
           git rm icq-dependencies.part.*
-          git commit -m "Remove parts after assembly" || echo "No changes"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: icq-deps-v1.0
-          name: ICQ Dependencies v1.0
-          files: icq-dependencies.zip
-          body: |
-            ## ICQ Dependencies Bundle
-            
-            Полный архив зависимостей ICQ (525 MB)
-            
-            ### Содержимое:
-            - Qt5 libraries
-            - Boost
-            - RapidJSON
-            - curl
-            - Другие зависимости
-            
-            ### Использование:
-            ```bash
-            wget https://github.com/${{ github.repository }}/releases/download/icq-deps-v1.0/icq-dependencies.zip
-            unzip icq-dependencies.zip -d icq-dependencies/
-            ```
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Создаем README
+          cat > README-ARCHIVES.md << 'EOF'
+          # ICQ Dependencies Archives
+          
+          | Архив | Размер | Содержимое |
+          |-------|--------|------------|
+          | qt5-core.zip | $(du -h qt5-core.zip | cut -f1) | Qt5 Core libraries |
+          | qt5-gui.zip | $(du -h qt5-gui.zip | cut -f1) | Qt5 GUI, Widgets |
+          | qt5-network.zip | $(du -h qt5-network.zip | cut -f1) | Qt5 Network, Multimedia |
+          | qt5-tools.zip | $(du -h qt5-tools.zip | cut -f1) | qmake, moc, rcc, uic, CMake |
+          | boost.zip | $(du -h boost.zip | cut -f1) | Boost libraries |
+          | rapidjson-curl.zip | $(du -h rapidjson-curl.zip | cut -f1) | RapidJSON, curl |
+          
+          ## Как собрать полный архив
+          \`\`\`bash
+          cat qt5-core.zip qt5-gui.zip qt5-network.zip qt5-tools.zip boost.zip rapidjson-curl.zip > icq-dependencies-full.zip
+          \`\`\`
+          EOF
+          
+          git add README-ARCHIVES.md
+          git commit -m "Assemble 6 archives from parts and remove parts"
+          git push
