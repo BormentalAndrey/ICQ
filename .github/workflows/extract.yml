@@ -1,42 +1,60 @@
-name: Unzip All Archives
+name: Unzip and Push
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
+# Даем права на запись, чтобы бот мог закоммитить распакованное
+permissions:
+  contents: write
+
 jobs:
-  unzip-files:
+  unzip-job:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          lfs: true # Скачиваем реальные файлы, а не LFS-ссылки
+          fetch-depth: 0 # Нужно для корректного пуша
 
-      - name: Unzip all archives in their own directories
+      - name: Debug and Unzip
         run: |
-          # Используем цикл while, чтобы корректно обрабатывать пути
+          set -e # Остановить выполнение при любой ошибке
+          
+          # Устанавливаем unzip, если его вдруг нет (на ubuntu-latest обычно есть)
+          sudo apt-get update && sudo apt-get install -y unzip
+
           find . -name "*.zip" -type f | while read -r zip_path; do
-            # Определяем абсолютный путь к папке и имя файла
             dir=$(dirname "$zip_path")
             file=$(basename "$zip_path")
             
-            echo "Переходим в $dir и распаковываем $file..."
+            echo "--- Обработка: $zip_path ---"
+            ls -lh "$zip_path"
             
-            # Переходим в директорию архива и распаковываем его там
-            # Это гарантирует, что содержимое не улетит в корень
-            (cd "$dir" && unzip -o "$file")
+            # Проверяем, не пустой ли файл и не LFS ли это
+            if [ $(stat -c%s "$zip_path") -lt 500 ]; then
+              echo "ПРЕДУПРЕЖДЕНИЕ: Файл подозрительно мал. Содержимое:"
+              cat "$zip_path"
+            fi
+
+            # Распаковка
+            echo "Распаковка в $dir..."
+            (cd "$dir" && unzip -o "$file") || { echo "Ошибка при распаковке $file"; exit 1; }
           done
 
-      - name: Check if files are unzipped
-        run: |
-          echo "Структура файлов после распаковки:"
-          ls -R
-
-      # ВАЖНО: Если вы хотите увидеть изменения в репозитории, их нужно закоммитить
-      - name: Commit and Push changes
+      - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
           git add .
-          # Проверяем, есть ли изменения, чтобы не упасть с ошибкой
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-unzip archives" && git push)
+          
+          # Проверяем статус перед коммитом
+          if git diff --staged --quiet; then
+            echo "Никаких изменений не найдено. Возможно, всё уже распаковано."
+          else
+            git commit -m "Auto-unzip archives"
+            git push
+          fi
