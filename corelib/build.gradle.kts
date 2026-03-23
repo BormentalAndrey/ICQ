@@ -11,20 +11,28 @@ android {
         minSdk = 24
         targetSdk = 34
 
+        // ЗАКОММЕНТИРОВАНО: 
+        // Исходники corelib собираются в главном CMakeLists.txt (внутри core), 
+        // поэтому отдельный нативный билд здесь не нужен и вызывает ошибку CXX1400.
+        /*
         externalNativeBuild {
             cmake {
-                cppFlags += "-std=c++17 -fexceptions -frtti -D__linux__ -DANDROID"
+                cppFlags("-std=c++17", "-fexceptions", "-frtti", "-D__linux__", "-DANDROID")
                 abiFilters.add("arm64-v8a")
             }
         }
+        */
     }
 
+    // ЗАКОММЕНТИРОВАНО (Решает ошибку отсутствующего файла)
+    /*
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
+    */
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
