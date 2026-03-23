@@ -1,12 +1,16 @@
-name: Sync Dependencies to Repository
+# .github/workflows/assemble-dependencies.yml
+name: Assemble ICQ Dependencies
 
 on:
-  workflow_dispatch: # Запуск вручную кнопкой в Actions
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'icq-dependencies.part.*'
+  workflow_dispatch:
 
 jobs:
-  sync-deps:
+  assemble:
     runs-on: ubuntu-latest
-    # Даем права на запись в репозиторий
     permissions:
       contents: write
     
@@ -14,49 +18,76 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Полная история для корректного push
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install aqtinstall
-        run: pip3 install aqtinstall
-
-      - name: Download Qt 6.5.0
+      - name: Assemble from parts
         run: |
-          mkdir -p Qt
-          # Android компоненты
-          python3 -m aqt install-qt linux android 6.5.0 android_arm64_v8a --outputdir ${{ github.workspace }}/Qt
-          # Desktop компоненты (инструменты хоста)
-          python3 -m aqt install-qt linux desktop 6.5.0 gcc_64 --outputdir ${{ github.workspace }}/Qt
-
-      - name: Download Boost 1.83.0
-        run: |
-          wget -q https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz
-          tar -xzf boost_1_83_0.tar.gz
-          rm boost_1_83_0.tar.gz
-
-      - name: Download RapidJSON
-        run: |
-          git clone --depth 1 https://github.com/Tencent/rapidjson.git
-
-      - name: Commit and Push Changes
-        run: |
-          # Настройка бота
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          echo "========================================="
+          echo "СБОРКА АРХИВА ИЗ ЧАСТЕЙ"
+          echo "========================================="
           
-          # Удаляем папки из .gitignore, если они там были (чтобы git add сработал)
-          sed -i '/Qt\//d' .gitignore || true
-          sed -i '/boost_1_83_0\//d' .gitignore || true
-          sed -i '/rapidjson\//d' .gitignore || true
+          echo ""
+          echo "📁 Найденные части:"
+          ls -la icq-dependencies.part.*
           
-          # Добавляем все скачанные файлы
-          git add Qt/
-          git add boost_1_83_0/
-          git add rapidjson/
+          echo ""
+          echo "🔧 Собираем архив..."
+          cat icq-dependencies.part.* > icq-dependencies.zip
           
-          # Фиксируем изменения, если они есть
-          if git diff --staged --quiet; then
-            echo "Нет изменений для коммита"
+          echo ""
+          echo "✅ Архив собран:"
+          ls -lh icq-dependencies.zip
+          
+          echo ""
+          echo "🔍 Проверка архива:"
+          if unzip -t icq-dependencies.zip > /dev/null 2>&1; then
+            echo "   ✅ Архив корректный"
+            SIZE=$(du -h icq-dependencies.zip | cut -f1)
+            echo "   📦 Размер: $SIZE"
           else
-            git commit -m "chore: add dependencies (Qt 6.5, Boost, RapidJSON)"
-            git push origin main
+            echo "   ❌ Архив поврежден!"
+            exit 1
           fi
+
+      - name: Remove parts
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git rm icq-dependencies.part.*
+          git add icq-dependencies.zip
+          git commit -m "Assemble ICQ dependencies archive from parts" || echo "Нет изменений"
+          git push
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: icq-dependencies
+          path: icq-dependencies.zip
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: icq-dependencies.zip
+          name: ICQ Dependencies ${{ github.ref_name }}
+          body: |
+            ## ICQ Dependencies Bundle
+            
+            Полный архив зависимостей ICQ.
+            
+            ### Размер: 551 MB
+            ### Содержимое:
+            - Qt5 libraries
+            - Boost
+            - RapidJSON
+            - curl
+            - Другие зависимости
+            
+            ### Использование:
+            ```bash
+            unzip icq-dependencies.zip
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
