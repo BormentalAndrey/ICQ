@@ -29,10 +29,33 @@ jobs:
         # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease 2>&1 | tee build.log
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload build logs
+        if: always()  # Загружаем логи даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            app/build/reports/
+            app/build/outputs/logs/
+            ~/.gradle/daemon/*/daemon-*.out.log
+          if-no-files-found: warn
+
+      - name: Upload Gradle reports
+        if: always()  # Загружаем отчеты даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/
+            **/build/outputs/logs/
+            **/build/test-results/
+          if-no-files-found: warn
