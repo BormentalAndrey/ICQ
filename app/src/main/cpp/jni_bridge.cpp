@@ -1,184 +1,392 @@
-# app/src/main/cpp/CMakeLists.txt
-cmake_minimum_required(VERSION 3.22.1)
-project("icq_mobile_core" LANGUAGES CXX C)
+// app/src/main/cpp/jni_bridge.cpp
+#include <jni.h>
+#include <string>
+#include <memory>
+#include <mutex>
+#include <vector>
+#include <android/log.h>
 
-# CMP0074: find_package() использует переменные <PackageName>_ROOT
-cmake_policy(SET CMP0074 NEW)
+// Основные заголовки проекта
+#include "core/stdafx.h"
+#include "gui/core_dispatcher.h"
 
-# -----------------------------------------------------------------------------
-# Поиск Qt (Принудительно Qt 6.5.0)
-# -----------------------------------------------------------------------------
+#define LOG_TAG "IcqCoreJNI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-# Пытаемся найти Qt6 версии 6.5.0
-# Сначала проверяем QT_ANDROID_PATH (обычно передается из Gradle)
-if(QT_ANDROID_PATH)
-    set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-endif()
+// Глобальные переменные
+static JavaVM* g_jvm = nullptr;
+static jclass g_callback_class = nullptr;
+static jmethodID g_on_event_method = nullptr;
+static jmethodID g_on_voip_event_method = nullptr;
+static jmethodID g_on_statistic_method = nullptr;
 
-# Если задана переменная окружения для Qt6 Android
-if(DEFINED ENV{Qt6_ANDROID_DIR})
-    list(APPEND CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
-endif()
+static std::unique_ptr<Ui::core_dispatcher> g_core;
+static jobject g_event_callback_obj = nullptr;
+static std::shared_ptr<core::icore_interface> g_gui_callback;
+static std::mutex g_core_mutex;
+static bool g_initialized = false;
+static std::string g_device_id;
 
-# Ищем именно Qt 6.5.0. Если не найдено, CMake выдаст ошибку конфигурации.
-find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network)
-set(QT_VERSION_MAJOR 6)
-
-message(STATUS "Using Qt${QT_VERSION_MAJOR}: ${Qt6_VERSION}")
-
-# -----------------------------------------------------------------------------
-# Настройка путей проекта
-# -----------------------------------------------------------------------------
-
-if(NOT ICQ_PROJECT_ROOT)
-    get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
-else()
-    set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
-endif()
-
-# -----------------------------------------------------------------------------
-# Глобальные определения
-# -----------------------------------------------------------------------------
-
-add_compile_definitions(
-    ANDROID
-    PLATFORM_ANDROID
-    __ANDROID__
-    STRIP_CRASH_HANDLER
-    SUPPORT_EXTERNAL_CONFIG
-    HAVE_SECURE_GETENV=1
-    _FORTIFY_SOURCE=2
-    QT_CORE_LIB 
-    QT_NETWORK_LIB
-)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_definitions(QT_NO_DEBUG NDEBUG)
-endif()
-
-# -----------------------------------------------------------------------------
-# Сбор исходных файлов
-# -----------------------------------------------------------------------------
-
-file(GLOB_RECURSE CORE_SOURCES
-    "${ICQ_ROOT}/core/*.cpp"
-    "${ICQ_ROOT}/common.shared/*.cpp"
-    "${ICQ_ROOT}/corelib/*.cpp"
-    "${ICQ_ROOT}/gui.shared/*.cpp"
-)
-
-# Исключаем платформозависимый код
-list(FILTER CORE_SOURCES EXCLUDE REGEX 
-    ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp"
-)
-
-# -----------------------------------------------------------------------------
-# Создание библиотеки
-# -----------------------------------------------------------------------------
-
-add_library(icq_core SHARED
-    jni_bridge.cpp
-    ${CORE_SOURCES}
-)
-
-# -----------------------------------------------------------------------------
-# Пути заголовков
-# -----------------------------------------------------------------------------
-
-target_include_directories(icq_core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${ICQ_ROOT}
-    ${ICQ_ROOT}/core
-    ${ICQ_ROOT}/core/Voip/libvoip/include
-    ${ICQ_ROOT}/corelib
-    ${ICQ_ROOT}/common.shared
-    ${ICQ_ROOT}/gui.shared
-)
-
-if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
-    target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
-endif()
-
-if(EXISTS "${ICQ_ROOT}/rapidjson/include")
-    target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
-endif()
-
-if(DEFINED ENV{CURL_INCLUDE_PATH})
-    target_include_directories(icq_core PRIVATE $ENV{CURL_INCLUDE_PATH})
-endif()
-
-# Заголовки Qt6
-target_include_directories(icq_core PRIVATE
-    ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
-)
-
-# -----------------------------------------------------------------------------
-# Свойства компиляции
-# -----------------------------------------------------------------------------
-
-set_target_properties(icq_core PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    POSITION_INDEPENDENT_CODE ON
-    OUTPUT_NAME "icq_core"
-)
-
-# -----------------------------------------------------------------------------
-# Флаги компилятора
-# -----------------------------------------------------------------------------
-
-target_compile_options(icq_core PRIVATE 
-    -fexceptions -frtti -fPIC -Wall -Wextra
-    -Wno-unused-parameter -Wno-unused-variable
-    -Wno-mismatched-tags -Wno-deprecated-declarations
-    -fdata-sections -ffunction-sections
-)
-
-# -----------------------------------------------------------------------------
-# Линковка
-# -----------------------------------------------------------------------------
-
-find_library(log-lib log REQUIRED)
-find_library(z-lib z REQUIRED)
-find_library(android-lib android REQUIRED)
-
-target_link_libraries(icq_core
-    Qt6::Core
-    Qt6::Network
-    ${log-lib}
-    ${z-lib}
-    ${android-lib}
-    -Wl,--gc-sections
-)
-
-# -----------------------------------------------------------------------------
-# Android специфика
-# -----------------------------------------------------------------------------
-
-if(ANDROID)
-    # Гарантируем, что JNI_OnLoad не будет вырезана линковщиком
-    target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
+// Вспомогательная функция для получения JNIEnv
+static JNIEnv* getJniEnv(bool& mustDetach) {
+    mustDetach = false;
+    if (!g_jvm) {
+        LOGE("JVM not initialized!");
+        return nullptr;
+    }
     
-    if(NOT ANDROID_NATIVE_API_LEVEL)
-        set(ANDROID_NATIVE_API_LEVEL 24)
-    endif()
-    target_compile_definitions(icq_core PRIVATE __ANDROID_API__=${ANDROID_NATIVE_API_LEVEL})
+    JNIEnv* env = nullptr;
+    jint res = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
     
-    # Обязательная команда для Qt6 при сборке под Android
-    qt_finalize_target(icq_core)
-endif()
+    if (res == JNI_EDETACHED) {
+        if (g_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            mustDetach = true;
+        } else {
+            LOGE("Failed to attach thread to JVM");
+            return nullptr;
+        }
+    } else if (res != JNI_OK) {
+        LOGE("Failed to get JNI environment");
+        return nullptr;
+    }
+    
+    return env;
+}
 
-# -----------------------------------------------------------------------------
-# Итоговый лог
-# -----------------------------------------------------------------------------
+// Реализация интерфейса обратного вызова из Ядра в Android GUI
+class AndroidGuiCallback : public core::icore_interface {
+public:
+    AndroidGuiCallback() = default;
+    virtual ~AndroidGuiCallback() = default;
+    
+    virtual int32_t addref() override { 
+        return 1; 
+    }
+    
+    virtual int32_t release() override { 
+        return 0; 
+    }
+    
+    void receive_variable(const std::string& _name, core::coll_ptr _value) override {
+        notifyJavaEvent(_name, _value);
+    }
 
-message(STATUS "")
-message(STATUS "========================================")
-message(STATUS "ICQ/DZIN Mobile Core Build Configuration")
-message(STATUS "========================================")
-message(STATUS "  ICQ_ROOT:      ${ICQ_ROOT}")
-message(STATUS "  Build Type:    ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Qt Version:    ${Qt6_VERSION}")
-message(STATUS "  Android API:   ${ANDROID_NATIVE_API_LEVEL}")
-message(STATUS "========================================")
+    void receive_package(const std::string& _name, core::coll_ptr _value) override {
+        notifyJavaEvent(_name, _value);
+    }
+
+    void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) override {
+        notifyJavaVoipEvent(_account, _data);
+    }
+
+    void send_statistic_event(const std::string& _event, const core::event_props_type& _props) override {
+        notifyJavaStatisticEvent(_event, _props);
+    }
+
+    std::string get_device_id() override {
+        return g_device_id;
+    }
+
+    core::iconnector* get_core_connector() override { 
+        return g_core ? g_core->get_core_connector() : nullptr;
+    }
+
+    core::iconnector* get_gui_connector() override { 
+        return g_core ? g_core->get_gui_connector() : nullptr;
+    }
+
+    core::icore_factory* get_factory() override { 
+        return g_core ? g_core->get_factory() : nullptr;
+    }
+
+private:
+    void notifyJavaEvent(const std::string& _name, core::coll_ptr _value) {
+        if (!g_event_callback_obj || !g_on_event_method) {
+            LOGW("Callback not set for event: %s", _name.c_str());
+            return;
+        }
+
+        bool mustDetach = false;
+        JNIEnv* env = getJniEnv(mustDetach);
+        if (!env) {
+            LOGE("Cannot notify Java event: no JNI environment");
+            return;
+        }
+
+        jstring jName = env->NewStringUTF(_name.c_str());
+        env->CallVoidMethod(g_event_callback_obj, g_on_event_method, jName);
+        env->DeleteLocalRef(jName);
+        
+        if (mustDetach) {
+            g_jvm->DetachCurrentThread();
+        }
+    }
+    
+    void notifyJavaVoipEvent(const std::string& _account, const std::vector<char>& _data) {
+        if (!g_event_callback_obj || !g_on_voip_event_method) {
+            LOGW("VoIP callback not set");
+            return;
+        }
+
+        bool mustDetach = false;
+        JNIEnv* env = getJniEnv(mustDetach);
+        if (!env) {
+            LOGE("Cannot notify Java VoIP event");
+            return;
+        }
+
+        jstring jAccount = env->NewStringUTF(_account.c_str());
+        jbyteArray jData = env->NewByteArray(_data.size());
+        env->SetByteArrayRegion(jData, 0, _data.size(), reinterpret_cast<const jbyte*>(_data.data()));
+        
+        env->CallVoidMethod(g_event_callback_obj, g_on_voip_event_method, jAccount, jData);
+        
+        env->DeleteLocalRef(jAccount);
+        env->DeleteLocalRef(jData);
+        
+        if (mustDetach) {
+            g_jvm->DetachCurrentThread();
+        }
+    }
+    
+    void notifyJavaStatisticEvent(const std::string& _event, const core::event_props_type& _props) {
+        if (!g_event_callback_obj || !g_on_statistic_method) {
+            LOGW("Statistic callback not set");
+            return;
+        }
+
+        bool mustDetach = false;
+        JNIEnv* env = getJniEnv(mustDetach);
+        if (!env) {
+            LOGE("Cannot notify Java statistic event");
+            return;
+        }
+
+        jstring jEvent = env->NewStringUTF(_event.c_str());
+        
+        // Преобразуем props в JSON строку для простоты
+        std::string props_json = "{";
+        for (const auto& prop : _props) {
+            if (props_json.length() > 1) props_json += ",";
+            props_json += "\"" + prop.first + "\":\"" + prop.second + "\"";
+        }
+        props_json += "}";
+        
+        jstring jProps = env->NewStringUTF(props_json.c_str());
+        
+        env->CallVoidMethod(g_event_callback_obj, g_on_statistic_method, jEvent, jProps);
+        
+        env->DeleteLocalRef(jEvent);
+        env->DeleteLocalRef(jProps);
+        
+        if (mustDetach) {
+            g_jvm->DetachCurrentThread();
+        }
+    }
+};
+
+// JNI_OnLoad - вызывается при загрузке библиотеки
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOGI("JNI_OnLoad called");
+    g_jvm = vm;
+    
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        LOGE("Failed to get JNI environment in JNI_OnLoad");
+        return JNI_ERR;
+    }
+    
+    // Кэшируем класс и методы для производительности
+    jclass localClass = env->FindClass("com/icq/mobile/core/IcqCoreEngine");
+    if (localClass) {
+        g_callback_class = reinterpret_cast<jclass>(env->NewGlobalRef(localClass));
+        g_on_event_method = env->GetMethodID(g_callback_class, "onCoreEvent", "(Ljava/lang/String;)V");
+        g_on_voip_event_method = env->GetMethodID(g_callback_class, "onVoipEvent", "(Ljava/lang/String;[B)V");
+        g_on_statistic_method = env->GetMethodID(g_callback_class, "onStatisticEvent", "(Ljava/lang/String;Ljava/lang/String;)V");
+        env->DeleteLocalRef(localClass);
+        
+        if (!g_on_event_method) {
+            LOGE("Failed to find onCoreEvent method");
+        }
+        if (!g_on_voip_event_method) {
+            LOGW("onVoipEvent method not found (optional)");
+        }
+        if (!g_on_statistic_method) {
+            LOGW("onStatisticEvent method not found (optional)");
+        }
+        LOGI("JNI callbacks cached successfully");
+    } else {
+        LOGE("Failed to find IcqCoreEngine class");
+        return JNI_ERR;
+    }
+    
+    return JNI_VERSION_1_6;
+}
+
+// Инициализация движка
+extern "C" JNIEXPORT void JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv* env, jobject thiz, 
+                                                   jstring data_path, 
+                                                   jstring cache_path, 
+                                                   jstring device_id,
+                                                   jobject callback) {
+    std::lock_guard<std::mutex> lock(g_core_mutex);
+    
+    if (g_core && g_initialized) {
+        LOGI("Core Engine already running");
+        return;
+    }
+
+    // Сохраняем callback
+    if (g_event_callback_obj) {
+        env->DeleteGlobalRef(g_event_callback_obj);
+    }
+    g_event_callback_obj = env->NewGlobalRef(callback);
+    
+    if (!g_event_callback_obj) {
+        LOGE("Failed to create global reference for callback");
+        return;
+    }
+    
+    // Сохраняем device ID
+    const char* device_id_str = env->GetStringUTFChars(device_id, nullptr);
+    if (device_id_str) {
+        g_device_id = device_id_str;
+        env->ReleaseStringUTFChars(device_id, device_id_str);
+    } else {
+        g_device_id = "android_device_default";
+    }
+    
+    // Создаем callback-объект
+    auto callback_impl = std::make_shared<AndroidGuiCallback>();
+    g_gui_callback = std::static_pointer_cast<core::icore_interface>(callback_impl);
+
+    // Извлекаем пути
+    const char* data_path_cstr = env->GetStringUTFChars(data_path, nullptr);
+    const char* cache_path_cstr = env->GetStringUTFChars(cache_path, nullptr);
+    
+    if (!data_path_cstr || !cache_path_cstr) {
+        LOGE("Failed to get path strings");
+        if (data_path_cstr) env->ReleaseStringUTFChars(data_path, data_path_cstr);
+        if (cache_path_cstr) env->ReleaseStringUTFChars(cache_path, cache_path_cstr);
+        return;
+    }
+    
+    std::string internal_data_path(data_path_cstr);
+    std::string internal_cache_path(cache_path_cstr);
+    
+    env->ReleaseStringUTFChars(data_path, data_path_cstr);
+    env->ReleaseStringUTFChars(cache_path, cache_path_cstr);
+
+    // Настройка параметров
+    common::core_gui_settings settings;
+    settings.os_version_ = "Android";
+    settings.locale_ = "ru_RU";
+    settings.recents_avatars_size_ = 120;
+    settings.data_path_ = internal_data_path;
+    settings.cache_path_ = internal_cache_path;
+    
+    // Создаем и линкуем ядро
+    try {
+        g_core = std::make_unique<Ui::core_dispatcher>();
+        g_core->link_gui(g_gui_callback, settings);
+        g_initialized = true;
+        LOGI("Core Engine started successfully. Data: %s, Cache: %s, Device: %s", 
+             internal_data_path.c_str(), internal_cache_path.c_str(), g_device_id.c_str());
+    } catch (const std::exception& e) {
+        LOGE("Exception during core initialization: %s", e.what());
+        g_core.reset();
+        g_initialized = false;
+    }
+}
+
+// Остановка движка
+extern "C" JNIEXPORT void JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeShutdown(JNIEnv* env, jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_core_mutex);
+    
+    if (g_core) {
+        try {
+            g_core->unlink_gui();
+            g_core.reset();
+            LOGI("Core Engine destroyed");
+        } catch (const std::exception& e) {
+            LOGE("Exception during core shutdown: %s", e.what());
+        }
+    }
+    
+    if (g_event_callback_obj) {
+        env->DeleteGlobalRef(g_event_callback_obj);
+        g_event_callback_obj = nullptr;
+    }
+    
+    g_gui_callback.reset();
+    g_initialized = false;
+    g_device_id.clear();
+}
+
+// Получение версии движка
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeGetVersion(JNIEnv* env, jobject thiz) {
+    return env->NewStringUTF("1.0.0");
+}
+
+// Проверка инициализации
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeIsInitialized(JNIEnv* env, jobject thiz) {
+    return g_initialized ? JNI_TRUE : JNI_FALSE;
+}
+
+// Обработка VoIP сообщения
+extern "C" JNIEXPORT void JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeProcessVoipMsg(JNIEnv* env, jobject thiz,
+                                                             jstring account, jint msg_type,
+                                                             jbyteArray data) {
+    std::lock_guard<std::mutex> lock(g_core_mutex);
+    
+    if (!g_core || !g_initialized) {
+        LOGW("Core not initialized for VoIP message");
+        return;
+    }
+    
+    const char* account_str = env->GetStringUTFChars(account, nullptr);
+    if (!account_str) return;
+    
+    jsize data_len = env->GetArrayLength(data);
+    jbyte* data_ptr = env->GetByteArrayElements(data, nullptr);
+    
+    if (data_ptr) {
+        std::vector<char> voip_data(data_ptr, data_ptr + data_len);
+        // Передаем в ядро через core_dispatcher
+        g_core->process_voip_message(account_str, msg_type, voip_data);
+        
+        env->ReleaseByteArrayElements(data, data_ptr, JNI_ABORT);
+    }
+    
+    env->ReleaseStringUTFChars(account, account_str);
+}
+
+// Отправка сообщения
+extern "C" JNIEXPORT void JNICALL
+Java_com_icq_mobile_core_IcqCoreEngine_nativeSendMessage(JNIEnv* env, jobject thiz,
+                                                          jstring contact, jstring message) {
+    std::lock_guard<std::mutex> lock(g_core_mutex);
+    
+    if (!g_core || !g_initialized) {
+        LOGW("Core not initialized for sending message");
+        return;
+    }
+    
+    const char* contact_str = env->GetStringUTFChars(contact, nullptr);
+    const char* message_str = env->GetStringUTFChars(message, nullptr);
+    
+    if (contact_str && message_str) {
+        // Отправляем сообщение через core_dispatcher
+        g_core->send_message(contact_str, message_str);
+        
+        env->ReleaseStringUTFChars(contact, contact_str);
+        env->ReleaseStringUTFChars(message, message_str);
+    }
+}
