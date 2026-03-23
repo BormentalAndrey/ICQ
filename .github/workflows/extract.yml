@@ -1,17 +1,17 @@
-name: "Production Build Repair: Dzin Core"
+name: "Dzin: Production Source Repair"
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Запуск вручную из вкладки Actions
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  auto-fix-and-propose:
+  repair-source:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -21,89 +21,79 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: 🛠 Fix config.cpp (Smart Syntax Repair)
+      - name: 🛠 Fix config.cpp (Smart Syntax)
         shell: python
         run: |
           import os
           import re
 
-          path = "common.shared/config/config.cpp"
-          if os.path.exists(path):
-              with open(path, 'r', encoding='utf-8') as f:
-                  content = f.read()
+          file_path = "common.shared/config/config.cpp"
+          if os.path.exists(file_path):
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  lines = f.readlines()
 
-              # 1. Исправляем блоки std::pair на агрегатную инициализацию {key, value}
-              # Регулярное выражение ищет std::pair(аргумент1, аргумент2) и учитывает вложенные скобки функций
-              pattern = r'std::pair\s*\(\s*(features::[a-zA-Z0-9_]+)\s*,\s*(get_[a-z]+\([^)]+\))\s*\)'
-              fixed_content = re.sub(pattern, r'{\1, \2}', content)
+              new_lines = []
+              # Регулярное выражение для поиска строк с std::pair или сломанными скобками
+              # Ищет: { КЛЮЧ, ЗНАЧЕНИЕ ) ) или std::pair( КЛЮЧ, ЗНАЧЕНИЕ )
+              pattern = re.compile(r'(?:std::pair\s*\(\s*|\{\s*)(?P<key>[a-zA-Z0-9_:]+)\s*,\s*(?P<val>get_[a-z]+\([^)]+\))(?:\s*\)\s*\)?|\s*\})')
 
-              # 2. Очистка артефактов от предыдущих запусков (двойные закрывающие скобки)
-              fixed_content = fixed_content.replace('})),', '},')
-              fixed_content = fixed_content.replace('}));', '};')
-              
-              # 3. Исправление запятых в блоке values (устранение warning: left operand has no effect)
-              # Заменяем ошибочные { values::name, на правильный синтаксис
-              fixed_content = re.sub(r'\{\s*(values::[a-zA-Z0-9_]+)\s*,', r'{\1,', fixed_content)
+              for line in lines:
+                  # Если в строке есть ключ из перечислений (features, urls, values)
+                  if any(x in line for x in ["features::", "urls::", "values::", "translations::"]):
+                      # Принудительно приводим к формату { KEY, VALUE },
+                      fixed = pattern.sub(r'{ \g<key>, \g<val> }', line)
+                      # Убираем возможные двойные запятые или скобки в конце
+                      fixed = fixed.replace(')),', ' },').replace('));', ' };').replace('},,', '},')
+                      new_lines.append(fixed)
+                  else:
+                      new_lines.append(line)
 
-              with open(path, 'w', encoding='utf-8') as f:
-                  f.write(fixed_content)
-              print("✓ config.cpp syntax repaired")
+              with open(file_path, 'w', encoding='utf-8') as f:
+                  f.writelines(new_lines)
+              print("✓ config.cpp syntax cleaned and unified.")
 
-      - name: 🛠 Fix common.h (Type Safety)
+      - name: 🛠 Fix common.h (Constants & Types)
         run: |
           FILE="common.shared/common.h"
           if [ -f "$FILE" ]; then
-            # Переводим константы в unsigned long long для исключения конфликтов знаков
+            # Меняем типы на unsigned long long для совместимости с size_t
             sed -i 's/unsigned long BYTE/unsigned long long BYTE/g' "$FILE"
             sed -i 's/unsigned long KILOBYTE/unsigned long long KILOBYTE/g' "$FILE"
             sed -i 's/unsigned long MEGABYTE/unsigned long long MEGABYTE/g' "$FILE"
             sed -i 's/unsigned long GIGABYTE/unsigned long long GIGABYTE/g' "$FILE"
-            # Убираем лишние static_cast, если они были добавлены ранее и мешают
+            # Очищаем старые приведения типов, если они были сделаны криво
             sed -i 's/static_cast<long long>(MEGABYTE)/MEGABYTE/g' "$FILE"
-            echo "✓ common.h constants upgraded to ULL"
+            echo "✓ common.h type safety improved."
           fi
 
-      - name: 🛠 Fix binary_stream.h (Signedness)
+      - name: 🛠 Fix binary_stream.h (Sign-Compare)
         run: |
           FILE="core/tools/binary_stream.h"
           if [ -f "$FILE" ]; then
             sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
-            sed -i 's/all_size() > 2/static_cast<size_t>(all_size()) > 2/g' "$FILE"
-            sed -i 's/all_size() > 4/static_cast<size_t>(all_size()) > 4/g' "$FILE"
-            echo "✓ binary_stream.h sign-compare fixed"
+            echo "✓ binary_stream.h fixed."
           fi
 
-      - name: 🛠 Fix StringComparator.h
-        run: |
-          FILE="gui/utils/StringComparator.h"
-          if [ -f "$FILE" ]; then
-            # Гарантируем правильное расположение инклудов для Qt6
-            sed -i '/#include/d' "$FILE"
-            sed -i '/#pragma once/a #include <QLatin1String>\n#include <QStringRef>\n#include <QStringView>' "$FILE"
-            echo "✓ StringComparator.h sanitized"
-          fi
-
-      - name: Commit and Create Pull Request
-        id: cpr
+      - name: Commit and Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          BRANCH_NAME="fix/production-build-repair-$(date +%s)"
-          git checkout -b "$BRANCH_NAME"
+          BRANCH="fix/build-repair-$(date +%s)"
+          git checkout -b "$BRANCH"
           git add .
           
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "No changes needed."
           else
-            git commit -m "build: production-grade fix for compilation errors (Dzin Core)"
-            git push origin "$BRANCH_NAME"
-            
+            git commit -m "build: clean repair of config.cpp and type mismatches"
+            git push origin "$BRANCH"
             gh pr create \
-              --title "🔧 Финальное исправление сборки (Production Fix)" \
-              --body "Автоматический ремонт синтаксиса config.cpp, приведение типов в common.h и исправление заголовков Qt6. Исправляет ошибку 'excess elements in struct initializer' и баланс скобок." \
-              --head "$BRANCH_NAME" \
+              --title "🔧 Production Fix: Сборка Дзинь" \
+              --body "Этот PR исправляет синтаксис в config.cpp и убирает ошибки sign-compare." \
+              --head "$BRANCH" \
               --base main
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
