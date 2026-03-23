@@ -21,18 +21,17 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble 6 different archives
+      - name: Assemble 6 archives (NO FULL ARCHIVE)
         run: |
           echo "========================================="
-          echo "СБОРКА 6 АРХИВОВ ИЗ ЧАСТЕЙ"
+          echo "СБОРКА 6 АРХИВОВ (каждый <100 MB)"
           echo "========================================="
           
           # Список всех частей
           echo "Найденные части:"
-          ls -la icq-dependencies.part.*
+          ls -la icq-dependencies.part.* | wc -l
           
           # Архив 1: Части 1-5 (Qt5 Core)
-          echo ""
           echo "📦 Сборка архива 1: qt5-core.zip"
           cat icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae > qt5-core.zip
           
@@ -57,32 +56,32 @@ jobs:
           cat icq-dependencies.part.az icq-dependencies.part.ba > rapidjson-curl.zip
           
           echo ""
-          echo "✅ 6 архивов собраны:"
+          echo "✅ 6 архивов собраны (все <100 MB):"
           ls -lh *.zip
 
-      - name: Commit archives to repository
+      - name: Commit only small archives to repository
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           
-          # Добавляем архивы
+          # Добавляем только маленькие архивы
           git add qt5-core.zip qt5-gui.zip qt5-network.zip qt5-tools.zip boost.zip rapidjson-curl.zip
           
           # Удаляем части
           git rm icq-dependencies.part.*
           
           # Создаем README
-          cat > README-ARCHIVES.md << 'EOF'
+          cat > DEPENDENCIES.md << 'EOF'
           # ICQ Dependencies Archives
           
           | Архив | Размер | Содержимое |
           |-------|--------|------------|
-          | qt5-core.zip | $(du -h qt5-core.zip | cut -f1) | Qt5 Core libraries |
-          | qt5-gui.zip | $(du -h qt5-gui.zip | cut -f1) | Qt5 GUI, Widgets |
-          | qt5-network.zip | $(du -h qt5-network.zip | cut -f1) | Qt5 Network, Multimedia |
-          | qt5-tools.zip | $(du -h qt5-tools.zip | cut -f1) | qmake, moc, rcc, uic, CMake |
-          | boost.zip | $(du -h boost.zip | cut -f1) | Boost libraries |
-          | rapidjson-curl.zip | $(du -h rapidjson-curl.zip | cut -f1) | RapidJSON, curl |
+          | qt5-core.zip | ~100 MB | Qt5 Core libraries |
+          | qt5-gui.zip | ~100 MB | Qt5 GUI, Widgets |
+          | qt5-network.zip | ~100 MB | Qt5 Network, Multimedia |
+          | qt5-tools.zip | ~100 MB | qmake, moc, rcc, uic, CMake |
+          | boost.zip | ~100 MB | Boost libraries |
+          | rapidjson-curl.zip | ~25 MB | RapidJSON, curl |
           
           ## Как собрать полный архив
           \`\`\`bash
@@ -90,6 +89,6 @@ jobs:
           \`\`\`
           EOF
           
-          git add README-ARCHIVES.md
-          git commit -m "Assemble 6 archives from parts and remove parts"
+          git add DEPENDENCIES.md
+          git commit -m "Assemble 6 small archives (<100 MB) from parts"
           git push
