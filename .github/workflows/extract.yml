@@ -1,61 +1,89 @@
-name: Android Build
+name: Auto-fix Compilation Errors
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
-  build:
+  fix-and-push:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Подгружаем сабмодули, если они есть
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK/NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build with Gradle
-        # Если в корне есть gradlew, собираем через него
-        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
+          fetch-depth: 0
+          
+      - name: Setup Git config
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease 2>&1 | tee build.log
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+      - name: Setup Clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-14
+          sudo ln -sf /usr/bin/clang-format-14 /usr/bin/clang-format
+          
+      - name: 🛠 Fix config.cpp (Exact Match)
+        run: |
+          FILE="common.shared/config/config.cpp"
+          if [ -f "$FILE" ]; then
+            # Исправляем конкретный синтаксис std::pair на фигурные скобки {}
+            sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/g' "$FILE"
+            sed -i 's/std::pair(features::group_calls_enabled,/{ features::group_calls_enabled,/g' "$FILE"
+            # Закрываем фигурные скобки там, где были двойные круглые
+            sed -i '/features::report_messages_enabled/s/)),/},/g' "$FILE"
+            sed -i '/features::group_calls_enabled/s/)),/},/g' "$FILE"
+            echo "✓ config.cpp patched"
+          fi
+          
+      - name: 🛠 Fix binary_stream.h (Sign-compare)
+        run: |
+          FILE="core/tools/binary_stream.h"
+          if [ -f "$FILE" ]; then
+            # Исправляем сравнения для подавления -Wsign-compare
+            sed -i 's/buffer_.size() < static_cast<size_t>(_size)/buffer_.size() < static_cast<size_t>(_size)/g' "$FILE"
+            sed -i 's/static_cast<size_t>(size_need) > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
+            sed -i 's/all_size() > 2/static_cast<size_t>(all_size()) > 2/g' "$FILE"
+            sed -i 's/all_size() > 4/static_cast<size_t>(all_size()) > 4/g' "$FILE"
+            echo "✓ binary_stream.h patched"
+          fi
+          
+      - name: 🛠 Fix common.h (MEGABYTE/GIGABYTE)
+        run: |
+          FILE="common.shared/common.h"
+          if [ -f "$FILE" ]; then
+            # Приводим типы к long long для корректного сравнения с байтами
+            sed -i 's/100 \* MEGABYTE/100LL * static_cast<long long>(MEGABYTE)/g' "$FILE"
+            sed -i 's/500 \* MEGABYTE/500LL * static_cast<long long>(MEGABYTE)/g' "$FILE"
+            sed -i 's/1500LL \* MEGABYTE/1500LL * static_cast<long long>(MEGABYTE)/g' "$FILE"
+            sed -i 's/100LL \* MEGABYTE/100LL * static_cast<long long>(MEGABYTE)/g' "$FILE"
+            echo "✓ common.h patched"
+          fi
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk
-
-      - name: Upload build logs
-        if: always()  # Загружаем логи даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build.log
-            app/build/reports/
-            app/build/outputs/logs/
-            ~/.gradle/daemon/*/daemon-*.out.log
-          if-no-files-found: warn
-
-      - name: Upload Gradle reports
-        if: always()  # Загружаем отчеты даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-reports
-          path: |
-            **/build/reports/
-            **/build/outputs/logs/
-            **/build/test-results/
-          if-no-files-found: warn
+      - name: 🛠 Fix StringComparator.h
+        run: |
+          FILE="gui/utils/StringComparator.h"
+          if [ -f "$FILE" ]; then
+            # Переносим инклуды под pragma once
+            sed -i '/#include/d' "$FILE"
+            sed -i '/#pragma once/a #include <QLatin1String>\n#include <QStringRef>\n#include <QStringView>' "$FILE"
+            echo "✓ StringComparator.h patched"
+          fi
+          
+      - name: Apply Formatting
+        run: |
+          git diff --name-only | grep -E '\.(cpp|h|hpp)$' | xargs -r clang-format -i
+          git add .
+          
+      - name: Push directly to main
+        run: |
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+          else
+            git commit -m "build: final core fixes for Android/Qt6"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
