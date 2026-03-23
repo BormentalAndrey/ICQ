@@ -1,63 +1,31 @@
-# .github/workflows/assemble-qt5-core.yml
-name: Assemble Qt5 Core Archive
+# .github/workflows/remove-large-file.yml
+name: Remove Large File
 
 on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - 'icq-dependencies.part.aa'
-      - 'icq-dependencies.part.ab'
-      - 'icq-dependencies.part.ac'
-      - 'icq-dependencies.part.ad'
-      - 'icq-dependencies.part.ae'
   workflow_dispatch:
 
 jobs:
-  assemble:
+  remove:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble qt5-core.zip (ONLY)
+      - name: Remove large file
         run: |
-          echo "========================================="
-          echo "СБОРКА ТОЛЬКО QT5-CORE.ZIP"
-          echo "========================================="
+          git filter-branch --force --index-filter \
+            "git rm --cached --ignore-unmatch icq-dependencies.zip" \
+            --prune-empty --tag-name-filter cat -- --all
           
-          # Проверяем наличие частей
-          echo "Проверка частей:"
-          ls -la icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae
+          git push --force --all
           
-          # Собираем ТОЛЬКО qt5-core.zip
-          echo ""
-          echo "📦 Сборка qt5-core.zip..."
-          cat icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae > qt5-core.zip
-          
-          echo ""
-          echo "✅ Архив собран:"
-          ls -lh qt5-core.zip
-
-      - name: Commit and remove parts
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          
-          # Удаляем ВСЕ части, чтобы избежать случайной сборки большого архива
-          git rm icq-dependencies.part.* || true
-          
-          # Добавляем только маленький архив
-          git add qt5-core.zip
-          
-          # Убеждаемся, что НЕТ большого архива
-          git rm --cached icq-dependencies.zip 2>/dev/null || true
-          rm -f icq-dependencies.zip
-          
-          git commit -m "Assemble qt5-core.zip and remove all parts" || echo "No changes"
-          git push
+          # Очищаем локальный репозиторий
+          rm -rf .git/refs/original/
+          git reflog expire --expire=now --all
+          git gc --prune=now --aggressive
