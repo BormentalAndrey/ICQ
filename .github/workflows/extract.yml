@@ -4,6 +4,8 @@ name: Assemble ICQ Dependencies
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - 'icq-dependencies.part.*'
   workflow_dispatch:
 
 jobs:
@@ -19,26 +21,43 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find and assemble
+      - name: Assemble from parts
         run: |
-          echo "Поиск частей..."
-          ls -la
-          echo ""
-          
-          if ls icq-dependencies.part.* 1> /dev/null 2>&1; then
-            echo "Сборка архива..."
-            cat icq-dependencies.part.* > icq-dependencies.zip
-            ls -lh icq-dependencies.zip
-          else
-            echo "Части не найдены"
-            exit 1
-          fi
+          echo "Сборка архива из частей..."
+          cat icq-dependencies.part.* > icq-dependencies.zip
+          ls -lh icq-dependencies.zip
 
-      - name: Commit
+      - name: Remove parts
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git rm -f icq-dependencies.part.* || true
-          git add icq-dependencies.zip
-          git commit -m "Assemble ICQ dependencies" || echo "Нет изменений"
-          git push
+          git rm icq-dependencies.part.*
+          git commit -m "Remove parts after assembly" || echo "No changes"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: icq-deps-v1.0
+          name: ICQ Dependencies v1.0
+          files: icq-dependencies.zip
+          body: |
+            ## ICQ Dependencies Bundle
+            
+            Полный архив зависимостей ICQ (525 MB)
+            
+            ### Содержимое:
+            - Qt5 libraries
+            - Boost
+            - RapidJSON
+            - curl
+            - Другие зависимости
+            
+            ### Использование:
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/icq-deps-v1.0/icq-dependencies.zip
+            unzip icq-dependencies.zip -d icq-dependencies/
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
