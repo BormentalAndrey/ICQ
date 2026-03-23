@@ -4,6 +4,8 @@ name: Assemble ICQ Dependencies
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - 'icq-dependencies.part.*'
   workflow_dispatch:
 
 jobs:
@@ -19,64 +21,17 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List all files
+      - name: Assemble from parts
         run: |
-          echo "Все файлы в репозитории:"
-          ls -la
-          echo ""
-          echo "Поиск частей архива:"
-          find . -name "*.part.*" -o -name "icq-dependencies*" | head -20
-
-      - name: Find and assemble parts
-        run: |
-          # Ищем все части
-          PARTS=$(find . -name "icq-dependencies.part.*" -type f 2>/dev/null | sort)
-          
-          if [ -z "$PARTS" ]; then
-            echo "❌ Части архива не найдены!"
-            echo "Проверьте, что файлы загружены с правильными именами:"
-            echo "  icq-dependencies.part.aa"
-            echo "  icq-dependencies.part.ab"
-            echo "  и т.д."
-            exit 1
-          fi
-          
-          echo "✅ Найдены части:"
-          echo "$PARTS"
-          echo ""
-          echo "🔧 Собираем архив..."
-          cat $PARTS > icq-dependencies.zip
-          
-          echo ""
-          echo "✅ Архив собран:"
+          echo "Сборка архива из частей..."
+          cat icq-dependencies.part.* > icq-dependencies.zip
           ls -lh icq-dependencies.zip
 
-      - name: Verify archive
-        run: |
-          echo "🔍 Проверка архива:"
-          if file icq-dependencies.zip | grep -q "Zip archive"; then
-            echo "   ✅ Это ZIP архив"
-            unzip -t icq-dependencies.zip 2>&1 | head -10
-            SIZE=$(du -h icq-dependencies.zip | cut -f1)
-            echo "   📦 Размер: $SIZE"
-          else
-            echo "   ❌ Не ZIP архив!"
-            file icq-dependencies.zip
-            exit 1
-          fi
-
-      - name: Remove parts
+      - name: Remove parts and commit
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          rm -f icq-dependencies.part.*
-          git add -A
-          git commit -m "Assemble ICQ dependencies archive from parts" || echo "Нет изменений"
+          git rm icq-dependencies.part.*
+          git add icq-dependencies.zip
+          git commit -m "Assemble ICQ dependencies from parts"
           git push
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: icq-dependencies
-          path: icq-dependencies.zip
-          retention-days: 30
