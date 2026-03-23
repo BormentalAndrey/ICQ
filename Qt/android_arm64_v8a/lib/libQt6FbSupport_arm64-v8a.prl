@@ -1,0 +1,5 @@
+QMAKE_PRL_TARGET = libQt6FbSupport_arm64-v8a.a
+QMAKE_PRL_CONFIG = static
+QMAKE_PRL_VERSION = 6.5.0
+QMAKE_PRL_LIBS = $$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6Gui_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so -lGLESv2 -lEGL -llog -pthread
+QMAKE_PRL_LIBS_FOR_CMAKE = $$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6Gui_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so;-lGLESv2;-lEGL;-llog;-pthread
