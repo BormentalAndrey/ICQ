@@ -1,5 +1,5 @@
-# .github/workflows/cleanup-old-parts.yml
-name: Cleanup Old Parts
+# .github/workflows/cleanup.yml
+name: Cleanup
 
 on:
   workflow_dispatch:
@@ -11,21 +11,16 @@ jobs:
       contents: write
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove old parts
+      - name: Delete old files
         run: |
-          echo "Удаление старых частей..."
-          
-          # Удаляем старые части
           rm -f icq-dependencies.part.*
           rm -f icq-dependencies.zip
-          
-          # Добавляем изменения
+          ls -la
+
+      - name: Push changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
           git add -A
-          git commit -m "Remove old parts" || echo "No changes"
+          git commit -m "Delete old parts" || echo "No changes"
           git push
