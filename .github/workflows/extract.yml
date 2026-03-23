@@ -35,16 +35,18 @@ jobs:
           
       - name: Create fix branch
         run: |
-          BRANCH_NAME="fix/config-excess-elements-$(date +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH_NAME" || git checkout "$BRANCH_NAME"
+          BRANCH_NAME="fix/build-errors-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           
       - name: Fix config.cpp - excess elements in struct initializer
         run: |
           FILE="common.shared/config/config.cpp"
           if [ -f "$FILE" ]; then
-            sed -i '247s/std::pair(\([^,]*\), \([^)]*\))/{ \1, \2 }/' "$FILE"
-            echo "✓ Fixed config.cpp line 247"
+            # Замена std::pair на инициализацию через фигурные скобки для совместимости с Qt6/C++17
+            sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/' "$FILE"
+            sed -i '/features::report_messages_enabled/s/)),/},/' "$FILE"
+            echo "✓ Fixed config.cpp struct initializer"
           fi
           
       - name: Fix antivirus_types.cpp - namespace issues
@@ -58,15 +60,16 @@ jobs:
           
       - name: Fix MemoryStats macros
         run: |
-          for file in gui/memory_stats/*.h; do
-            if [ -f "$file" ]; then
-              if ! grep -q "#define MEMSTATS_NS_BEGIN" "$file"; then
-                sed -i '1i#ifndef MEMSTATS_NS_BEGIN\n#define MEMSTATS_NS_BEGIN namespace memory_stats {\n#define MEMSTATS_NS_END }\n#endif\n' "$file"
-                echo "✓ Added macros to $file"
-              fi
+          # Исправление макросов во всех хедерах папки gui/memory_stats
+          find gui/memory_stats -name "*.h" -type f | while read -r file; do
+            if ! grep -q "#define MEMSTATS_NS_BEGIN" "$file"; then
+              sed -i '1i#ifndef MEMSTATS_NS_BEGIN\n#define MEMSTATS_NS_BEGIN namespace memory_stats {\n#define MEMSTATS_NS_END }\n#endif\n' "$file"
+              echo "✓ Added macros to $file"
             fi
           done
           
+          # Создание общего заголовочного файла для макросов
+          mkdir -p gui/memory_stats
           cat > gui/memory_stats/memory_stats_macros.h << 'EOF'
 #ifndef MEMORY_STATS_MACROS_H
 #define MEMORY_STATS_MACROS_H
@@ -82,8 +85,10 @@ EOF
         run: |
           FILE="core/curl_handler.h"
           if [ -f "$FILE" ]; then
-            sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#include <curl\/curl.h>\n#else\n#include <curl.h>\n#endif/' "$FILE"
-            echo "✓ Fixed curl.h include path"
+            if ! grep -q "#ifdef __ANDROID__" "$FILE"; then
+              sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#include <curl\/curl.h>\n#else\n#include <curl.h>\n#endif/' "$FILE"
+              echo "✓ Fixed curl.h include path for Android"
+            fi
           fi
           
       - name: Fix Qt6 includes for QRect and QStringRef
@@ -102,7 +107,7 @@ EOF
               sed -i '1i#include <QStringRef>\n#include <QLatin1String>' "$FILE"
               echo "✓ Added QStringRef include to StringComparator.h"
             fi
-            sed -i 's/ql1s/QLatin1String/g' "$FILE"
+            sed -i 's/\bql1s\b/QLatin1String/g' "$FILE"
             echo "✓ Fixed ql1s to QLatin1String"
           fi
           
@@ -110,9 +115,10 @@ EOF
         run: |
           FILE="gui/utils/gui_coll_helper.h"
           if [ -f "$FILE" ]; then
-            cat >> "$FILE" << 'EOF'
+            if ! grep -q "inline size_t array_size" "$FILE"; then
+              cat >> "$FILE" << 'EOF'
 
-// Helper functions for iarray compatibility
+// Helper functions for iarray compatibility (Qt6/Dzin)
 namespace core {
     template<typename T>
     inline size_t array_size(iarray* arr) {
@@ -130,26 +136,27 @@ namespace core {
     }
 }
 EOF
-            echo "✓ Added iarray compatibility helpers"
+              echo "✓ Added iarray compatibility helpers"
+            fi
           fi
           
       - name: Fix patch_version.h namespace
         run: |
           FILE="common.shared/patch_version.h"
           if [ -f "$FILE" ]; then
-            sed -i 's/^namespace common$/namespace common {/' "$FILE"
-            if ! grep -q "} \/\/ namespace common" "$FILE"; then
+            if grep -q "^namespace common$" "$FILE"; then
+              sed -i 's/^namespace common$/namespace common {/' "$FILE"
               echo "} // namespace common" >> "$FILE"
+              echo "✓ Fixed patch_version.h namespace braces"
             fi
-            echo "✓ Fixed patch_version.h namespace"
           fi
           
       - name: Fix sign-compare warnings in common.h
         run: |
           FILE="common.shared/common.h"
           if [ -f "$FILE" ]; then
-            sed -i 's/if (_bytes > \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<unsigned long long>(_bytes) > \1LL * MEGABYTE)/g' "$FILE"
-            sed -i 's/if (_bytes < \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<unsigned long long>(_bytes) < \1LL * MEGABYTE)/g' "$FILE"
+            sed -i 's/if (_bytes > \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<long long>(_bytes) > \1LL * MEGABYTE)/g' "$FILE"
+            sed -i 's/if (_bytes < \([0-9]\+\)LL \* MEGABYTE)/if (static_cast<long long>(_bytes) < \1LL * MEGABYTE)/g' "$FILE"
             echo "✓ Fixed sign-compare warnings in common.h"
           fi
           
@@ -157,128 +164,83 @@ EOF
         run: |
           FILE="core/tools/binary_stream.h"
           if [ -f "$FILE" ]; then
-            sed -i '159s/if (buffer_.size() < _size)/if (buffer_.size() < static_cast<size_t>(_size))/' "$FILE"
-            sed -i '187s/if (size_need > buffer_.size())/if (static_cast<size_t>(size_need) > buffer_.size())/' "$FILE"
-            sed -i '219s/if (size_need > buffer_.size())/if (static_cast<size_t>(size_need) > buffer_.size())/' "$FILE"
+            # Исправление сравнений size_t и int64_t
+            sed -i 's/buffer_.size() < _size/buffer_.size() < static_cast<size_t>(_size)/g' "$FILE"
+            sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
             echo "✓ Fixed sign-compare warnings in binary_stream.h"
           fi
           
       - name: Apply clang-format to all modified files
         run: |
           set -euo pipefail
-
-          # Format only C/C++/header files that we have modified
-          git diff --name-only --diff-filter=ACMRT \
-            | grep -E '\.(cpp|h|hpp)$' \
-            | xargs -r -I {} bash -c '
-                if [ -f "{}" ]; then
-                  clang-format -i "{}"
-                  git add "{}"
-                  echo "✓ Formatted: {}"
-                fi'
-
-          if git diff --cached --quiet; then
-            echo "No files were formatted"
+          MODIFIED_FILES=$(git diff --name-only | grep -E '\.(cpp|h|hpp)$' || true)
+          if [ -n "$MODIFIED_FILES" ]; then
+            echo "$MODIFIED_FILES" | xargs clang-format -i
+            git add $MODIFIED_FILES
+            echo "✓ Clang-format applied"
           else
-            echo "Some files were formatted and re-staged"
+            echo "No C++ files modified"
           fi
           
       - name: Verify syntax - check brace balance
         run: |
           echo "Checking for potential syntax issues..."
-          
-          for file in \( (git diff --name-only --diff-filter=ACMRT | grep -E '\.(cpp|h|hpp) \)' || true); do
+          git diff --name-only --cached | grep -E '\.(cpp|h|hpp)$' | while read -r file; do
             if [ -f "$file" ]; then
               opens=$(grep -o '{' "$file" | wc -l)
               closes=$(grep -o '}' "$file" | wc -l)
               if [ "$opens" != "$closes" ]; then
-                echo "⚠ Warning: Unbalanced braces in $file: opens=$opens, closes=$closes"
+                echo "::warning file=$file::Unbalanced braces: opens=$opens, closes=$closes"
               fi
             fi
           done
-          
           echo "✓ Syntax verification completed"
           
       - name: Commit changes
+        id: commit
         run: |
-          git add -A
           if git diff --cached --quiet; then
             echo "No changes to commit"
-            echo "NO_CHANGES=true" >> $GITHUB_ENV
+            echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
           else
-            git commit -m "build: auto-fix compilation errors and warnings
+            git commit -m "build: auto-fix compilation errors and warnings (Android/Qt6)
 
-- Fixed excess elements in struct initializer (config.cpp:247)
-- Fixed namespace issues in antivirus_types.cpp
-- Added missing MEMSTATS_NS_BEGIN/END macros
-- Fixed curl.h include path for Android
-- Added missing Qt6 includes (QRect, QStringRef)
-- Replaced ql1s → QLatin1String
-- Added iarray compatibility helpers
-- Fixed patch_version.h namespace braces
-- Fixed sign-compare warnings in common.h & binary_stream.h
-- Applied clang-format to changed files
-
-Automated fix generated by GitHub Actions"
+- Исправлена инициализация struct в config.cpp (pair -> {})
+- Исправлены namespace в antivirus_types.cpp (tools -> common::json)
+- Добавлены MEMSTATS макросы и заголовочный файл
+- Путь curl.h адаптирован под Android NDK
+- Добавлены QRect и QStringRef для Qt6
+- ql1s заменен на QLatin1String
+- Добавлены iarray хелперы в gui_coll_helper.h
+- Исправлен namespace в patch_version.h
+- Устранены sign-compare предупреждения"
             git push origin "${{ env.BRANCH_NAME }}"
-            echo "NO_CHANGES=false" >> $GITHUB_ENV
+            echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
           fi
           
       - name: Create Pull Request
-        if: env.NO_CHANGES == 'false'
+        if: steps.commit.outputs.NO_CHANGES == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pulls } = await github.rest.pulls.list({
+            const branch = process.env.BRANCH_NAME;
+            const target = context.payload.inputs ? context.payload.inputs.target_branch : 'main';
+            
+            const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              head: `\( {context.repo.owner}: \){{ env.BRANCH_NAME }}`,
-              base: '${{ github.event.inputs.target_branch || 'main' }}',
-              state: 'open'
+              title: 'Auto-fix: Compilation errors and warnings (C++/Qt6/Android)',
+              body: `## 🛠️ Автоматическое исправление ошибок сборки (Dzin Rebrand)
+
+Исправлены критические ошибки, блокировавшие сборку под Android с использованием Qt6:
+- **config.cpp**: Исправлен \`excess elements in struct initializer\`.
+- **Qt6 Compatibility**: Добавлены пропущенные инклуды и заменены устаревшие типы.
+- **NDK Fixes**: Исправлены пути к заголовочным файлам (curl).
+- **Warnings**: Исправлены \`sign-compare\` в базовых инструментах.
+
+*Автоматически создано GitHub Actions.*`,
+              head: branch,
+              base: target
             });
+            console.log(`Created PR #${pr.number}`);
             
-            if (pulls.length === 0) {
-              const { data: pr } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: 'Auto-fix: Compilation errors and warnings (C++/Qt6/Android)',
-                body: `## 🛠️ Автоматическое исправление ошибок сборки
-
-### Исправленные проблемы:
-
-#### Критические ошибки компиляции
-1. excess elements in struct initializer → config.cpp:247
-2. namespace issues (tools:: → common::json::) → antivirus_types.cpp
-3. Отсутствующие MEMSTATS_NS_BEGIN / MEMSTATS_NS_END → memory_stats/*.h
-4. Неправильный путь #include <curl.h> → curl_handler.h
-5. Отсутствующие Qt6 заголовки (QRect, QStringRef) + ql1s → QLatin1String
-6. Отсутствующие методы iarray → gui_coll_helper.h
-7. Некорректные скобки namespace → patch_version.h
-
-#### Предупреждения компилятора
-- sign-compare в common.h и binary_stream.h (добавлены static_cast)
-
-### Выполнено:
-- Применён clang-format ко всем изменённым файлам
-- Проверен баланс скобок {}
-- Создан отдельный PR для ревью
-
-Автоматический фикс от GitHub Actions — \( {{ github.server_url }}/ \){{ github.repository }}/actions/runs/${{ github.run_id }}`,
-                head: '${{ env.BRANCH_NAME }}',
-                base: '${{ github.event.inputs.target_branch || 'main' }}'
-              });
-              console.log(`Created PR #${pr.number}`);
-            } else {
-              console.log(`PR already exists: #${pulls[0].number}`);
-            }
-          }
-          
-      - name: Upload fix report (if any)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fix-report
-          path: |
-            *.patch
-            fix-*.log
-          if-no-files-found: ignore
