@@ -24,8 +24,8 @@ jobs:
           
       - name: Setup Git config
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
       - name: Setup Clang-format
         run: |
@@ -45,7 +45,6 @@ jobs:
           if [ -f "$FILE" ]; then
             sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/' "$FILE"
             sed -i '/features::report_messages_enabled/s/)),/},/' "$FILE"
-            echo "✓ Fixed config.cpp struct initializer"
           fi
           
       - name: Fix antivirus_types.cpp - namespace issues
@@ -54,7 +53,6 @@ jobs:
           if [ -f "$FILE" ]; then
             sed -i 's/tools::make_string_ref/common::json::make_string_ref/g' "$FILE"
             sed -i 's/tools::unserialize_value/common::json::unserialize_value/g' "$FILE"
-            echo "✓ Fixed antivirus_types.cpp namespace issues"
           fi
           
       - name: Fix MemoryStats macros
@@ -128,7 +126,7 @@ EOF
           MODIFIED_FILES=$(git diff --name-only | grep -E '\.(cpp|h|hpp)$' || true)
           if [ -n "$MODIFIED_FILES" ]; then
             echo "$MODIFIED_FILES" | xargs clang-format -i
-            git add $MODIFIED_FILES
+            git add .
           fi
           
       - name: Commit changes
@@ -137,7 +135,16 @@ EOF
           if git diff --cached --quiet; then
             echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
           else
-            git commit -m "build: auto-fix compilation errors (Android/Qt6)"
+            git commit -m "build: auto-fix compilation errors (Android/Qt6)
+            
+            - Fixed config.cpp struct initializer
+            - Fixed antivirus namespaces
+            - Added memory_stats macros
+            - Patched curl.h for Android
+            - Updated Qt6 types and includes
+            - Fixed iarray and patch_version
+            - Resolved sign-compare warnings"
+            
             git push origin "${{ env.BRANCH_NAME }}"
             echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
           fi
@@ -148,13 +155,12 @@ EOF
         with:
           script: |
             const branch = process.env.BRANCH_NAME;
-            const target = "${{ github.event.inputs.target_branch }}" || 'main';
+            const target = `${{ github.event.inputs.target_branch || 'main' }}`;
             await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: 'Auto-fix: Compilation errors (C++/Qt6/Android)',
-              body: 'Автоматическое исправление ошибок сборки из логов.',
+              body: 'Автоматическое исправление ошибок сборки из логов (Dzin Rebrand).',
               head: branch,
               base: target
             });
-            
