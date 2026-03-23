@@ -67,10 +67,10 @@ constexpr const char *tf(const bool v) noexcept {
 } // namespace logutils
 
 namespace core {
-constexpr unsigned long BYTE = 1;
-constexpr unsigned long KILOBYTE = 1024 * BYTE;
-constexpr unsigned long MEGABYTE = 1024 * KILOBYTE;
-constexpr unsigned long GIGABYTE = 1024 * MEGABYTE;
+constexpr unsigned long long BYTE = 1;
+constexpr unsigned long long KILOBYTE = 1024 * BYTE;
+constexpr unsigned long long MEGABYTE = 1024 * KILOBYTE;
+constexpr unsigned long long GIGABYTE = 1024 * MEGABYTE;
 
 const std::string KILOBYTE_STR = "kb";
 const std::string MEGABYTE_STR = "mb";
@@ -118,9 +118,9 @@ inline std::string round_interval(const long long _min_val,
 inline std::string memory_size_interval(size_t _bytes) {
   std::string interval;
 
-  if (_bytes <= 100LL * static_cast<long long>(MEGABYTE))
+  if (_bytes <= 100LL * MEGABYTE)
     interval = round_interval(0, _bytes / MEGABYTE, 100, 100) + MEGABYTE_STR;
-  else if (_bytes <= 500LL * static_cast<long long>(MEGABYTE))
+  else if (_bytes <= 500LL * MEGABYTE)
     interval = round_interval(100, _bytes / MEGABYTE, 50, 500) + MEGABYTE_STR;
   else if (_bytes <= 1 * GIGABYTE)
     interval = round_interval(500, _bytes / MEGABYTE, 100, 1024) + MEGABYTE_STR;
@@ -151,9 +151,9 @@ inline std::string disk_space_interval(long long _bytes) {
   std::string interval;
 
   // FIX: Added LL to prevent -Wsign-compare warnings
-  if (_bytes > 1500LL * static_cast<long long>(MEGABYTE))
+  if (_bytes > 1500LL * MEGABYTE)
     interval = "1500mb +";
-  else if (_bytes < 100LL * static_cast<long long>(MEGABYTE))
+  else if (_bytes < 100LL * MEGABYTE)
     interval = "< 100mb";
   else
     interval = round_interval(100, _bytes / MEGABYTE, 100, 1500) + MEGABYTE_STR;
@@ -176,7 +176,7 @@ inline std::string traffic_size_interval(size_t _bytes) {
     interval = round_interval(5, _bytes / MEGABYTE, 5, 20) + MEGABYTE_STR;
   else if (_bytes <= 50 * MEGABYTE)
     interval = round_interval(20, _bytes / MEGABYTE, 30, 50) + MEGABYTE_STR;
-  else if (_bytes <= 500LL * static_cast<long long>(MEGABYTE))
+  else if (_bytes <= 500LL * MEGABYTE)
     interval = round_interval(50, _bytes / MEGABYTE, 50, 500) + MEGABYTE_STR;
   else
     interval = "more500" + MEGABYTE_STR;
