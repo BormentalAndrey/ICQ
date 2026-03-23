@@ -6,37 +6,25 @@ project("icq_mobile_core" LANGUAGES CXX C)
 cmake_policy(SET CMP0074 NEW)
 
 # -----------------------------------------------------------------------------
-# Поиск Qt (Qt5 или Qt6)
+# Поиск Qt (Принудительно Qt 6.5.0)
 # -----------------------------------------------------------------------------
 
+# Пытаемся найти Qt6 версии 6.5.0
+# Сначала проверяем QT_ANDROID_PATH (обычно передается из Gradle)
 if(QT_ANDROID_PATH)
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-    find_package(Qt6 QUIET COMPONENTS Core Network)
-    if(NOT Qt6_FOUND)
-        find_package(Qt5 REQUIRED COMPONENTS Core Network)
-        set(QT_VERSION_MAJOR 5)
-    else()
-        set(QT_VERSION_MAJOR 6)
-    endif()
-elseif(DEFINED ENV{Qt5_DIR})
-    set(CMAKE_PREFIX_PATH $ENV{Qt5_DIR})
-    find_package(Qt5 REQUIRED COMPONENTS Core Network)
-    set(QT_VERSION_MAJOR 5)
-elseif(DEFINED ENV{Qt6_ANDROID_DIR})
-    set(CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
-    find_package(Qt6 REQUIRED COMPONENTS Core Network)
-    set(QT_VERSION_MAJOR 6)
-else()
-    find_package(Qt6 QUIET COMPONENTS Core Network)
-    if(NOT Qt6_FOUND)
-        find_package(Qt5 REQUIRED COMPONENTS Core Network)
-        set(QT_VERSION_MAJOR 5)
-    else()
-        set(QT_VERSION_MAJOR 6)
-    endif()
 endif()
 
-message(STATUS "Using Qt${QT_VERSION_MAJOR}: ${Qt${QT_VERSION_MAJOR}_VERSION}")
+# Если задана переменная окружения для Qt6 Android
+if(DEFINED ENV{Qt6_ANDROID_DIR})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
+endif()
+
+# Ищем именно Qt 6.5.0. Если не найдено, CMake выдаст ошибку конфигурации.
+find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network)
+set(QT_VERSION_MAJOR 6)
+
+message(STATUS "Using Qt${QT_VERSION_MAJOR}: ${Qt6_VERSION}")
 
 # -----------------------------------------------------------------------------
 # Настройка путей проекта
@@ -60,13 +48,9 @@ add_compile_definitions(
     SUPPORT_EXTERNAL_CONFIG
     HAVE_SECURE_GETENV=1
     _FORTIFY_SOURCE=2
+    QT_CORE_LIB 
+    QT_NETWORK_LIB
 )
-
-if(${QT_VERSION_MAJOR} EQUAL 5)
-    add_compile_definitions(QT_CORE_LIB QT_NETWORK_LIB)
-else()
-    add_compile_definitions(QT_CORE_LIB QT_NETWORK_LIB)
-endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_definitions(QT_NO_DEBUG NDEBUG)
@@ -123,17 +107,11 @@ if(DEFINED ENV{CURL_INCLUDE_PATH})
     target_include_directories(icq_core PRIVATE $ENV{CURL_INCLUDE_PATH})
 endif()
 
-if(${QT_VERSION_MAJOR} EQUAL 5)
-    target_include_directories(icq_core PRIVATE
-        ${Qt5Core_INCLUDE_DIRS}
-        ${Qt5Network_INCLUDE_DIRS}
-    )
-else()
-    target_include_directories(icq_core PRIVATE
-        ${Qt6Core_INCLUDE_DIRS}
-        ${Qt6Network_INCLUDE_DIRS}
-    )
-endif()
+# Заголовки Qt6
+target_include_directories(icq_core PRIVATE
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Network_INCLUDE_DIRS}
+)
 
 # -----------------------------------------------------------------------------
 # Свойства компиляции
@@ -165,31 +143,21 @@ find_library(log-lib log REQUIRED)
 find_library(z-lib z REQUIRED)
 find_library(android-lib android REQUIRED)
 
-if(${QT_VERSION_MAJOR} EQUAL 5)
-    target_link_libraries(icq_core
-        Qt5::Core
-        Qt5::Network
-        ${log-lib}
-        ${z-lib}
-        ${android-lib}
-        -Wl,--gc-sections
-    )
-else()
-    target_link_libraries(icq_core
-        Qt6::Core
-        Qt6::Network
-        ${log-lib}
-        ${z-lib}
-        ${android-lib}
-        -Wl,--gc-sections
-    )
-endif()
+target_link_libraries(icq_core
+    Qt6::Core
+    Qt6::Network
+    ${log-lib}
+    ${z-lib}
+    ${android-lib}
+    -Wl,--gc-sections
+)
 
 # -----------------------------------------------------------------------------
 # Android специфика
 # -----------------------------------------------------------------------------
 
 if(ANDROID)
+    # Гарантируем, что JNI_OnLoad не будет вырезана линковщиком
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
     
     if(NOT ANDROID_NATIVE_API_LEVEL)
@@ -197,9 +165,8 @@ if(ANDROID)
     endif()
     target_compile_definitions(icq_core PRIVATE __ANDROID_API__=${ANDROID_NATIVE_API_LEVEL})
     
-    if(${QT_VERSION_MAJOR} EQUAL 6)
-        qt_finalize_target(icq_core)
-    endif()
+    # Обязательная команда для Qt6 при сборке под Android
+    qt_finalize_target(icq_core)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -208,10 +175,10 @@ endif()
 
 message(STATUS "")
 message(STATUS "========================================")
-message(STATUS "ICQ Mobile Core Build Configuration")
+message(STATUS "ICQ/DZIN Mobile Core Build Configuration")
 message(STATUS "========================================")
 message(STATUS "  ICQ_ROOT:      ${ICQ_ROOT}")
 message(STATUS "  Build Type:    ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Qt Version:    ${Qt${QT_VERSION_MAJOR}_VERSION}")
+message(STATUS "  Qt Version:    ${Qt6_VERSION}")
 message(STATUS "  Android API:   ${ANDROID_NATIVE_API_LEVEL}")
 message(STATUS "========================================")
