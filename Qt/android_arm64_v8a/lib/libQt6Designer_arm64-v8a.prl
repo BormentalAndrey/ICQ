@@ -1,0 +1,5 @@
+QMAKE_PRL_TARGET = libQt6Designer_arm64-v8a.so
+QMAKE_PRL_CONFIG = shared
+QMAKE_PRL_VERSION = 6.5.0
+QMAKE_PRL_LIBS = $$[QT_INSTALL_LIBS]/libQt6Xml_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6OpenGLWidgets_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6OpenGL_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6Widgets_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6Gui_arm64-v8a.so $$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so -llog -pthread -lGLESv2 -lEGL
+QMAKE_PRL_LIBS_FOR_CMAKE = $$[QT_INSTALL_LIBS]/libQt6Xml_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6OpenGLWidgets_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6OpenGL_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6Widgets_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6Gui_arm64-v8a.so;$$[QT_INSTALL_LIBS]/libQt6Core_arm64-v8a.so;-llog;-pthread;-lGLESv2;-lEGL
