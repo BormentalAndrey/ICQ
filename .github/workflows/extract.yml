@@ -1,11 +1,13 @@
-# .github/workflows/remove-large-file.yml
-name: Remove Large File
+# .github/workflows/cleanup-old-parts.yml
+name: Cleanup Old Parts
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Раз в неделю
 
 jobs:
-  remove:
+  cleanup:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,15 +19,22 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Remove large file
+      - name: Remove old parts
         run: |
-          git filter-branch --force --index-filter \
-            "git rm --cached --ignore-unmatch icq-dependencies.zip" \
-            --prune-empty --tag-name-filter cat -- --all
+          echo "========================================="
+          echo "УДАЛЕНИЕ СТАРЫХ ЧАСТЕЙ АРХИВА"
+          echo "========================================="
           
-          git push --force --all
+          # Удаляем старые части (aa, ab, ac и т.д.)
+          git rm icq-dependencies.part.* 2>/dev/null || echo "Нет старых частей"
           
-          # Очищаем локальный репозиторий
-          rm -rf .git/refs/original/
-          git reflog expire --expire=now --all
-          git gc --prune=now --aggressive
+          # Удаляем большие файлы если есть
+          git rm --cached icq-dependencies.zip 2>/dev/null || true
+          
+          # Проверяем, есть ли новые архивы
+          if ls qt5-*.zip 1>/dev/null 2>&1; then
+            echo "Новые архивы уже есть, старые удалены"
+          fi
+          
+          git commit -m "Clean up old parts" || echo "Нет изменений"
+          git push
