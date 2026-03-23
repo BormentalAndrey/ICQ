@@ -1,5 +1,5 @@
-# .github/workflows/extract-all-archives.yml
-name: Extract All Archives
+# .github/workflows/extract-zip-archives.yml
+name: Extract ZIP Archives
 
 on:
   push:
@@ -19,37 +19,30 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find and extract all archives
+      - name: Find and extract all ZIP files
         run: |
-          echo "ПОИСК И РАСПАКОВКА АРХИВОВ"
+          echo "ПОИСК И РАСПАКОВКА ZIP АРХИВОВ"
           
-          # Находим все архивы
-          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) 2>/dev/null | while read archive; do
+          find . -type f -name "*.zip" | while read archive; do
             echo ""
-            echo "Архив: $archive"
+            echo "📦 Архив: $archive"
             
             dir=$(dirname "$archive")
             cd "$dir"
             
-            if [[ "$archive" == *.zip ]]; then
-              unzip -o "$(basename "$archive")" 2>/dev/null
-            elif [[ "$archive" == *.tar.gz ]]; then
-              tar -xzf "$(basename "$archive")" 2>/dev/null
-            elif [[ "$archive" == *.tar.bz2 ]]; then
-              tar -xjf "$(basename "$archive")" 2>/dev/null
-            fi
+            unzip -o "$(basename "$archive")"
             
             cd - > /dev/null
-            echo "✅ Распаковано: $archive"
+            echo "✅ Распаковано"
           done
 
-      - name: Remove archives
+      - name: Remove ZIP archives
         run: |
           git config user.name "GitHub Actions Bot"
-          git config.user.email "actions@github.com"
+          git config user.email "actions@github.com"
           
-          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) -exec git rm {} \; 2>/dev/null || true
+          find . -type f -name "*.zip" -exec git rm {} \;
           
           git add -A
-          git commit -m "Extract and remove archives" || echo "No changes"
+          git commit -m "Extract and remove ZIP archives" || echo "No changes"
           git push
