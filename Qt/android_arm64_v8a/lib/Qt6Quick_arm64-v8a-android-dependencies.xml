@@ -1,0 +1,5 @@
+<rules><dependencies>
+<lib name="Qt6Quick_arm64-v8a"><depends>
+<bundled file="plugins/scenegraph" />
+</depends></lib>
+</dependencies></rules>

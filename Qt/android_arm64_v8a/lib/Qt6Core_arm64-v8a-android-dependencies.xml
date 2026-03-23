@@ -1,0 +1,8 @@
+<rules><dependencies>
+<lib name="Qt6Core_arm64-v8a"><depends>
+<jar bundling="1" file="jar/Qt6Android.jar"  />
+<lib file="plugins/platforms/libplugins_platforms_qtforandroid_arm64-v8a.so"  />
+<permission name="android.permission.INTERNET" />
+<permission name="android.permission.WRITE_EXTERNAL_STORAGE" />
+</depends></lib>
+</dependencies></rules>

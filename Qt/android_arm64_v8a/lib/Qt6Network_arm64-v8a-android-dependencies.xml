@@ -1,0 +1,14 @@
+<rules><dependencies>
+<lib name="Qt6Network_arm64-v8a"><depends>
+<jar bundling="1" file="jar/Qt6AndroidNetwork.jar"  />
+<jar bundling="1" file="jar/Qt6AndroidNetworkInformationBackend.jar"  />
+<permission name="android.permission.ACCESS_NETWORK_STATE" />
+<jar bundling="1" file="jar/Qt6AndroidNetworkInformationBackend.jar"  />
+<permission name="android.permission.ACCESS_NETWORK_STATE" />
+<jar bundling="1" file="jar/Qt6AndroidNetworkInformationBackend.jar"  />
+<permission name="android.permission.ACCESS_NETWORK_STATE" />
+<bundled file="plugins/networkaccess" />
+<bundled file="plugins/networkinformation" />
+<bundled file="plugins/tls" />
+</depends></lib>
+</dependencies></rules>

@@ -1,0 +1,5 @@
+<rules><dependencies>
+<lib name="Qt6Qml_arm64-v8a"><depends>
+<bundled file="plugins/qmltooling" />
+</depends></lib>
+</dependencies></rules>
