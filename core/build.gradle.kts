@@ -34,7 +34,7 @@ android {
         cmake {
             // ИСПРАВЛЕНИЕ: указываем путь к реальному файлу в папке App
             // Так как мы находимся в папке 'core', поднимаемся на уровень выше
-            path = file("../App/src/main/cpp/CMakeLists.txt")
+            path = file("../app/src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
