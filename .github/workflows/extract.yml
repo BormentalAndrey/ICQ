@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       target_branch:
-        description: 'Target branch for PR'
+        description: 'Ветка для создания PR'
         required: false
         default: 'main'
         type: string
 
 jobs:
-  auto-fix:
+  fix-and-propose:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Нужно для корректного ребейза
           
       - name: Setup Git config
         run: |
@@ -33,126 +33,83 @@ jobs:
           sudo apt-get install -y clang-format-14
           sudo ln -sf /usr/bin/clang-format-14 /usr/bin/clang-format
           
-      - name: Create fix branch
+      - name: Create unique fix branch
         run: |
-          BRANCH_NAME="fix/build-errors-$(date +%Y%m%d-%H%M%S)"
+          BRANCH_NAME="fix/build-repair-$(date +%Y%m%d-%H%M%S)"
           git checkout -b "$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           
-      - name: Fix config.cpp - excess elements in struct initializer
+      - name: 🛠 Fix config.cpp (Struct Initializer Error)
         run: |
           FILE="common.shared/config/config.cpp"
           if [ -f "$FILE" ]; then
+            # Исправляем ошибку в строке 247 и похожих (std::pair -> {})
             sed -i 's/std::pair(features::report_messages_enabled,/{ features::report_messages_enabled,/' "$FILE"
             sed -i '/features::report_messages_enabled/s/)),/},/' "$FILE"
+            echo "✓ config.cpp patched"
           fi
           
-      - name: Fix antivirus_types.cpp - namespace issues
-        run: |
-          FILE="common.shared/antivirus/antivirus_types.cpp"
-          if [ -f "$FILE" ]; then
-            sed -i 's/tools::make_string_ref/common::json::make_string_ref/g' "$FILE"
-            sed -i 's/tools::unserialize_value/common::json::unserialize_value/g' "$FILE"
-          fi
-          
-      - name: Fix MemoryStats macros
-        run: |
-          find gui/memory_stats -name "*.h" -type f | while read -r file; do
-            if ! grep -q "#define MEMSTATS_NS_BEGIN" "$file"; then
-              sed -i '1i#ifndef MEMSTATS_NS_BEGIN\n#define MEMSTATS_NS_BEGIN namespace memory_stats {\n#define MEMSTATS_NS_END }\n#endif\n' "$file"
-            fi
-          done
-          mkdir -p gui/memory_stats
-          cat > gui/memory_stats/memory_stats_macros.h << 'EOF'
-#ifndef MEMORY_STATS_MACROS_H
-#define MEMORY_STATS_MACROS_H
-#define MEMSTATS_NS_BEGIN namespace memory_stats {
-#define MEMSTATS_NS_END }
-#endif
-EOF
-          
-      - name: Fix curl.h include
+      - name: 🛠 Fix curl_handler.h (Android NDK Path)
         run: |
           FILE="core/curl_handler.h"
           if [ -f "$FILE" ]; then
-            if ! grep -q "#ifdef __ANDROID__" "$FILE"; then
-              sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#include <curl\/curl.h>\n#else\n#include <curl.h>\n#endif/' "$FILE"
-            fi
+            # Заменяем обычный инклуд на кроссплатформенный
+            sed -i 's/#include <curl.h>/#ifdef __ANDROID__\n#  include <curl\/curl.h>\n#else\n#  include <curl.h>\n#endif/' "$FILE"
+            echo "✓ curl_handler.h patched"
           fi
           
-      - name: Fix Qt6 includes
+      - name: 🛠 Fix binary_stream.h (Sign-compare Warnings)
         run: |
-          FILE="gui/types/message.h"
-          [ -f "$FILE" ] && ! grep -q "#include <QRect>" "$FILE" && sed -i '/#include <QString>/a #include <QRect>' "$FILE"
-          
-          FILE="gui/utils/StringComparator.h"
-          if [ -f "$FILE" ]; then
-            ! grep -q "#include <QStringRef>" "$FILE" && sed -i '1i#include <QStringRef>\n#include <QLatin1String>' "$FILE"
-            sed -i 's/\bql1s\b/QLatin1String/g' "$FILE"
-          fi
-          
-      - name: Fix iarray interface
-        run: |
-          FILE="gui/utils/gui_coll_helper.h"
-          if [ -f "$FILE" ] && ! grep -q "inline size_t array_size" "$FILE"; then
-            cat >> "$FILE" << 'EOF'
-namespace core {
-    template<typename T> inline size_t array_size(iarray* arr) { return arr ? arr->size() : 0; }
-    template<typename T> inline void array_reserve(iarray* arr, size_t size) { if (arr) arr->reserve(size); }
-    template<typename T> inline void array_push_back(iarray* arr, T* value) { if (arr) arr->push_back(value); }
-}
-EOF
-          fi
-          
-      - name: Fix patch_version.h namespace
-        run: |
-          FILE="common.shared/patch_version.h"
-          if [ -f "$FILE" ] && grep -q "^namespace common$" "$FILE"; then
-            sed -i 's/^namespace common$/namespace common {/' "$FILE"
-            echo "} // namespace common" >> "$FILE"
-          fi
-          
-      - name: Fix sign-compare warnings
-        run: |
-          [ -f "common.shared/common.h" ] && sed -i 's/if (_bytes [<>]/if (static_cast<long long>(_bytes) /g' "common.shared/common.h"
           FILE="core/tools/binary_stream.h"
           if [ -f "$FILE" ]; then
             sed -i 's/buffer_.size() < _size/buffer_.size() < static_cast<size_t>(_size)/g' "$FILE"
             sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
+            echo "✓ binary_stream.h patched"
           fi
-          
-      - name: Apply clang-format
+
+      - name: 🛠 Fix Qt6 StringComparator
         run: |
-          MODIFIED_FILES=$(git diff --name-only | grep -E '\.(cpp|h|hpp)$' || true)
-          if [ -n "$MODIFIED_FILES" ]; then
-            echo "$MODIFIED_FILES" | xargs clang-format -i
-            git add .
+          FILE="gui/utils/StringComparator.h"
+          if [ -f "$FILE" ]; then
+            sed -i '1i#include <QStringRef>\n#include <QLatin1String>' "$FILE"
+            sed -i 's/\bql1s\b/QLatin1String/g' "$FILE"
+            echo "✓ StringComparator.h patched"
           fi
           
-      - name: Commit changes
-        id: commit
+      - name: Apply Formatting
+        run: |
+          # Форматируем только измененные файлы
+          git diff --name-only | grep -E '\.(cpp|h|hpp)$' | xargs -r clang-format -i
+          git add .
+          
+      - name: Finalize Changes and Push
+        id: push_step
         run: |
           if git diff --cached --quiet; then
-            echo "NO_CHANGES=true" >> $GITHUB_OUTPUT
+            echo "SKIPPED=true" >> $GITHUB_OUTPUT
           else
-            git commit -m "build: auto-fix compilation errors (Android/Qt6)"
-            git push origin "${{ env.BRANCH_NAME }}"
-            echo "NO_CHANGES=false" >> $GITHUB_OUTPUT
+            git commit -m "build: auto-fix compilation errors (Qt6/Android)"
+            
+            # РЕШЕНИЕ КОНФЛИКТА: делаем pull с ребейзом перед отправкой
+            # Если BormentalAndrey что-то запушил, наши правки встанут сверху
+            git pull --rebase origin ${{ github.event.inputs.target_branch || 'main' }}
+            
+            git push origin HEAD:${{ env.BRANCH_NAME }}
+            echo "SKIPPED=false" >> $GITHUB_OUTPUT
           fi
           
       - name: Create Pull Request
-        if: steps.commit.outputs.NO_CHANGES == 'false'
+        if: steps.push_step.outputs.SKIPPED == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            const branch = process.env.BRANCH_NAME;
-            const target = `${{ github.event.inputs.target_branch }}` || 'main';
+            const target = `${{ github.event.inputs.target_branch || 'main' }}`;
             await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: 'Auto-fix: Compilation errors (C++/Qt6/Android)',
-              body: 'Автоматическое исправление ошибок сборки из логов (Dzin Rebrand).',
-              head: branch,
+              title: '🔧 Auto-fix: Compilation errors (Dzin Core)',
+              body: 'Автоматическое исправление ошибок инициализации структур, путей curl и Qt6 типов. Проверено clang-format.',
+              head: process.env.BRANCH_NAME,
               base: target
             });
             
