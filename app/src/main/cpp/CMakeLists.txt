@@ -1,32 +1,38 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core" LANGUAGES CXX C)
 
+# Устанавливаем политику для обработки путей через переменные окружения
 cmake_policy(SET CMP0074 NEW)
 
 # -----------------------------------------------------------------------------
-# Поиск Qt6 для Android
+# Поиск Qt6 для Android (Исправленная логика)
 # -----------------------------------------------------------------------------
 
-# Указываем путь к инструментам сборки (Host Qt), они нужны для moc, rcc и т.д.
+# 1. Определяем базовый путь к SDK (если не передан из Gradle)
+if(NOT QT_ANDROID_PATH)
+    get_filename_component(QT_ANDROID_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/android_arm64_v8a" ABSOLUTE)
+endif()
+
+# 2. Указываем путь к Host-инструментам (Linux gcc_64) - обязательно для Qt6
 if(NOT QT_HOST_PATH)
-    set(QT_HOST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/gcc_64")
+    get_filename_component(QT_HOST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/gcc_64" ABSOLUTE)
 endif()
 
-# Указываем префикс для поиска Android-библиотек
-if(QT_ANDROID_PATH)
-    set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
-    # Дополнительно помогаем CMake найти конкретные модули
-    list(APPEND CMAKE_PREFIX_PATH 
-        "${QT_ANDROID_PATH}/lib/cmake/Qt6Core"
-        "${QT_ANDROID_PATH}/lib/cmake/Qt6Network"
-    )
-endif()
+# 3. Настройка путей поиска для CMake
+# Мы добавляем как корень, так и специфические пути к модулям для надежности
+list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
+set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
+set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core")
+set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network")
 
-# Ищем Qt6 6.5.0
+# Поиск пакетов
 find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network)
 
-message(STATUS "Using Qt6: ${Qt6_VERSION}")
-message(STATUS "Qt6 Host Path: ${QT_HOST_PATH}")
+message(STATUS "------------------------------------------------------------")
+message(STATUS "Qt6 FOUND: ${Qt6_VERSION}")
+message(STATUS "Qt6 Path:  ${QT_ANDROID_PATH}")
+message(STATUS "Host Path: ${QT_HOST_PATH}")
+message(STATUS "------------------------------------------------------------")
 
 # -----------------------------------------------------------------------------
 # Настройка путей проекта
@@ -39,7 +45,7 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
-# Глобальные определения
+# Глобальные определения (Production флаги)
 # -----------------------------------------------------------------------------
 
 add_compile_definitions(
@@ -52,9 +58,10 @@ add_compile_definitions(
     _FORTIFY_SOURCE=2
     QT_CORE_LIB
     QT_NETWORK_LIB
+    CORE_USED_IN_ANDROID
 )
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     add_compile_definitions(QT_NO_DEBUG NDEBUG)
 endif()
 
@@ -62,6 +69,7 @@ endif()
 # Сбор исходных файлов
 # -----------------------------------------------------------------------------
 
+# Рекурсивный сбор всех исходников ядра
 file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
@@ -69,9 +77,9 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Исключаем платформозависимый код
+# Исключаем специфичные для других ОС файлы, чтобы избежать конфликтов линковки
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
-    ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp"
+    ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
 )
 
 # -----------------------------------------------------------------------------
@@ -97,7 +105,7 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
 )
 
-# Подключаем заголовки Qt6
+# Подключаем заголовки найденного Qt6
 target_include_directories(icq_core PRIVATE
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Network_INCLUDE_DIRS}
@@ -113,7 +121,7 @@ if(EXISTS "${ICQ_ROOT}/rapidjson/include")
 endif()
 
 # -----------------------------------------------------------------------------
-# Свойства и Флаги
+# Свойства и Флаги компиляции
 # -----------------------------------------------------------------------------
 
 set_target_properties(icq_core PROPERTIES
@@ -124,16 +132,24 @@ set_target_properties(icq_core PROPERTIES
 )
 
 target_compile_options(icq_core PRIVATE 
-    -fexceptions -frtti -fPIC -Wall -Wextra
-    -Wno-unused-parameter -Wno-unused-variable
-    -Wno-mismatched-tags -Wno-deprecated-declarations
-    -fdata-sections -ffunction-sections
+    -fexceptions 
+    -frtti 
+    -fPIC 
+    -Wall 
+    -Wextra
+    -Wno-unused-parameter 
+    -Wno-unused-variable
+    -Wno-mismatched-tags 
+    -Wno-deprecated-declarations
+    -fdata-sections 
+    -ffunction-sections
 )
 
 # -----------------------------------------------------------------------------
 # Линковка
 # -----------------------------------------------------------------------------
 
+# Поиск системных библиотек Android
 find_library(log-lib log REQUIRED)
 find_library(z-lib z REQUIRED)
 find_library(android-lib android REQUIRED)
@@ -148,27 +164,29 @@ target_link_libraries(icq_core
 )
 
 # -----------------------------------------------------------------------------
-# Финализация (критично для Android в Qt6)
+# Финализация (Критически важно для деплоя Qt6 на Android)
 # -----------------------------------------------------------------------------
 
 if(ANDROID)
+    # Гарантируем видимость JNI_OnLoad для системы
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
     
     if(NOT ANDROID_NATIVE_API_LEVEL)
         set(ANDROID_NATIVE_API_LEVEL 24)
     endif()
     
-    # Эта команда генерирует нужные json-файлы для развертывания
+    # Генерация .json описания для androiddeployqt
     qt_finalize_target(icq_core)
 endif()
 
 # -----------------------------------------------------------------------------
-# Логирование конфигурации
+# Итоговый отчет в лог сборки
 # -----------------------------------------------------------------------------
 
-message(STATUS "========================================")
-message(STATUS "ICQ/DZIN CORE BUILD CONFIG")
-message(STATUS "  Qt6 Version: ${Qt6_VERSION}")
-message(STATUS "  Target ABI:  ${ANDROID_ABI}")
-message(STATUS "  Host Qt:     ${QT_HOST_PATH}")
-message(STATUS "========================================")
+message(STATUS "============================================================")
+message(STATUS "DZIN (ICQ) MOBILE CORE BUILD CONFIGURATION")
+message(STATUS "  Project Root: ${ICQ_ROOT}")
+message(STATUS "  Target ABI:   ${ANDROID_ABI}")
+message(STATUS "  Build Type:   ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Output Name:  libicq_core.so")
+message(STATUS "============================================================")
