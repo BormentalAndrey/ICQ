@@ -4,6 +4,8 @@ name: Extract ZIP Archives
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - '**.zip'
   workflow_dispatch:
 
 jobs:
@@ -19,30 +21,42 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find and extract all ZIP files
+      - name: Extract ZIP files
         run: |
-          echo "ПОИСК И РАСПАКОВКА ZIP АРХИВОВ"
+          echo "========================================="
+          echo "РАСПАКОВКА ZIP АРХИВОВ"
+          echo "========================================="
           
-          find . -type f -name "*.zip" | while read archive; do
+          # Находим все zip файлы
+          for archive in $(find . -name "*.zip" -type f); do
             echo ""
-            echo "📦 Архив: $archive"
+            echo "📦 Распаковка: $archive"
+            echo "   Размер: $(du -h "$archive" | cut -f1)"
             
+            # Получаем директорию
             dir=$(dirname "$archive")
             cd "$dir"
             
-            unzip -o "$(basename "$archive")"
+            # Распаковываем
+            unzip -q -o "$(basename "$archive")"
+            
+            # Проверяем результат
+            if [ $? -eq 0 ]; then
+              echo "   ✅ Успешно"
+              # Удаляем архив
+              rm -f "$(basename "$archive")"
+            else
+              echo "   ❌ Ошибка распаковки"
+            fi
             
             cd - > /dev/null
-            echo "✅ Распаковано"
           done
 
-      - name: Remove ZIP archives
+      - name: Commit changes
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           
-          find . -type f -name "*.zip" -exec git rm {} \;
-          
           git add -A
-          git commit -m "Extract and remove ZIP archives" || echo "No changes"
+          git commit -m "Extract ZIP archives" || echo "Нет изменений"
           git push
