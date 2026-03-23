@@ -1,30 +1,32 @@
-# app/src/main/cpp/CMakeLists.txt
 cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core" LANGUAGES CXX C)
 
-# CMP0074: find_package() использует переменные <PackageName>_ROOT
 cmake_policy(SET CMP0074 NEW)
 
 # -----------------------------------------------------------------------------
-# Поиск Qt (Принудительно Qt 6.5.0)
+# Поиск Qt6 для Android
 # -----------------------------------------------------------------------------
 
-# Пытаемся найти Qt6 версии 6.5.0
-# Сначала проверяем QT_ANDROID_PATH (обычно передается из Gradle)
+# Указываем путь к инструментам сборки (Host Qt), они нужны для moc, rcc и т.д.
+if(NOT QT_HOST_PATH)
+    set(QT_HOST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/gcc_64")
+endif()
+
+# Указываем префикс для поиска Android-библиотек
 if(QT_ANDROID_PATH)
     set(CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}/lib/cmake")
+    # Дополнительно помогаем CMake найти конкретные модули
+    list(APPEND CMAKE_PREFIX_PATH 
+        "${QT_ANDROID_PATH}/lib/cmake/Qt6Core"
+        "${QT_ANDROID_PATH}/lib/cmake/Qt6Network"
+    )
 endif()
 
-# Если задана переменная окружения для Qt6 Android
-if(DEFINED ENV{Qt6_ANDROID_DIR})
-    list(APPEND CMAKE_PREFIX_PATH "$ENV{Qt6_ANDROID_DIR}/lib/cmake")
-endif()
-
-# Ищем именно Qt 6.5.0. Если не найдено, CMake выдаст ошибку конфигурации.
+# Ищем Qt6 6.5.0
 find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network)
-set(QT_VERSION_MAJOR 6)
 
-message(STATUS "Using Qt${QT_VERSION_MAJOR}: ${Qt6_VERSION}")
+message(STATUS "Using Qt6: ${Qt6_VERSION}")
+message(STATUS "Qt6 Host Path: ${QT_HOST_PATH}")
 
 # -----------------------------------------------------------------------------
 # Настройка путей проекта
@@ -48,7 +50,7 @@ add_compile_definitions(
     SUPPORT_EXTERNAL_CONFIG
     HAVE_SECURE_GETENV=1
     _FORTIFY_SOURCE=2
-    QT_CORE_LIB 
+    QT_CORE_LIB
     QT_NETWORK_LIB
 )
 
@@ -95,6 +97,13 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/gui.shared
 )
 
+# Подключаем заголовки Qt6
+target_include_directories(icq_core PRIVATE
+    ${Qt6Core_INCLUDE_DIRS}
+    ${Qt6Network_INCLUDE_DIRS}
+)
+
+# Внешние зависимости (Boost, RapidJSON)
 if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
 endif()
@@ -103,18 +112,8 @@ if(EXISTS "${ICQ_ROOT}/rapidjson/include")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
 endif()
 
-if(DEFINED ENV{CURL_INCLUDE_PATH})
-    target_include_directories(icq_core PRIVATE $ENV{CURL_INCLUDE_PATH})
-endif()
-
-# Заголовки Qt6
-target_include_directories(icq_core PRIVATE
-    ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
-)
-
 # -----------------------------------------------------------------------------
-# Свойства компиляции
+# Свойства и Флаги
 # -----------------------------------------------------------------------------
 
 set_target_properties(icq_core PROPERTIES
@@ -123,10 +122,6 @@ set_target_properties(icq_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME "icq_core"
 )
-
-# -----------------------------------------------------------------------------
-# Флаги компилятора
-# -----------------------------------------------------------------------------
 
 target_compile_options(icq_core PRIVATE 
     -fexceptions -frtti -fPIC -Wall -Wextra
@@ -153,32 +148,27 @@ target_link_libraries(icq_core
 )
 
 # -----------------------------------------------------------------------------
-# Android специфика
+# Финализация (критично для Android в Qt6)
 # -----------------------------------------------------------------------------
 
 if(ANDROID)
-    # Гарантируем, что JNI_OnLoad не будет вырезана линковщиком
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
     
     if(NOT ANDROID_NATIVE_API_LEVEL)
         set(ANDROID_NATIVE_API_LEVEL 24)
     endif()
-    target_compile_definitions(icq_core PRIVATE __ANDROID_API__=${ANDROID_NATIVE_API_LEVEL})
     
-    # Обязательная команда для Qt6 при сборке под Android
+    # Эта команда генерирует нужные json-файлы для развертывания
     qt_finalize_target(icq_core)
 endif()
 
 # -----------------------------------------------------------------------------
-# Итоговый лог
+# Логирование конфигурации
 # -----------------------------------------------------------------------------
 
-message(STATUS "")
 message(STATUS "========================================")
-message(STATUS "ICQ/DZIN Mobile Core Build Configuration")
-message(STATUS "========================================")
-message(STATUS "  ICQ_ROOT:      ${ICQ_ROOT}")
-message(STATUS "  Build Type:    ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Qt Version:    ${Qt6_VERSION}")
-message(STATUS "  Android API:   ${ANDROID_NATIVE_API_LEVEL}")
+message(STATUS "ICQ/DZIN CORE BUILD CONFIG")
+message(STATUS "  Qt6 Version: ${Qt6_VERSION}")
+message(STATUS "  Target ABI:  ${ANDROID_ABI}")
+message(STATUS "  Host Qt:     ${QT_HOST_PATH}")
 message(STATUS "========================================")
