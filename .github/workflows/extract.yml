@@ -4,8 +4,6 @@ name: Assemble ICQ Dependencies
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - 'icq-dependencies.part.*'
   workflow_dispatch:
 
 jobs:
@@ -21,17 +19,26 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble from parts
+      - name: Find and assemble
         run: |
-          echo "Сборка архива из частей..."
-          cat icq-dependencies.part.* > icq-dependencies.zip
-          ls -lh icq-dependencies.zip
+          echo "Поиск частей..."
+          ls -la
+          echo ""
+          
+          if ls icq-dependencies.part.* 1> /dev/null 2>&1; then
+            echo "Сборка архива..."
+            cat icq-dependencies.part.* > icq-dependencies.zip
+            ls -lh icq-dependencies.zip
+          else
+            echo "Части не найдены"
+            exit 1
+          fi
 
-      - name: Remove parts and commit
+      - name: Commit
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git rm icq-dependencies.part.*
+          git rm -f icq-dependencies.part.* || true
           git add icq-dependencies.zip
-          git commit -m "Assemble ICQ dependencies from parts"
+          git commit -m "Assemble ICQ dependencies" || echo "Нет изменений"
           git push
