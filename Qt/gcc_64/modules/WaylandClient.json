@@ -1,0 +1,13 @@
+{
+    "name": "WaylandClient",
+    "repository": "qtwayland",
+    "version": "6.5.0",
+    "plugin_types": ["wayland_graphics_integration_client", "wayland_inputdevice_integration", "wayland_decoration_client", "wayland_shell_integration"],
+    "built_with": {
+        "compiler_id": "GNU",
+        "compiler_target": "",
+        "compiler_version": "10.3.1",
+        "cross_compiled": false,
+        "target_system": "Linux"
+    }
+}

@@ -1,0 +1,7 @@
+module Qt.labs.settings
+linktarget Qt6::qmlsettingsplugin
+optional plugin qml_Qt_labs_settings_qmlsettingsplugin
+classname QmlSettingsPlugin
+typeinfo plugins.qmltypes
+prefer :/qt-project.org/imports/Qt/labs/settings/
+

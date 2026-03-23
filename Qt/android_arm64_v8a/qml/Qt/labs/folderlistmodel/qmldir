@@ -1,0 +1,8 @@
+module Qt.labs.folderlistmodel
+linktarget Qt6::qmlfolderlistmodelplugin
+optional plugin qml_Qt_labs_folderlistmodel_qmlfolderlistmodelplugin
+classname QmlFolderListModelPlugin
+typeinfo plugins.qmltypes
+depends QtQml.Models auto
+prefer :/qt-project.org/imports/Qt/labs/folderlistmodel/
+

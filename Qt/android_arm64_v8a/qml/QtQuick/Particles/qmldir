@@ -1,0 +1,8 @@
+module QtQuick.Particles
+linktarget Qt6::particlesplugin
+optional plugin qml_QtQuick_Particles_particlesplugin
+classname QtQuick2ParticlesPlugin
+typeinfo plugins.qmltypes
+depends QtQuick auto
+prefer :/qt-project.org/imports/QtQuick/Particles/
+
