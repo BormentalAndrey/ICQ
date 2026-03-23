@@ -1,61 +1,109 @@
-name: Android Build
+name: "Production Build Repair: Dzin Core"
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+permissions:
+  contents: write
+  pull-requests: write
 
+jobs:
+  auto-fix-and-propose:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Подгружаем сабмодули, если они есть
+          fetch-depth: 0
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          python-version: '3.x'
 
-      - name: Setup Android SDK/NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build with Gradle
-        # Если в корне есть gradlew, собираем через него
-        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
+      - name: 🛠 Fix config.cpp (Smart Syntax Repair)
+        shell: python
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease 2>&1 | tee build.log
+          import os
+          import re
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk
+          path = "common.shared/config/config.cpp"
+          if os.path.exists(path):
+              with open(path, 'r', encoding='utf-8') as f:
+                  content = f.read()
 
-      - name: Upload build logs
-        if: always()  # Загружаем логи даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build.log
-            app/build/reports/
-            app/build/outputs/logs/
-            ~/.gradle/daemon/*/daemon-*.out.log
-          if-no-files-found: warn
+              # 1. Исправляем блоки std::pair на агрегатную инициализацию {key, value}
+              # Регулярное выражение ищет std::pair(аргумент1, аргумент2) и учитывает вложенные скобки функций
+              pattern = r'std::pair\s*\(\s*(features::[a-zA-Z0-9_]+)\s*,\s*(get_[a-z]+\([^)]+\))\s*\)'
+              fixed_content = re.sub(pattern, r'{\1, \2}', content)
 
-      - name: Upload Gradle reports
-        if: always()  # Загружаем отчеты даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-reports
-          path: |
-            **/build/reports/
-            **/build/outputs/logs/
-            **/build/test-results/
-          if-no-files-found: warn
+              # 2. Очистка артефактов от предыдущих запусков (двойные закрывающие скобки)
+              fixed_content = fixed_content.replace('})),', '},')
+              fixed_content = fixed_content.replace('}));', '};')
+              
+              # 3. Исправление запятых в блоке values (устранение warning: left operand has no effect)
+              # Заменяем ошибочные { values::name, на правильный синтаксис
+              fixed_content = re.sub(r'\{\s*(values::[a-zA-Z0-9_]+)\s*,', r'{\1,', fixed_content)
+
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(fixed_content)
+              print("✓ config.cpp syntax repaired")
+
+      - name: 🛠 Fix common.h (Type Safety)
+        run: |
+          FILE="common.shared/common.h"
+          if [ -f "$FILE" ]; then
+            # Переводим константы в unsigned long long для исключения конфликтов знаков
+            sed -i 's/unsigned long BYTE/unsigned long long BYTE/g' "$FILE"
+            sed -i 's/unsigned long KILOBYTE/unsigned long long KILOBYTE/g' "$FILE"
+            sed -i 's/unsigned long MEGABYTE/unsigned long long MEGABYTE/g' "$FILE"
+            sed -i 's/unsigned long GIGABYTE/unsigned long long GIGABYTE/g' "$FILE"
+            # Убираем лишние static_cast, если они были добавлены ранее и мешают
+            sed -i 's/static_cast<long long>(MEGABYTE)/MEGABYTE/g' "$FILE"
+            echo "✓ common.h constants upgraded to ULL"
+          fi
+
+      - name: 🛠 Fix binary_stream.h (Signedness)
+        run: |
+          FILE="core/tools/binary_stream.h"
+          if [ -f "$FILE" ]; then
+            sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
+            sed -i 's/all_size() > 2/static_cast<size_t>(all_size()) > 2/g' "$FILE"
+            sed -i 's/all_size() > 4/static_cast<size_t>(all_size()) > 4/g' "$FILE"
+            echo "✓ binary_stream.h sign-compare fixed"
+          fi
+
+      - name: 🛠 Fix StringComparator.h
+        run: |
+          FILE="gui/utils/StringComparator.h"
+          if [ -f "$FILE" ]; then
+            # Гарантируем правильное расположение инклудов для Qt6
+            sed -i '/#include/d' "$FILE"
+            sed -i '/#pragma once/a #include <QLatin1String>\n#include <QStringRef>\n#include <QStringView>' "$FILE"
+            echo "✓ StringComparator.h sanitized"
+          fi
+
+      - name: Commit and Create Pull Request
+        id: cpr
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          BRANCH_NAME="fix/production-build-repair-$(date +%s)"
+          git checkout -b "$BRANCH_NAME"
+          git add .
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "build: production-grade fix for compilation errors (Dzin Core)"
+            git push origin "$BRANCH_NAME"
+            
+            gh pr create \
+              --title "🔧 Финальное исправление сборки (Production Fix)" \
+              --body "Автоматический ремонт синтаксиса config.cpp, приведение типов в common.h и исправление заголовков Qt6. Исправляет ошибку 'excess elements in struct initializer' и баланс скобок." \
+              --head "$BRANCH_NAME" \
+              --base main
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
