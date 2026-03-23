@@ -15,14 +15,18 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags += "-std=c++17 -fexceptions -frtti -D__linux__ -DANDROID"
+                cppFlags("-std=c++17", "-fexceptions", "-frtti", "-D__linux__", "-DANDROID")
                 
-                // Находим путь к Qt внутри вашего репозитория
-                val qtPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
+                // Находим пути к Qt относительно корня репозитория (универсально для GitHub Actions и ПК)
+                val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
+                val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
                 
-                // Передаем этот путь в CMake
-                arguments += "-DQT_ANDROID_PATH=$qtPath"
-                arguments += "-DANDROID_STL=c++_shared"
+                // Передаем в CMake ОБА пути для успешной кросс-компиляции Qt6
+                arguments(
+                    "-DQT_ANDROID_PATH=$qtAndroidPath",
+                    "-DQT_HOST_PATH=$qtHostPath",
+                    "-DANDROID_STL=c++_shared"
+                )
                 
                 abiFilters.add("arm64-v8a")
             }
