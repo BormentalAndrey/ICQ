@@ -153,8 +153,7 @@ public:
   template <typename T, typename = std::enable_if_t<!std::is_same<
                             T, std::ifstream>::value>> // for file streams use
                                                        // load_from_file
-                                                       void write_stream(
-                                                           T &_source) {
+  void write_stream(T &_source) {
     const auto size = buffer_.size();
     std::copy(
         std::istreambuf_iterator<typename std::istream::char_type>(_source),
@@ -234,18 +233,21 @@ public:
   int64_t all_size() const noexcept override { return buffer_.size(); }
 
   bool is_zlib_compressed() const noexcept {
-    return all_size() > 2 && static_cast<uint8_t>(buffer_[0]) == 0x78 &&
+    return static_cast<size_t>(all_size()) > 2 &&
+           static_cast<uint8_t>(buffer_[0]) == 0x78 &&
            (static_cast<uint8_t>(buffer_[1]) == 0x9C ||
             static_cast<uint8_t>(buffer_[1]) == 0x01 ||
             static_cast<uint8_t>(buffer_[1]) == 0xDA ||
             static_cast<uint8_t>(buffer_[1]) == 0x5E);
   }
   bool is_gzip_compressed() const noexcept {
-    return all_size() > 2 && static_cast<uint8_t>(buffer_[0]) == 0x1F &&
+    return static_cast<size_t>(all_size()) > 2 &&
+           static_cast<uint8_t>(buffer_[0]) == 0x1F &&
            static_cast<uint8_t>(buffer_[1]) == 0x8B;
   }
   bool is_zstd_compressed() const noexcept {
-    return all_size() > 4 && static_cast<uint8_t>(buffer_[0]) == 0x28 &&
+    return static_cast<size_t>(all_size()) > 4 &&
+           static_cast<uint8_t>(buffer_[0]) == 0x28 &&
            static_cast<uint8_t>(buffer_[1]) == 0xB5 &&
            static_cast<uint8_t>(buffer_[2]) == 0x2F &&
            static_cast<uint8_t>(buffer_[3]) == 0xFD;

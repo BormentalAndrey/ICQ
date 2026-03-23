@@ -1,6 +1,7 @@
+#pragma once
 #include <QLatin1String>
 #include <QStringRef>
-#pragma once
+#include <QStringView>
 
 namespace Utils {
 template <Qt::CaseSensitivity cs> struct QStringComparator {
