@@ -1,26 +1,73 @@
-# .github/workflows/cleanup.yml
-name: Cleanup
+# .github/workflows/extract-all-archives.yml
+name: Extract All Archives
 
 on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**/*.zip'
+      - '**/*.tar.gz'
+      - '**/*.tar.bz2'
   workflow_dispatch:
 
 jobs:
-  cleanup:
+  extract:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     
     steps:
-      - name: Delete old files
-        run: |
-          rm -f icq-dependencies.part.*
-          rm -f icq-dependencies.zip
-          ls -la
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push changes
+      - name: Find and extract all archives
         run: |
-          git config user.name "GitHub Actions"
+          echo "========================================="
+          echo "ПОИСК И РАСПАКОВКА АРХИВОВ"
+          echo "========================================="
+          
+          # Находим все архивы
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) | while read archive; do
+            echo ""
+            echo "📦 Найден архив: $archive"
+            echo "   Размер: $(du -h "$archive" | cut -f1)"
+            
+            # Получаем директорию архива
+            dir=$(dirname "$archive")
+            echo "   Распаковка в: $dir"
+            
+            # Распаковываем в ту же папку
+            cd "$dir"
+            
+            case "$archive" in
+              *.zip)
+                unzip -o "$(basename "$archive")"
+                ;;
+              *.tar.gz)
+                tar -xzf "$(basename "$archive")"
+                ;;
+              *.tar.bz2)
+                tar -xjf "$(basename "$archive")"
+                ;;
+            esac
+            
+            # Возвращаемся обратно
+            cd - > /dev/null
+            
+            echo "   ✅ Распаковано"
+          done
+
+      - name: Remove archives after extraction
+        run: |
+          git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
+          
+          # Удаляем все архивы после распаковки
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.bz2" \) -exec git rm {} \;
+          
           git add -A
-          git commit -m "Delete old parts" || echo "No changes"
+          git commit -m "Extract and remove archives" || echo "No changes"
           git push
