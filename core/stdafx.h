@@ -66,6 +66,17 @@ do { if(!(condition)){ std::cerr << "ASSERT FAILED: " << #condition << " " << __
 #include <charconv>
 #include <typeinfo>
 
+// --- QT6 INCLUDES FOR ANDROID BUILD ---
+#include <QString>
+#include <QDateTime>
+#include <QList>
+#include <QMap>
+#include <QVector>
+#include <QByteArray>
+#include <QObject>
+#include <QDebug>
+// --------------------------------------
+
 #if defined(_WIN32) || defined(__linux__)
 #include <filesystem>
 #endif
