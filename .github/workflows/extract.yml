@@ -3,8 +3,6 @@ name: Cleanup Old Parts
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 0'  # Раз в неделю
 
 jobs:
   cleanup:
@@ -21,20 +19,13 @@ jobs:
 
       - name: Remove old parts
         run: |
-          echo "========================================="
-          echo "УДАЛЕНИЕ СТАРЫХ ЧАСТЕЙ АРХИВА"
-          echo "========================================="
+          echo "Удаление старых частей..."
           
-          # Удаляем старые части (aa, ab, ac и т.д.)
-          git rm icq-dependencies.part.* 2>/dev/null || echo "Нет старых частей"
+          # Удаляем старые части
+          rm -f icq-dependencies.part.*
+          rm -f icq-dependencies.zip
           
-          # Удаляем большие файлы если есть
-          git rm --cached icq-dependencies.zip 2>/dev/null || true
-          
-          # Проверяем, есть ли новые архивы
-          if ls qt5-*.zip 1>/dev/null 2>&1; then
-            echo "Новые архивы уже есть, старые удалены"
-          fi
-          
-          git commit -m "Clean up old parts" || echo "Нет изменений"
+          # Добавляем изменения
+          git add -A
+          git commit -m "Remove old parts" || echo "No changes"
           git push
