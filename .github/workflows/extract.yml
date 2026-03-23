@@ -25,19 +25,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assemble qt5-core.zip
+      - name: Assemble qt5-core.zip (ONLY)
         run: |
           echo "========================================="
-          echo "СБОРКА QT5-CORE.ZIP"
+          echo "СБОРКА ТОЛЬКО QT5-CORE.ZIP"
           echo "========================================="
           
           # Проверяем наличие частей
           echo "Проверка частей:"
           ls -la icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae
           
-          # Собираем архив
+          # Собираем ТОЛЬКО qt5-core.zip
           echo ""
-          echo "📦 Сборка архива..."
+          echo "📦 Сборка qt5-core.zip..."
           cat icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae > qt5-core.zip
           
           echo ""
@@ -49,11 +49,15 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           
-          # Добавляем архив
+          # Удаляем ВСЕ части, чтобы избежать случайной сборки большого архива
+          git rm icq-dependencies.part.* || true
+          
+          # Добавляем только маленький архив
           git add qt5-core.zip
           
-          # Удаляем использованные части
-          git rm icq-dependencies.part.aa icq-dependencies.part.ab icq-dependencies.part.ac icq-dependencies.part.ad icq-dependencies.part.ae
+          # Убеждаемся, что НЕТ большого архива
+          git rm --cached icq-dependencies.zip 2>/dev/null || true
+          rm -f icq-dependencies.zip
           
-          git commit -m "Assemble qt5-core.zip from parts aa-ae"
+          git commit -m "Assemble qt5-core.zip and remove all parts" || echo "No changes"
           git push
