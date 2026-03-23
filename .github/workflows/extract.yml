@@ -183,10 +183,10 @@ EOF
           
       - name: Apply clang-format to all modified files
         run: |
-          MODIFIED_FILES=$(git diff --name-only --cached)
+          MODIFIED_FILES=$(git diff --name-only)
           if [ -n "$MODIFIED_FILES" ]; then
             for file in $MODIFIED_FILES; do
-              if [[ $file =~ \.(cpp|h|hpp)$ ]] && [ -f "$file" ]; then
+              if [[ \( file =\~ \.(cpp|h|hpp) \) ]] && [ -f "$file" ]; then
                 clang-format -i "$file"
                 echo "✓ Formatted: $file"
               fi
@@ -198,7 +198,7 @@ EOF
           echo "Checking for potential syntax issues..."
           
           # Проверяем баланс фигурных скобок
-          for file in $(git diff --name-only --cached | grep -E '\.(cpp|h|hpp)$'); do
+          for file in \( (git diff --name-only | grep -E '\.(cpp|h|hpp) \)'); do
             if [ -f "$file" ]; then
               opens=$(grep -o '{' "$file" | wc -l)
               closes=$(grep -o '}' "$file" | wc -l)
@@ -243,7 +243,7 @@ This is an automated fix from GitHub Actions."
             const { data: pulls } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              head: `${context.repo.owner}:${{ env.BRANCH_NAME }}`,
+              head: `\( {context.repo.owner}: \){{ env.BRANCH_NAME }}`,
               base: '${{ github.event.inputs.target_branch || 'main' }}',
               state: 'open'
             });
