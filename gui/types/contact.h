@@ -2,6 +2,11 @@
 
 #include "lastseen.h"
 #include "utils/SvgUtils.h"
+#include <QString>
+#include <QStringList>
+#include <QMap>
+#include <QPixmap>
+#include <memory>
 
 namespace core
 {
@@ -98,7 +103,7 @@ namespace Data
     class Contact : public Buddy
     {
     public:
-        virtual ~Contact();
+        virtual ~Contact() {} // Исправлено: Добавлено тело для деструктора
 
         virtual const QString& GetDisplayName() const
         {
@@ -234,4 +239,4 @@ namespace Data
 
 Q_DECLARE_METATYPE(Data::Buddy*);
 Q_DECLARE_METATYPE(Data::Contact*);
-Q_DECLARE_METATYPE(Data::UserInfo*)
+Q_DECLARE_METATYPE(Data::UserInfo*); // Исправлено: Добавлена пропущенная точка с запятой
