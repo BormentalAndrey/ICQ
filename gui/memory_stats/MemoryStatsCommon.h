@@ -5,6 +5,11 @@
 #include <unordered_set>
 #include "namespaces.h"
 
+#ifndef MEMSTATS_NS_BEGIN
+#define MEMSTATS_NS_BEGIN namespace memory_stats {
+#define MEMSTATS_NS_END }
+#endif
+
 MEMSTATS_NS_BEGIN
 
 enum class StatType
