@@ -46,6 +46,16 @@ public:
   void set_input(int64_t _pos) const noexcept { input_cursor_ = _pos; }
   void set_output(int64_t _pos) const noexcept { output_cursor_ = _pos; }
 
+  void reset() {
+    input_cursor_ = 0;
+    output_cursor_ = 0;
+    buffer_.clear();
+  }
+
+  void reset_out() {
+    output_cursor_ = 0;
+  }
+
   char *alloc_buffer(int64_t _size) {
     const auto size_need = input_cursor_ + _size;
     if (static_cast<size_t>(size_need) > buffer_.size())
