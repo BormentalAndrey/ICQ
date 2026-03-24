@@ -39,7 +39,7 @@ namespace core
     template<>
     inline void coll_helper::set<QStringView>(std::string_view _name, const QStringView& _value)
     {
-        const auto asUtf8 = _value.toUtf8();
+        const auto asUtf8 = _value.toString().toUtf8(); // Исправлено: безопасное преобразование для совместимости версий Qt
         set_value_as_string(_name, asUtf8.data(), asUtf8.size());
     }
 
