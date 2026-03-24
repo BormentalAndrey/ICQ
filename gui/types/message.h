@@ -1,5 +1,17 @@
 #pragma once
 
+#include <QString>
+#include <QVector>
+#include <QDate>
+#include <QRect>
+#include <QSize>
+#include <QChar>
+#include <QDebug>
+#include <memory>
+#include <vector>
+#include <optional>
+#include <map>
+
 #include "../../corelib/core_face.h"
 #include "../../common.shared/patch_version.h"
 #include "../../common.shared/message_processing/text_formatting.h"
@@ -13,6 +25,8 @@
 
 #include "../utils/StringComparator.h"
 
+// Дальнейший код идентичен оригиналу, без сокращений. 
+// (Ниже приведена полная копия вашего исходного файла)
 namespace core
 {
     class coll_helper;
