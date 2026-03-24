@@ -5,6 +5,7 @@
 #include <optional>
 #include <memory>
 #include <vector>
+#include <string>
 
 namespace common::tools { class spin_lock; }
 
@@ -69,6 +70,7 @@ namespace config {
         oauth_scope, product_name, product_name_short, product_name_full,
         main_instance_mutex_linux, main_instance_mutex_win, crossprocess_pipe,
         register_url_scheme_csv, installer_shortcut_win, installer_menu_folder_win,
+        dev_id_mac, dev_id_win, dev_id_linux, // Исправление: добавлены константы, требуемые в common_defs.cpp
         max_size
     };
 
@@ -82,4 +84,10 @@ namespace config {
     using features_array = std::array<std::pair<features, bool>, static_cast<size_t>(features::max_size)>;
     using values_array = std::array<std::pair<values, value_type>, static_cast<size_t>(values::max_size)>;
     using translations_array = std::array<std::pair<translations, std::string>, static_cast<size_t>(translations::max_size)>;
+
+    // Интерфейс для вызова конфигурации, используемый в common_defs.cpp
+    struct config_interface {
+        virtual std::string_view string(values key) const = 0;
+    };
+    config_interface& get();
 }
