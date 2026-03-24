@@ -1,5 +1,10 @@
 #pragma once
 
+#include <QPixmap>
+#include <QString>
+#include <QSize>
+#include <QColor>
+#include <vector>
 #include "styles/ThemeColor.h"
 
 namespace Utils
