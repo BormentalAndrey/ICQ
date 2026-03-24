@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string_view>
+#include <rapidjson/document.h>
+
 using rapidjson_allocator = rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator>;
 
 namespace core
