@@ -1,6 +1,9 @@
 #include "stdafx.h"
+#include <string>
+#include <sstream>
 
 #include "config/config.h"
+// Подразумевается, что platform.h подключается через common_defs.h
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -10,6 +13,10 @@
 #pragma comment(lib, "netapi32.lib")
 #else
 #include <pwd.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <mutex>
+#include <optional>
 #endif // _WIN32
 
 namespace common
@@ -251,6 +258,7 @@ namespace common
 
     std::string_view get_dev_id()
     {
+        // Константы теперь безопасно резолвятся благодаря добавлениям в config.h
         constexpr auto key = platform::is_apple()
             ? config::values::dev_id_mac : (platform::is_windows() ? config::values::dev_id_win : config::values::dev_id_linux);
         return config::get().string(key);
