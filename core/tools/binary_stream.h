@@ -8,6 +8,7 @@
 #include <iterator>
 #include <algorithm>
 #include <string>
+#include <cstdint>
 #include "zlib.h"
 #include "strings.h" // Для from_utf16
 
