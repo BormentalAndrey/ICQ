@@ -4,6 +4,7 @@
 #include <string_view>
 #include <algorithm>
 #include <utility>
+#include <cstdint>
 
 namespace common
 {
