@@ -1,5 +1,9 @@
 #pragma once
 
+#include <QString>
+#include <QStringView>
+#include <vector>
+#include <string_view>
 #include "../../corelib/collection_helper.h"
 
 namespace Ui
