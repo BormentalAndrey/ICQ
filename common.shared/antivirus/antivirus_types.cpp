@@ -3,6 +3,11 @@
 
 #include "../json_unserialize_helpers.h"
 #include "../json_helper.h"
+#include <cassert>
+
+#ifndef im_assert
+#define im_assert(x) assert(x)
+#endif
 
 namespace core::antivirus
 {
@@ -64,15 +69,16 @@ namespace core::antivirus
 
     void check::serialize(rapidjson::Value& _node, rapidjson_allocator& _a) const
     {
-        _node.AddMember("check_mode", tools::make_string_ref(mode_to_string(mode_)), _a);
-        _node.AddMember("check_result", tools::make_string_ref(result_to_string(result_)), _a);
+        _node.AddMember("check_mode", common::json::make_string_ref(mode_to_string(mode_)), _a);
+        _node.AddMember("check_result", common::json::make_string_ref(result_to_string(result_)), _a);
     }
 
     void check::unserialize(const rapidjson::Value& _node)
     {
-        if (std::string_view check_mode; tools::unserialize_value(_node, "check_mode", check_mode))
-            mode_ = mode_from_string(check_mode);
-        if (std::string_view check_result; tools::unserialize_value(_node, "check_result", check_result))
-            result_ = result_from_string(check_result);
+        if (auto check_mode = common::json::get_value<std::string_view>(_node, "check_mode"))
+            mode_ = mode_from_string(*check_mode);
+        
+        if (auto check_result = common::json::get_value<std::string_view>(_node, "check_result"))
+            result_ = result_from_string(*check_result);
     }
 } // namespace core::antivirus
