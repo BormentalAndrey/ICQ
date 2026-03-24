@@ -8,6 +8,7 @@
 #include <iterator>
 #include <algorithm>
 #include "zlib.h"
+#include "strings.h" // Для from_utf16
 
 namespace core::tools {
 class stream {
@@ -41,6 +42,9 @@ public:
   int64_t available() const noexcept override { return input_cursor_ - output_cursor_; }
   int64_t all_size() const noexcept override { return static_cast<int64_t>(buffer_.size()); }
   char *get_data() const noexcept override { return buffer_.empty() ? nullptr : buffer_.data(); }
+
+  void set_input(int64_t _pos) const noexcept { input_cursor_ = _pos; }
+  void set_output(int64_t _pos) const noexcept { output_cursor_ = _pos; }
 
   char *alloc_buffer(int64_t _size) {
     const auto size_need = input_cursor_ + _size;
@@ -76,6 +80,30 @@ public:
     uint8_t b0 = static_cast<uint8_t>(buffer_[0]);
     uint8_t b1 = static_cast<uint8_t>(buffer_[1]);
     return (b0 == 0x78 && (b1 == 0x9C || b1 == 0x01)) || (b0 == 0x1F && b1 == 0x8B) || (b0 == 0x28 && b1 == 0xB5);
+  }
+
+  bool load_from_file(const std::wstring& _path) {
+    #ifdef _WIN32
+        std::ifstream file(_path, std::ios::binary | std::ios::ate);
+    #else
+        std::string path_u8 = core::tools::from_utf16(_path);
+        std::ifstream file(path_u8, std::ios::binary | std::ios::ate);
+    #endif
+    
+    if (!file.is_open()) return false;
+    
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    if (size > 0) {
+        buffer_.resize(static_cast<size_t>(size));
+        if (file.read(buffer_.data(), size)) {
+            input_cursor_ = size;
+            output_cursor_ = 0;
+            return true;
+        }
+    }
+    return false;
   }
 };
 }
