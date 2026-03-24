@@ -15,6 +15,9 @@
 
 #include "corelib/collection_helper.h"
 #include "corelib/enumerations.h"
+#include <optional>
+#include <string_view>
+
 namespace core
 {
     class coll_helper;
@@ -166,7 +169,8 @@ namespace core
         bool async_loader::load_from_local(async_handler<T> _handler, metainfo_parser_t _parser, std::wstring_view _path)
         {
             tools::binary_stream json_file;
-            if (json_file.load_from_file(_path))
+            // Исправлено: явное приведение std::wstring(_path), так как конструктор explicit в C++17
+            if (json_file.load_from_file(std::wstring(_path)))
             {
                 if (const auto file_size = json_file.available())
                 {
@@ -187,7 +191,7 @@ namespace core
                             if (need_to_repeat)
                             {
                                 g_core->write_string_to_network_log("download_metainfo's been delayed by the server. It's going to be repeated\r\n");
-                                tools::system::delete_file(std::wstring(_path));
+                                tools::system::delete_file(std::wstring(_path)); // Исправлено: аналогично приведение к std::wstring
                             }
 
                             fire_callback(need_to_repeat ? loader_errors::come_back_later : loader_errors::http_client_error, transferred_data<T>(), _handler.completion_callback_);
