@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <string_view>
+
 // ----------------------------------------------
 // fix for msvc++/clang compartibility
 
