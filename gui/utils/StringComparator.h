@@ -1,7 +1,7 @@
 #pragma once
 #include <QLatin1String>
-#include <QStringRef>
 #include <QStringView>
+#include <QString>
 
 namespace Utils {
 template <Qt::CaseSensitivity cs> struct QStringComparator {
@@ -14,16 +14,11 @@ template <Qt::CaseSensitivity cs> struct QStringComparator {
   bool operator()(const QString &lhs, QLatin1String rhs) const {
     return lhs.compare(rhs, cs) < 0;
   }
-  bool operator()(const QStringRef &lhs, QLatin1String rhs) const {
-    return lhs.compare(rhs, cs) < 0;
-  }
 
   bool operator()(QLatin1String lhs, const QString &rhs) const {
     return rhs.compare(lhs, cs) > 0;
   }
-  bool operator()(QLatin1String lhs, const QStringRef &rhs) const {
-    return rhs.compare(lhs, cs) > 0;
-  }
+
   bool operator()(QLatin1String lhs, QLatin1String rhs) const {
     if constexpr (cs == Qt::CaseSensitive)
       return lhs < rhs;
