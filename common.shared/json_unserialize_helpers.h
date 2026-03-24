@@ -125,3 +125,17 @@ namespace common::json
         return std::nullopt;
     }
 }
+
+namespace core::tools
+{
+    template <typename T>
+    inline bool unserialize_value(const rapidjson::Value& _node, std::string_view _name, T& _out)
+    {
+        if (auto val = common::json::get_value<T>(_node, _name))
+        {
+            _out = *val;
+            return true;
+        }
+        return false;
+    }
+}
