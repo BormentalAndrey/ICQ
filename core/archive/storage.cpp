@@ -2,6 +2,9 @@
 #include "storage.h"
 #include "history_message.h"
 #include "../tools/system.h"
+#include "../tools/strings.h"
+#include <boost/filesystem.hpp>
+#include <limits>
 
 using namespace core;
 using namespace archive;
@@ -98,7 +101,7 @@ static std::int32_t get_system_last_error()
 {
 #ifdef _WIN32
     return std::int32_t(GetLastError());
-#else //  Win
+#else 
     return errno;
 #endif
 }
@@ -108,7 +111,7 @@ storage::result_type storage::write_data_block(core::tools::binary_stream& _data
     if (!active_file_stream_)
     {
         im_assert(!"file stream not opened");
-        return { false, 0 };
+        return result_type{ false, 0 };
     }
 
     _offset = active_file_stream_->tellp();
@@ -117,25 +120,25 @@ storage::result_type storage::write_data_block(core::tools::binary_stream& _data
     {
         active_file_stream_->write((const char*)&data_size, sizeof(data_size));
         if (active_file_stream_->fail())
-            return { false, get_system_last_error() };
+            return result_type{ false, get_system_last_error() };
         active_file_stream_->write((const char*)&data_size, sizeof(data_size));
         if (active_file_stream_->fail())
-            return { false, get_system_last_error() };
+            return result_type{ false, get_system_last_error() };
 
         active_file_stream_->write((const char*)_data.read(data_size), data_size);
         if (active_file_stream_->fail())
-            return { false, get_system_last_error() };
+            return result_type{ false, get_system_last_error() };
 
         active_file_stream_->write((const char*)&data_size, sizeof(data_size));
         if (active_file_stream_->fail())
-            return { false, get_system_last_error() };
+            return result_type{ false, get_system_last_error() };
         active_file_stream_->write((const char*)&data_size, sizeof(data_size));
         if (active_file_stream_->fail())
-            return { false, get_system_last_error() };
-        return { true, 0 };
+            return result_type{ false, get_system_last_error() };
+        return result_type{ true, 0 };
     }
 
-    return { false, std::numeric_limits<std::int32_t>::max() };
+    return result_type{ false, std::numeric_limits<std::int32_t>::max() };
 }
 
 storage::result_type storage::write_data_block_at(core::tools::binary_stream& _data, int64_t _offset)
