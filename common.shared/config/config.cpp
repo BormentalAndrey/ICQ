@@ -38,7 +38,7 @@ static auto get_int64(const rapidjson::Value &json_value, std::string_view name)
 
 static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("urls"); it != _node.MemberEnd()) {
-    urls_array res = {
+    urls_array res = {{
          { urls::base, get_string(it->value, "base") },
          { urls::base_binary, get_string(it->value, "base_binary") },
          { urls::files_parser_url, get_string(it->value, "files_parser_url") },
@@ -84,7 +84,7 @@ static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
          { urls::terms_of_use_url, get_string(it->value, "terms_of_use_url") },
          { urls::delete_account_url, get_string(it->value, "delete_account_url") },
          { urls::delete_account_url_email, get_string(it->value, "delete_account_url_email") }
-    };
+    }};
 
     if (std::is_sorted(std::cbegin(res), std::cend(res), is_less_by_first))
       return std::make_optional(std::move(res));
@@ -95,14 +95,14 @@ static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
 
 static std::optional<translations_array> parse_translations(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("translations"); it != _node.MemberEnd()) {
-    translations_array res = {
+    translations_array res = {{
          { translations::installer_title_win, get_string(it->value, "installer_title_win") },
          { translations::installer_failed_win, get_string(it->value, "installer_failed_win") },
          { translations::installer_welcome_win, get_string(it->value, "installer_welcome_win") },
          { translations::app_title, get_string(it->value, "app_title") },
          { translations::app_install_mobile, get_string(it->value, "app_install_mobile") },
          { translations::gdpr_welcome, get_string(it->value, "gdpr_welcome") }
-    };
+    }};
 
     if (std::is_sorted(std::cbegin(res), std::cend(res), is_less_by_first))
       return std::make_optional(std::move(res));
@@ -113,7 +113,7 @@ static std::optional<translations_array> parse_translations(const rapidjson::Val
 
 static std::optional<features_array> parse_features(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("features"); it != _node.MemberEnd()) {
-    features_array res = {
+    features_array res = {{
          { features::feedback_selected, get_bool(it->value, "feedback_selected") },
          { features::new_avatar_rapi, get_bool(it->value, "new_avatar_rapi") },
          { features::ptt_recognition, get_bool(it->value, "ptt_recognition") },
@@ -226,7 +226,7 @@ static std::optional<features_array> parse_features(const rapidjson::Value &_nod
          { features::digital_assistant_search_positioning, get_bool(it->value, "digital_assistant_search_positioning") },
          { features::leading_last_name, get_bool(it->value, "leading_last_name") },
          { features::report_messages_enabled, get_bool(it->value, "report_messages_enabled") }
-    };
+    }};
 
     if (std::is_sorted(std::cbegin(res), std::cend(res), is_less_by_first))
       return std::make_optional(std::move(res));
@@ -237,7 +237,7 @@ static std::optional<features_array> parse_features(const rapidjson::Value &_nod
 
 static std::optional<values_array> parse_values(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("values"); it != _node.MemberEnd()) {
-    values_array res = {
+    values_array res = {{
          { values::product_path, get_string(it->value, "product_path") },
          { values::product_path_mac, get_string(it->value, "product_path_mac") },
          { values::app_name_win, get_string(it->value, "app_name_win") },
@@ -258,7 +258,7 @@ static std::optional<values_array> parse_values(const rapidjson::Value &_node) {
          { values::register_url_scheme_csv, get_string(it->value, "register_url_scheme_csv") },
          { values::installer_shortcut_win, get_string(it->value, "installer_shortcut_win") },
          { values::installer_menu_folder_win, get_string(it->value, "installer_menu_folder_win") }
-    };
+    }};
 
     if (std::is_sorted(std::cbegin(res), std::cend(res), is_less_by_first))
       return std::make_optional(std::move(res));
