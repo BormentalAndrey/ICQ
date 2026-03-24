@@ -75,6 +75,14 @@ if(EXISTS ${CONFIG_JSON_PATH})
 endif()
 
 # -----------------------------------------------------------------------------
+# Подключение подпроектов (libomicron)
+# -----------------------------------------------------------------------------
+if(EXISTS "${ICQ_ROOT}/libomicron/CMakeLists.txt")
+    message(STATUS "[CORE] Adding libomicron to build tree")
+    add_subdirectory("${ICQ_ROOT}/libomicron" libomicron_build)
+endif()
+
+# -----------------------------------------------------------------------------
 # Глобальные определения (Production флаги)
 # -----------------------------------------------------------------------------
 
@@ -132,6 +140,7 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
+    ${ICQ_ROOT}/libomicron/include
     ${curl_SOURCE_DIR}/include
 )
 
@@ -185,6 +194,7 @@ find_library(z-lib z REQUIRED)
 find_library(android-lib android REQUIRED)
 
 target_link_libraries(icq_core
+    libomicron
     Qt6::Core
     Qt6::Network
     ${log-lib}
