@@ -5,8 +5,9 @@
 
 #include <string>
 #include <string_view>
+#include <optional>
 
-namespace common { namespace json
+namespace common::json
 {
     template <typename T>
     inline std::string rapidjson_get_string(const T& value) { return std::string(value.GetString(), value.GetStringLength()); }
@@ -19,19 +20,16 @@ namespace common { namespace json
 
     template <>
     inline std::string_view rapidjson_get_string_view<rapidjson::StringBuffer>(const rapidjson::StringBuffer& value) { return std::string_view(value.GetString(), value.GetSize()); }
-}}
 
-namespace common { namespace json
-{
     inline auto make_string_ref(std::string_view str)
     {
         return rapidjson::StringRef(str.data(), str.size());
-    };
+    }
 
     inline namespace v2
     {
         template <class T>
-        auto get_value(const rapidjson::Value& _node, std::string_view _name)->std::optional<T> = delete;
+        auto get_value(const rapidjson::Value& _node, std::string_view _name) -> std::optional<T> = delete;
     }
 
     template <>
@@ -42,8 +40,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsString())
                 return rapidjson_get_string(iter->value);
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -54,8 +51,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsString())
                 return rapidjson_get_string_view(iter->value);
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -66,8 +62,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsInt())
                 return iter->value.GetInt();
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -78,8 +73,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsUint())
                 return iter->value.GetUint();
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -90,8 +84,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsInt64())
                 return iter->value.GetInt64();
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -102,8 +95,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsUint64())
                 return iter->value.GetUint64();
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -114,8 +106,7 @@ namespace common { namespace json
             if (const auto iter = _node.FindMember(make_string_ref(_name)); iter != _node.MemberEnd() && iter->value.IsDouble())
                 return iter->value.GetDouble();
         }
-
-        return {};
+        return std::nullopt;
     }
 
     template <>
@@ -131,7 +122,6 @@ namespace common { namespace json
                     return iter->value != 0;
             }
         }
-
-        return {};
+        return std::nullopt;
     }
-}}
+}
