@@ -136,7 +136,7 @@ namespace core
         void tlv::set_value(const T_ &_value)
         {
             value_stream_.reset();
-            value_stream_.write(_value);
+            value_stream_.write(reinterpret_cast<const char*>(&_value), sizeof(T_));
         }
 
         template <class T_>
