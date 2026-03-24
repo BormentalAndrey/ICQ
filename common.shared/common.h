@@ -1,6 +1,9 @@
 #pragma once
 
 #include "environment.h"
+#include <string>
+#include <vector>
+#include <cassert>
 
 #if !defined(InOut)
 #define InOut
@@ -18,8 +21,7 @@
 #define __FUNCTION__ ""
 #endif
 
-#define __DISABLE(x)                                                           \
-  {}
+#define __DISABLE(x) {}
 
 #define __STRA(x) _STRA(x)
 #define _STRA(x) #x
@@ -60,17 +62,14 @@
 
 namespace logutils {
 constexpr const char *yn(const bool v) noexcept { return (v ? "yes" : "no"); }
-
-constexpr const char *tf(const bool v) noexcept {
-  return (v ? "true" : "false");
+constexpr const char *tf(const bool v) noexcept { return (v ? "true" : "false"); }
 }
-} // namespace logutils
 
 namespace core {
-constexpr unsigned long long BYTE = 1;
-constexpr unsigned long long KILOBYTE = 1024 * BYTE;
-constexpr unsigned long long MEGABYTE = 1024 * KILOBYTE;
-constexpr unsigned long long GIGABYTE = 1024 * MEGABYTE;
+constexpr unsigned long long BYTE = 1ULL;
+constexpr unsigned long long KILOBYTE = 1024ULL * BYTE;
+constexpr unsigned long long MEGABYTE = 1024ULL * KILOBYTE;
+constexpr unsigned long long GIGABYTE = 1024ULL * MEGABYTE;
 
 const std::string KILOBYTE_STR = "kb";
 const std::string MEGABYTE_STR = "mb";
@@ -85,126 +84,36 @@ using event_props_type = std::vector<event_prop_kv_type>;
 
 constexpr int32_t msg_pending_delay_s = 5;
 
-inline std::string round_value(const int32_t _value, const int32_t _step,
-                               const int32_t _max_value) {
-  assert(_step);
-  if (!_step)
-    return std::string();
-
-  if (_value > _max_value)
-    return (std::to_string(_max_value) + '+');
-
-  const auto base = _value / _step;
-  const auto over = (_value % _step) ? 1 : 0;
-  return std::to_string((base + over) * _step);
-}
-
-inline time_t round_to_hours(time_t _value) { return (_value / 3600) * 3600; }
-
-inline std::string round_interval(const long long _min_val,
-                                  const long long _value, const long long _step,
-                                  const long long _max_value) {
-  assert(_value >= _min_val && _value <= _max_value && _step);
-  if ((_value < _min_val) || (_value > _max_value) || !_step)
-    return std::string();
-
+inline std::string round_interval(const long long _min_val, const long long _value, const long long _step, const long long _max_value) {
+  if ((_value < _min_val) || (_value > _max_value) || _step <= 0) return std::string();
   auto steps = (_value - _min_val) / _step;
   auto start = _min_val + steps * _step;
   auto end = (start + _step > _max_value) ? _max_value : start + _step;
-
   return std::to_string(start) + '-' + std::to_string(end);
 }
 
 inline std::string memory_size_interval(size_t _bytes) {
-  std::string interval;
-
-  if (_bytes <= 100LL * MEGABYTE)
-    interval = round_interval(0, _bytes / MEGABYTE, 100, 100) + MEGABYTE_STR;
-  else if (_bytes <= 500LL * MEGABYTE)
-    interval = round_interval(100, _bytes / MEGABYTE, 50, 500) + MEGABYTE_STR;
-  else if (_bytes <= 1 * GIGABYTE)
-    interval = round_interval(500, _bytes / MEGABYTE, 100, 1024) + MEGABYTE_STR;
-  else
-    interval = "more1" + GIGABYTE_STR;
-
-  return interval;
-}
-
-inline std::string duration_interval(long long _ms) {
-  std::string interval;
-
-  if (_ms <= 250)
-    interval = core::stats::round_interval(0, _ms, 50, 250);
-  else if (_ms <= 2000)
-    interval = core::stats::round_interval(250, _ms, 250, 2000);
-  else if (_ms <= 5000)
-    interval = core::stats::round_interval(2000, _ms, 1000, 5000);
-  else
-    interval = "more5000";
-
-  interval += MILLISECONDS_STR;
-
-  return interval;
+  const unsigned long long b = static_cast<unsigned long long>(_bytes);
+  if (b <= 100ULL * MEGABYTE) return round_interval(0, b / MEGABYTE, 100, 100) + MEGABYTE_STR;
+  if (b <= 500ULL * MEGABYTE) return round_interval(100, b / MEGABYTE, 50, 500) + MEGABYTE_STR;
+  if (b <= 1ULL * GIGABYTE) return round_interval(500, b / MEGABYTE, 100, 1024) + MEGABYTE_STR;
+  return "more1" + GIGABYTE_STR;
 }
 
 inline std::string disk_space_interval(long long _bytes) {
-  std::string interval;
-
-  // FIX: Added LL to prevent -Wsign-compare warnings
-  if (_bytes > 1500LL * MEGABYTE)
-    interval = "1500mb +";
-  else if (_bytes < 100LL * MEGABYTE)
-    interval = "< 100mb";
-  else
-    interval = round_interval(100, _bytes / MEGABYTE, 100, 1500) + MEGABYTE_STR;
-
-  return interval;
+  if (_bytes > static_cast<long long>(1500ULL * MEGABYTE)) return "1500mb +";
+  if (_bytes < static_cast<long long>(100ULL * MEGABYTE)) return "< 100mb";
+  return round_interval(100, _bytes / static_cast<long long>(MEGABYTE), 100, 1500) + MEGABYTE_STR;
 }
 
 inline std::string traffic_size_interval(size_t _bytes) {
-  std::string interval;
-
-  if (_bytes <= 100 * KILOBYTE)
-    interval = round_interval(0, _bytes / KILOBYTE, 100, 100) + KILOBYTE_STR;
-  else if (_bytes <= 500 * KILOBYTE)
-    interval = round_interval(100, _bytes / KILOBYTE, 400, 500) + KILOBYTE_STR;
-  else if (_bytes <= MEGABYTE)
-    interval = round_interval(500, _bytes / KILOBYTE, 500, 1024) + KILOBYTE_STR;
-  else if (_bytes <= 5 * MEGABYTE)
-    interval = round_interval(1, _bytes / MEGABYTE, 1, 5) + MEGABYTE_STR;
-  else if (_bytes <= 20 * MEGABYTE)
-    interval = round_interval(5, _bytes / MEGABYTE, 5, 20) + MEGABYTE_STR;
-  else if (_bytes <= 50 * MEGABYTE)
-    interval = round_interval(20, _bytes / MEGABYTE, 30, 50) + MEGABYTE_STR;
-  else if (_bytes <= 500LL * MEGABYTE)
-    interval = round_interval(50, _bytes / MEGABYTE, 50, 500) + MEGABYTE_STR;
-  else
-    interval = "more500" + MEGABYTE_STR;
-
-  return interval;
+  const unsigned long long b = static_cast<unsigned long long>(_bytes);
+  if (b <= 100ULL * KILOBYTE) return round_interval(0, b / KILOBYTE, 100, 100) + KILOBYTE_STR;
+  if (b <= 500ULL * KILOBYTE) return round_interval(100, b / KILOBYTE, 400, 500) + KILOBYTE_STR;
+  if (b <= MEGABYTE) return round_interval(500, b / KILOBYTE, 500, 1024) + KILOBYTE_STR;
+  if (b <= 5ULL * MEGABYTE) return round_interval(1, b / MEGABYTE, 1, 5) + MEGABYTE_STR;
+  if (b <= 500ULL * MEGABYTE) return round_interval(50, b / MEGABYTE, 50, 500) + MEGABYTE_STR;
+  return "more500" + MEGABYTE_STR;
 }
-} // namespace stats
-} // namespace core
-
-namespace ffmpeg {
-constexpr bool is_enable_streaming() noexcept {
-  return false; // platform::is_windows();
 }
-} // namespace ffmpeg
-
-namespace core {
-namespace dump {
-constexpr bool is_crash_handle_enabled() noexcept {
-  // XXX : don't change it
-  // use /settings/dump_type.txt: 0 for not handle crashes
-  //                              1 for make mini dump
-  //                              2 for make full dump
-
-  if constexpr (platform::is_apple())
-    return environment::is_alpha() || environment::is_beta() ||
-           environment::is_release();
-  else
-    return !build::is_debug();
 }
-} // namespace dump
-} // namespace core
