@@ -13,11 +13,13 @@
 #include "../../../utils.h"
 #include "../../../tools/system.h"
 #include "../../../../common.shared/json_helper.h"
+#include "../../../../common.shared/json_unserialize_helpers.h"
 #include "../log_replace_functor.h"
 
 #include "openssl/sha.h"
 
 #include <boost/range/adaptor/reversed.hpp>
+#include <optional>
 
 
 using namespace core;
@@ -71,16 +73,16 @@ int32_t get_history::init_request(const std::shared_ptr<core::http_request_simpl
 
     rapidjson::Value node_params(rapidjson::Type::kObjectType);
 
-    node_params.AddMember("sn", hist_params_.aimid_, a);
+    node_params.AddMember("sn", common::json::make_string_ref(hist_params_.aimid_), a);
     node_params.AddMember("fromMsgId", hist_params_.from_msg_id_, a);
 
     if (hist_params_.till_msg_id_ > 0)
         node_params.AddMember("tillMsgId", hist_params_.till_msg_id_, a);
 
     node_params.AddMember("count", hist_params_.count_, a);
-    node_params.AddMember("patchVersion", hist_params_.patch_version_, a);
+    node_params.AddMember("patchVersion", common::json::make_string_ref(hist_params_.patch_version_), a);
     if (!locale_.empty())
-        node_params.AddMember("lang", locale_ , a);
+        node_params.AddMember("lang", common::json::make_string_ref(locale_), a);
 
     rapidjson::Value ment_params(rapidjson::Type::kObjectType);
     ment_params.AddMember("resolve", false, a);
@@ -109,45 +111,43 @@ int32_t get_history::init_request(const std::shared_ptr<core::http_request_simpl
     return 0;
 }
 
-
 int32_t get_history::parse_results(const rapidjson::Value& _node_results)
 {
-    if (int32_t unreads = 0; tools::unserialize_value(_node_results, "unreadCnt", unreads))
-        dlg_state_->set_unread_count(unreads);
+    if (auto unreads = common::json::get_value<int32_t>(_node_results, "unreadCnt"))
+        dlg_state_->set_unread_count(*unreads);
 
-    if (int32_t unreads = 0; tools::unserialize_value(_node_results, "unreadMentionMeCount", unreads))
-        dlg_state_->set_unread_mentions_count(unreads);
+    if (auto unreads = common::json::get_value<int32_t>(_node_results, "unreadMentionMeCount"))
+        dlg_state_->set_unread_mentions_count(*unreads);
 
-    tools::unserialize_value(_node_results, "olderMsgId", older_msgid_);
+    if (auto older = common::json::get_value<int64_t>(_node_results, "olderMsgId"))
+        older_msgid_ = *older;
 
-    if (int64_t last_msgid = 0; tools::unserialize_value(_node_results, "lastMsgId", last_msgid))
-        dlg_state_->set_last_msgid(last_msgid);
+    if (auto last_msgid = common::json::get_value<int64_t>(_node_results, "lastMsgId"))
+        dlg_state_->set_last_msgid(*last_msgid);
 
     if (const auto it = _node_results.FindMember("yours"); it != _node_results.MemberEnd())
     {
-        if (int64_t last_read = 0; tools::unserialize_value(it->value, "lastRead", last_read))
-            dlg_state_->set_yours_last_read(last_read);
+        if (auto last_read = common::json::get_value<int64_t>(it->value, "lastRead"))
+            dlg_state_->set_yours_last_read(*last_read);
 
-        if (int64_t last_read = 0; tools::unserialize_value(it->value, "lastReadMention", last_read))
-            dlg_state_->set_last_read_mention(last_read);
+        if (auto last_read_mention = common::json::get_value<int64_t>(it->value, "lastReadMention"))
+            dlg_state_->set_last_read_mention(*last_read_mention);
     }
 
     if (const auto iter_theirs = _node_results.FindMember("theirs"); iter_theirs != _node_results.MemberEnd())
     {
-        int64_t theirs_last_delivered = 0;
-        if (tools::unserialize_value(iter_theirs->value, "lastDelivered", theirs_last_delivered))
-            dlg_state_->set_theirs_last_delivered(theirs_last_delivered);
+        if (auto theirs_last_delivered = common::json::get_value<int64_t>(iter_theirs->value, "lastDelivered"))
+            dlg_state_->set_theirs_last_delivered(*theirs_last_delivered);
 
-        int64_t theirs_last_read = 0;
-        if (tools::unserialize_value(iter_theirs->value, "lastRead", theirs_last_read))
-            dlg_state_->set_theirs_last_read(theirs_last_read);
+        if (auto theirs_last_read = common::json::get_value<int64_t>(iter_theirs->value, "lastRead"))
+            dlg_state_->set_theirs_last_read(*theirs_last_read);
     }
 
-    if (std::string patch_version; tools::unserialize_value(_node_results, "patchVersion", patch_version))
+    if (auto patch_version = common::json::get_value<std::string>(_node_results, "patchVersion"))
     {
-        im_assert(!patch_version.empty());
-        if (!patch_version.empty())
-            dlg_state_->set_history_patch_version(std::move(patch_version));
+        im_assert(!patch_version->empty());
+        if (!patch_version->empty())
+            dlg_state_->set_history_patch_version(std::move(*patch_version));
     }
 
     __INFO(
@@ -182,8 +182,8 @@ int32_t get_history::parse_results(const rapidjson::Value& _node_results)
             dlg_state_->set_pinned_message(*pin_block.front());
     }
 
-    if (auto no_update = false; tools::unserialize_value(_node_results, "noRecentsUpdate", no_update))
-        dlg_state_->set_no_recents_update(no_update);
+    if (auto no_update = common::json::get_value<bool>(_node_results, "noRecentsUpdate"))
+        dlg_state_->set_no_recents_update(*no_update);
 
     if (const auto it = _node_results.FindMember("parentTopic"); it != _node_results.MemberEnd() && it->value.IsObject())
     {
