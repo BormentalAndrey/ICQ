@@ -5,29 +5,43 @@ project("icq_mobile_core" LANGUAGES CXX C)
 cmake_policy(SET CMP0074 NEW)
 
 # -----------------------------------------------------------------------------
+# Настройка корня проекта (Перенесено наверх для точного построения путей)
+# -----------------------------------------------------------------------------
+if(NOT ICQ_PROJECT_ROOT)
+    # Из app/src/main/cpp поднимаемся на 4 уровня вверх до корня репозитория
+    get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
+else()
+    set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
+endif()
+
+# -----------------------------------------------------------------------------
 # Поиск Qt6 для Android (Production логика кросс-компиляции)
 # -----------------------------------------------------------------------------
 
 # 1. Определяем путь к Host-инструментам (Linux gcc_64)
 if(NOT QT_HOST_PATH)
-    get_filename_component(QT_HOST_PATH_AUTO "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/gcc_64" ABSOLUTE)
-    set(QT_HOST_PATH "${QT_HOST_PATH_AUTO}" CACHE PATH "Path to host Qt installation" FORCE)
-else()
-    set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Path to host Qt installation" FORCE)
+    set(QT_HOST_PATH "${ICQ_ROOT}/Qt/gcc_64" CACHE PATH "Path to host Qt installation" FORCE)
 endif()
 
 # 2. Определяем путь к Android SDK (Target)
 if(NOT QT_ANDROID_PATH)
-    get_filename_component(QT_ANDROID_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../Qt/android_arm64_v8a" ABSOLUTE)
+    set(QT_ANDROID_PATH "${ICQ_ROOT}/Qt/android_arm64_v8a" CACHE PATH "Path to target Qt" FORCE)
 endif()
 
 # 3. Настройка путей поиска
+# Для Android NDK кросс-компиляции ОЧЕНЬ ВАЖНО добавить путь в CMAKE_FIND_ROOT_PATH, 
+# иначе find_package будет искать только внутри sysroot NDK и проигнорирует внешние папки.
+list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
 
-set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
-set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core")
-set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network")
+# Явно указываем пути к конфигам, чтобы CMake не пытался искать их вслепую
+set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
+set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
+set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
+set(Qt6Gui_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Gui" CACHE PATH "" FORCE)
+set(Qt6Widgets_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Widgets" CACHE PATH "" FORCE)
 
+# Ищем Qt6 со всеми нужными компонентами
 find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network)
 
 message(STATUS "------------------------------------------------------------")
@@ -35,16 +49,6 @@ message(STATUS "Qt6 FOUND SUCCESS: ${Qt6_VERSION}")
 message(STATUS "Using Host Qt:     ${QT_HOST_PATH}")
 message(STATUS "Using Target Qt:   ${QT_ANDROID_PATH}")
 message(STATUS "------------------------------------------------------------")
-
-# -----------------------------------------------------------------------------
-# Настройка путей проекта
-# -----------------------------------------------------------------------------
-
-if(NOT ICQ_PROJECT_ROOT)
-    get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
-else()
-    set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
-endif()
 
 # -----------------------------------------------------------------------------
 # Подготовка зависимостей (CURL для Android NDK)
@@ -102,6 +106,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
+# Исключаем платформозависимый код других ОС
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
     ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
 )
@@ -130,11 +135,13 @@ target_include_directories(icq_core PRIVATE
     ${curl_SOURCE_DIR}/include
 )
 
+# Заголовки Qt6 из найденного пакета
 target_include_directories(icq_core PRIVATE
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Network_INCLUDE_DIRS}
 )
 
+# Внешние зависимости (Boost, RapidJSON)
 if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
 endif()
@@ -154,6 +161,7 @@ set_target_properties(icq_core PROPERTIES
     OUTPUT_NAME "icq_core"
 )
 
+# Продакшн флаги компилятора Clang (NDK)
 target_compile_options(icq_core PRIVATE 
     -fexceptions 
     -frtti 
@@ -191,7 +199,10 @@ target_link_libraries(icq_core
 # -----------------------------------------------------------------------------
 
 if(ANDROID)
+    # Гарантируем, что JNI_OnLoad не будет вырезан оптимизатором
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
+    
+    # Генерация .json файлов для развертывания (заменяет старый androiddeployqt ручной запуск)
     qt_finalize_target(icq_core)
 endif()
 
