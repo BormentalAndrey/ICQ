@@ -2,8 +2,10 @@
 #include "config_data.h"
 #include "../tools/system.h"
 #include "../utils.h"
+#include "../tools/strings.h" // Для from_utf16
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <android/log.h>
 
 #define LOG_TAG "ICQConfig"
@@ -26,9 +28,9 @@ namespace config
     
     std::string config_json()
     {
-        // Получаем wstring путь и конвертируем в string
+        // Получаем wstring путь и безопасно конвертируем в utf8 string
         std::wstring wpath = core::utils::get_product_data_path();
-        std::string base_path(wpath.begin(), wpath.end());
+        std::string base_path = core::tools::from_utf16(wpath);
         
         // Пытаемся загрузить конфиг из нескольких возможных мест
         std::vector<std::string> possible_paths = {
