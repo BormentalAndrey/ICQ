@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "json_helper.h"
+#include <algorithm>
+#include <string_view>
 
 namespace core::tools
 {
