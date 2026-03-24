@@ -1,12 +1,7 @@
 #pragma once
 
 #include "tools/threadpool.h"
-
-#ifdef __ANDROID__
 #include <curl/curl.h>
-#else
-#include <curl.h>
-#endif
 
 namespace core {
 namespace curl_easy {
