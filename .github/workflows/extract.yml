@@ -1,99 +1,61 @@
-name: "Dzin: Production Source Repair"
+name: Android Build
 
 on:
-  workflow_dispatch: # Запуск вручную из вкладки Actions
-
-permissions:
-  contents: write
-  pull-requests: write
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  repair-source:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          submodules: recursive # Подгружаем сабмодули, если они есть
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          python-version: '3.x'
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: 🛠 Fix config.cpp (Smart Syntax)
-        shell: python
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build with Gradle
+        # Если в корне есть gradlew, собираем через него
+        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
         run: |
-          import os
-          import re
+          chmod +x gradlew
+          ./gradlew assembleRelease 2>&1 | tee build.log
 
-          file_path = "common.shared/config/config.cpp"
-          if os.path.exists(file_path):
-              with open(file_path, 'r', encoding='utf-8') as f:
-                  lines = f.readlines()
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
 
-              new_lines = []
-              # Регулярное выражение для поиска строк с std::pair или сломанными скобками
-              # Ищет: { КЛЮЧ, ЗНАЧЕНИЕ ) ) или std::pair( КЛЮЧ, ЗНАЧЕНИЕ )
-              pattern = re.compile(r'(?:std::pair\s*\(\s*|\{\s*)(?P<key>[a-zA-Z0-9_:]+)\s*,\s*(?P<val>get_[a-z]+\([^)]+\))(?:\s*\)\s*\)?|\s*\})')
+      - name: Upload build logs
+        if: always()  # Загружаем логи даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            app/build/reports/
+            app/build/outputs/logs/
+            ~/.gradle/daemon/*/daemon-*.out.log
+          if-no-files-found: warn
 
-              for line in lines:
-                  # Если в строке есть ключ из перечислений (features, urls, values)
-                  if any(x in line for x in ["features::", "urls::", "values::", "translations::"]):
-                      # Принудительно приводим к формату { KEY, VALUE },
-                      fixed = pattern.sub(r'{ \g<key>, \g<val> }', line)
-                      # Убираем возможные двойные запятые или скобки в конце
-                      fixed = fixed.replace(')),', ' },').replace('));', ' };').replace('},,', '},')
-                      new_lines.append(fixed)
-                  else:
-                      new_lines.append(line)
-
-              with open(file_path, 'w', encoding='utf-8') as f:
-                  f.writelines(new_lines)
-              print("✓ config.cpp syntax cleaned and unified.")
-
-      - name: 🛠 Fix common.h (Constants & Types)
-        run: |
-          FILE="common.shared/common.h"
-          if [ -f "$FILE" ]; then
-            # Меняем типы на unsigned long long для совместимости с size_t
-            sed -i 's/unsigned long BYTE/unsigned long long BYTE/g' "$FILE"
-            sed -i 's/unsigned long KILOBYTE/unsigned long long KILOBYTE/g' "$FILE"
-            sed -i 's/unsigned long MEGABYTE/unsigned long long MEGABYTE/g' "$FILE"
-            sed -i 's/unsigned long GIGABYTE/unsigned long long GIGABYTE/g' "$FILE"
-            # Очищаем старые приведения типов, если они были сделаны криво
-            sed -i 's/static_cast<long long>(MEGABYTE)/MEGABYTE/g' "$FILE"
-            echo "✓ common.h type safety improved."
-          fi
-
-      - name: 🛠 Fix binary_stream.h (Sign-Compare)
-        run: |
-          FILE="core/tools/binary_stream.h"
-          if [ -f "$FILE" ]; then
-            sed -i 's/size_need > buffer_.size()/static_cast<size_t>(size_need) > buffer_.size()/g' "$FILE"
-            echo "✓ binary_stream.h fixed."
-          fi
-
-      - name: Commit and Create PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          BRANCH="fix/build-repair-$(date +%s)"
-          git checkout -b "$BRANCH"
-          git add .
-          
-          if git diff --cached --quiet; then
-            echo "No changes needed."
-          else
-            git commit -m "build: clean repair of config.cpp and type mismatches"
-            git push origin "$BRANCH"
-            gh pr create \
-              --title "🔧 Production Fix: Сборка Дзинь" \
-              --body "Этот PR исправляет синтаксис в config.cpp и убирает ошибки sign-compare." \
-              --head "$BRANCH" \
-              --base main
-          fi
-          
+      - name: Upload Gradle reports
+        if: always()  # Загружаем отчеты даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/
+            **/build/outputs/logs/
+            **/build/test-results/
+          if-no-files-found: warn
