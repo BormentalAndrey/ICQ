@@ -5,6 +5,7 @@
 #include <QSize>
 #include <QColor>
 #include <vector>
+#include <utility>
 #include "styles/ThemeColor.h"
 
 namespace Utils
