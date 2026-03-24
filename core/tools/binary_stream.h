@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iterator>
 #include <algorithm>
+#include <string>
 #include "zlib.h"
 #include "strings.h" // Для from_utf16
 
