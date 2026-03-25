@@ -32,7 +32,7 @@ namespace Utils
     struct BasePixmap
     {
         BasePixmap(const QPixmap& _pixmap);
-        virtual ~BasePixmap() {};
+        virtual ~BasePixmap() = default;
 
         QPixmap cachedPixmap() const { return pixmap_; }
         virtual QPixmap actualPixmap() { return pixmap_; }
@@ -65,7 +65,7 @@ namespace Utils
 
     struct StyledPixmap final : BaseStyledPixmap
     {
-        explicit StyledPixmap();
+        StyledPixmap(); // Исправлено: убран explicit для корректной работы внутри std::pair и контейнеров
         explicit StyledPixmap(
             const QString& _resourcePath,
             const QSize& _scaledSize = {},
