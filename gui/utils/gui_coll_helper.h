@@ -38,7 +38,7 @@ namespace core
     template<>
     inline void coll_helper::set<QStringView>(std::string_view _name, const QStringView& _value)
     {
-        const auto asUtf8 = _value.toString().toUtf8(); // Исправлено: безопасное преобразование для совместимости версий Qt
+        const auto asUtf8 = _value.toString().toUtf8(); 
         set_value_as_string(_name, asUtf8.data(), asUtf8.size());
     }
 
@@ -63,7 +63,8 @@ namespace Utils
         T container;
         if (array)
         {
-            const auto size = array->size();
+            // Исправлено: используем count() вместо несуществующего size()
+            const auto size = array->count(); 
             container.reserve(size);
             for (std::remove_const_t<decltype(size)> i = 0; i < size; ++i)
             {
@@ -82,10 +83,12 @@ namespace Utils
     core::ifptr<core::iarray> toArrayOfStrings(const T& _cont, Ui::gui_coll_helper& _coll)
     {
         core::ifptr<core::iarray> arr(_coll->create_array());
-        arr->reserve(_cont.size());
-        for (const auto& item : _cont)
-            arr->push_back(_coll.create_qstring_value(item).get());
-
+        if (arr)
+        {
+            arr->reserve(_cont.size());
+            for (const auto& item : _cont)
+                arr->push_back(_coll.create_qstring_value(item).get());
+        }
         return arr;
     }
 }
