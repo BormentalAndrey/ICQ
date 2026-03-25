@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "config_data.h"
-#include "tools/system.h"   // Исправлен путь
+#include "tools/system.h"
 #include "../utils.h"
-#include "tools/strings.h"  // Исправлен путь (Для from_utf16)
+#include "tools/strings.h"
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -26,14 +26,17 @@ namespace config
         return std::string();
     }
     
-    // Исправлено: добавлен обязательный noexcept для совпадения с заголовочным файлом
-    std::string config_json() noexcept
+    std::string_view config_json() noexcept
     {
-        // Получаем wstring путь и безопасно конвертируем в utf8 string
+        static std::string cached_json; // Статическая переменная для удержания памяти
+        
+        if (!cached_json.empty()) {
+            return cached_json;
+        }
+
         std::wstring wpath = core::utils::get_product_data_path();
         std::string base_path = core::tools::from_utf16(wpath);
         
-        // Пытаемся загрузить конфиг из нескольких возможных мест
         std::vector<std::string> possible_paths = {
             base_path + "/products/icq/config.json",
             base_path + "/../products/icq/config.json",
@@ -47,11 +50,13 @@ namespace config
             if (!json.empty())
             {
                 LOGI("Loaded config from: %s", path.c_str());
-                return json;
+                cached_json = json;
+                return cached_json;
             }
         }
         
         LOGE("Failed to load config from any path");
-        return "{}"; // Возвращаем пустой JSON объект как fallback
+        cached_json = "{}"; // Fallback
+        return cached_json;
     }
 }
