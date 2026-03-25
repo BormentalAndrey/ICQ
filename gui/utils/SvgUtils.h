@@ -9,7 +9,7 @@
 #include <memory>
 
 // Включаем параметры тем, так как они используются в аргументах функций
-#include "styles/ThemeColor.h"
+#include "../styles/ThemeColor.h"
 
 namespace Utils
 {
