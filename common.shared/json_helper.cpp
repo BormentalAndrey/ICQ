@@ -3,25 +3,40 @@
 #include <algorithm>
 #include <string_view>
 
-namespace core::tools
+// КРИТИЧЕСКИ ВАЖНО для Android NDK: 
+// Определение swap для Member, чтобы std::sort мог переставлять элементы
+namespace rapidjson {
+    template <typename Encoding, typename Allocator>
+    inline void swap(GenericMember<Encoding, Allocator>& a, GenericMember<Encoding, Allocator>& b) noexcept {
+        a.name.Swap(b.name);
+        a.value.Swap(b.value);
+    }
+}
+
+namespace core::tools::json_helper
 {
     void sort_json_keys_by_name(rapidjson::Value& _node)
     {
         if (!_node.IsObject())
             return;
 
-        // Компаратор для Member объектов RapidJSON
+        // Компаратор теперь работает максимально быстро через string_view
         auto members_comparator = [](const rapidjson::Value::Member& _lhs, const rapidjson::Value::Member& _rhs) noexcept
         {
-            std::string_view s1(_lhs.name.GetString(), _lhs.name.GetStringLength());
-            std::string_view s2(_rhs.name.GetString(), _rhs.name.GetStringLength());
+            const std::string_view s1(_lhs.name.GetString(), _lhs.name.GetStringLength());
+            const std::string_view s2(_rhs.name.GetString(), _rhs.name.GetStringLength());
             return s1 < s2;
         };
 
-        // Сортируем поля объекта
-        std::sort(_node.MemberBegin(), _node.MemberEnd(), members_comparator);
+        // Теперь std::sort сработает, так как мы определили swap выше
+        auto members = _node.MemberBegin();
+        auto members_end = _node.MemberEnd();
+        
+        if (members < members_end) {
+            std::sort(members, members_end, members_comparator);
+        }
 
-        // Рекурсивный обход
+        // Рекурсивный обход для вложенных структур
         for (auto& member : _node.GetObject())
         {
             if (member.value.IsObject())
@@ -38,4 +53,4 @@ namespace core::tools
             }
         }
     }
-}
+} // namespace core::tools::json_helper
