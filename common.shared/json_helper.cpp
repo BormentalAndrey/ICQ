@@ -7,13 +7,21 @@ namespace core::tools
 {
     void sort_json_keys_by_name(rapidjson::Value& _node)
     {
-        auto members_comparator = [](const auto& _lhs, const auto& _rhs) noexcept
+        if (!_node.IsObject())
+            return;
+
+        // Компаратор для Member объектов RapidJSON
+        auto members_comparator = [](const rapidjson::Value::Member& _lhs, const rapidjson::Value::Member& _rhs) noexcept
         {
-            return rapidjson_get_string_view(_lhs.name) < rapidjson_get_string_view(_rhs.name);
+            std::string_view s1(_lhs.name.GetString(), _lhs.name.GetStringLength());
+            std::string_view s2(_rhs.name.GetString(), _rhs.name.GetStringLength());
+            return s1 < s2;
         };
 
+        // Сортируем поля объекта
         std::sort(_node.MemberBegin(), _node.MemberEnd(), members_comparator);
 
+        // Рекурсивный обход
         for (auto& member : _node.GetObject())
         {
             if (member.value.IsObject())
