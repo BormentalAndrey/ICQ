@@ -23,7 +23,6 @@ namespace Ui
 
 namespace core
 {
-
     template<>
     inline QString coll_helper::get<QString>(std::string_view _name) const
     {
@@ -57,6 +56,7 @@ namespace Utils
         no,
         yes
     };
+    
     template<typename T>
     T toContainerOfString(const core::iarray* array, TrimString _trim = TrimString::yes)
     {
