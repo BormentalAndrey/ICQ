@@ -3,7 +3,6 @@
 #include <sstream>
 
 #include "config/config.h"
-// Подразумевается, что platform.h подключается через common_defs.h
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -17,6 +16,9 @@
 #include <sys/types.h>
 #include <mutex>
 #include <optional>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #endif // _WIN32
 
 namespace common
@@ -183,7 +185,6 @@ namespace common
         {
             DWORD serialNum = 0;
 
-            // Determine if this volume uses an NTFS file system.
             GetVolumeInformationA("c:\\", NULL, 0, &serialNum, NULL, NULL, NULL, 0);
             uint16_t hash = (uint16_t)((serialNum + (serialNum >> 16)) & 0xFFFF);
 
@@ -246,6 +247,23 @@ namespace common
             return pw->pw_dir;
         return {};
     }
+
+    std::wstring get_guid()
+    {
+        boost::uuids::uuid uuid = boost::uuids::random_generator()();
+        std::string s = boost::uuids::to_string(uuid);
+        return std::wstring(s.begin(), s.end());
+    }
+
+    std::string get_android_device_id()
+    {
+        static std::string dev_id;
+        if (dev_id.empty()) {
+            dev_id = "android_id_" + std::to_string(getuid());
+        }
+        return dev_id;
+    }
+
 #endif // _WIN32
 }
 
@@ -258,7 +276,6 @@ namespace common
 
     std::string_view get_dev_id()
     {
-        // Константы теперь безопасно резолвятся благодаря добавлениям в config.h
         constexpr auto key = platform::is_apple()
             ? config::values::dev_id_mac : (platform::is_windows() ? config::values::dev_id_win : config::values::dev_id_linux);
         return config::get().string(key);
