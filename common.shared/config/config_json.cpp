@@ -6,11 +6,17 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
-#include <android/log.h>
 
+// Безопасное логирование: работает на Android, игнорируется на Desktop
+#ifdef __ANDROID__
+#include <android/log.h>
 #define LOG_TAG "ICQConfig"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...)
+#define LOGE(...)
+#endif
 
 namespace config
 {
@@ -28,7 +34,8 @@ namespace config
     
     std::string_view config_json() noexcept
     {
-        static std::string cached_json; // Статическая переменная для удержания памяти
+        // Статическая переменная удерживает память, чтобы string_view не указывал на мусор
+        static std::string cached_json; 
         
         if (!cached_json.empty()) {
             return cached_json;
@@ -40,7 +47,9 @@ namespace config
         std::vector<std::string> possible_paths = {
             base_path + "/products/icq/config.json",
             base_path + "/../products/icq/config.json",
+#ifdef __ANDROID__
             "/data/data/com.icq.mobile/files/products/icq/config.json",
+#endif
             "./products/icq/config.json"
         };
         
