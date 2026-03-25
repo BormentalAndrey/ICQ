@@ -103,7 +103,7 @@ namespace Data
     class Contact : public Buddy
     {
     public:
-        virtual ~Contact() {} // Исправлено: Добавлено тело для деструктора
+        virtual ~Contact() = default; // Исправлено: Использован default для виртуального деструктора вместо {}
 
         virtual const QString& GetDisplayName() const
         {
