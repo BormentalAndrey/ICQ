@@ -11,7 +11,7 @@
 
 namespace core
 {
-    // --- Перечисления состояния (оставляем без изменений) ---
+    // --- Перечисления состояния ---
     enum login_error
     {
         le_success = 0,
@@ -48,8 +48,6 @@ namespace core
 
     /**
      * @brief Основной интерфейс взаимодействия Core -> GUI.
-     * В этом файле НЕ должно быть реализации (return nullptr), 
-     * только объявление структуры интерфейса (= 0).
      */
     struct icore_interface : public ibase
     {
@@ -66,7 +64,7 @@ namespace core
         // Системные запросы
         virtual std::string get_device_id() = 0;
 
-        // Коннекторы (должны быть реализованы в jni_bridge.cpp, здесь только сигнатуры)
+        // Коннекторы 
         virtual iconnector* get_core_connector() = 0;
         virtual iconnector* get_gui_connector() = 0;
         virtual icore_factory* get_factory() = 0;
@@ -75,6 +73,10 @@ namespace core
     // --- Вспомогательные структуры (icollection, iarray и т.д.) ---
     struct iarray : ibase
     {
+        // Исправлено: добавлены недостающие методы изменения массива
+        virtual void reserve(int32_t size) = 0;
+        virtual void push_back(ivalue* value) = 0;
+        
         virtual ivalue* get_at(int32_t index) const = 0;
         virtual int32_t count() const = 0;
         virtual bool empty() const = 0;
