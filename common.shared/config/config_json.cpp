@@ -7,7 +7,6 @@
 #include <sstream>
 #include <vector>
 
-// Безопасное логирование: работает на Android, игнорируется на Desktop
 #ifdef __ANDROID__
 #include <android/log.h>
 #define LOG_TAG "ICQConfig"
@@ -34,11 +33,11 @@ namespace config
     
     std::string_view config_json() noexcept
     {
-        // Статическая переменная удерживает память, чтобы string_view не указывал на мусор
+        // Статическая переменная удерживает данные в памяти на весь срок работы программы
         static std::string cached_json; 
         
         if (!cached_json.empty()) {
-            return cached_json;
+            return std::string_view(cached_json);
         }
 
         std::wstring wpath = core::utils::get_product_data_path();
@@ -59,13 +58,13 @@ namespace config
             if (!json.empty())
             {
                 LOGI("Loaded config from: %s", path.c_str());
-                cached_json = json;
-                return cached_json;
+                cached_json = std::move(json);
+                return std::string_view(cached_json);
             }
         }
         
-        LOGE("Failed to load config from any path");
-        cached_json = "{}"; // Fallback
-        return cached_json;
+        LOGE("Failed to load config from any path, using empty object");
+        cached_json = "{}"; 
+        return std::string_view(cached_json);
     }
 }
