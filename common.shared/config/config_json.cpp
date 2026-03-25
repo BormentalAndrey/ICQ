@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "config_data.h"
-#include "../tools/system.h"
+#include "tools/system.h"   // Исправлен путь
 #include "../utils.h"
-#include "../tools/strings.h" // Для from_utf16
+#include "tools/strings.h"  // Исправлен путь (Для from_utf16)
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -26,7 +26,8 @@ namespace config
         return std::string();
     }
     
-    std::string config_json()
+    // Исправлено: добавлен обязательный noexcept для совпадения с заголовочным файлом
+    std::string config_json() noexcept
     {
         // Получаем wstring путь и безопасно конвертируем в utf8 string
         std::wstring wpath = core::utils::get_product_data_path();
