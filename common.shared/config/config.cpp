@@ -7,7 +7,7 @@
 #include "../core/tools/system.h"
 #include "../core/utils.h"
 #include <boost/filesystem.hpp>
-#endif // SUPPORT_EXTERNAL_CONFIG
+#endif 
 
 #include "../environment.h"
 #include "../json_unserialize_helpers.h"
@@ -17,7 +17,6 @@
 namespace config {
 
 static auto is_less_by_first = [](const auto &x1, const auto &x2) {
-  static_assert(std::is_same_v<decltype(x1), decltype(x2)>);
   auto key1 = x1.first;
   auto key2 = x2.first;
   return static_cast<std::underlying_type_t<decltype(key1)>>(key1) <
@@ -36,7 +35,7 @@ static auto get_int64(const rapidjson::Value &json_value, std::string_view name)
   return common::json::get_value<int64_t>(json_value, name).value_or(0);
 }
 
-static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
+[[maybe_unused]] static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("urls"); it != _node.MemberEnd()) {
     urls_array res = {{
          { urls::base, get_string(it->value, "base") },
@@ -93,7 +92,7 @@ static std::optional<urls_array> parse_urls(const rapidjson::Value &_node) {
   return {};
 }
 
-static std::optional<translations_array> parse_translations(const rapidjson::Value &_node) {
+[[maybe_unused]] static std::optional<translations_array> parse_translations(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("translations"); it != _node.MemberEnd()) {
     translations_array res = {{
          { translations::installer_title_win, get_string(it->value, "installer_title_win") },
@@ -111,7 +110,7 @@ static std::optional<translations_array> parse_translations(const rapidjson::Val
   return {};
 }
 
-static std::optional<features_array> parse_features(const rapidjson::Value &_node) {
+[[maybe_unused]] static std::optional<features_array> parse_features(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("features"); it != _node.MemberEnd()) {
     features_array res = {{
          { features::feedback_selected, get_bool(it->value, "feedback_selected") },
@@ -235,7 +234,7 @@ static std::optional<features_array> parse_features(const rapidjson::Value &_nod
   return {};
 }
 
-static std::optional<values_array> parse_values(const rapidjson::Value &_node) {
+[[maybe_unused]] static std::optional<values_array> parse_values(const rapidjson::Value &_node) {
   if (const auto it = _node.FindMember("values"); it != _node.MemberEnd()) {
     values_array res = {{
          { values::product_path, get_string(it->value, "product_path") },
