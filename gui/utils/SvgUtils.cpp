@@ -1,11 +1,20 @@
 #include "stdafx.h"
-
 #include "SvgUtils.h"
 #include "utils.h"
 
+#include <QSvgRenderer>
+#include <QPainter>
+#include <QFileInfo>
+#include <QTransform>
+#include <QBrush>
+#include <cmath>
+#include <algorithm>
+#include <limits>
+
 namespace
 {
-    Utils::ColorLayers colorsFromContainers(Utils::ColorContainerLayers& _containers)
+    // Вспомогательная функция для преобразования контейнеров цветов в актуальные QColor
+    Utils::ColorLayers colorsFromContainers(const Utils::ColorContainerLayers& _containers)
     {
         Utils::ColorLayers result;
         result.reserve(_containers.size());
@@ -13,53 +22,69 @@ namespace
             _containers.begin(),
             _containers.end(),
             std::back_inserter(result),
-            [](std::pair<QString, Styling::ColorContainer>& _container) { return std::make_pair(_container.first, _container.second.actualColor()); });
+            [](const std::pair<QString, Styling::ColorContainer>& _container) 
+            { 
+                return std::make_pair(_container.first, _container.second.actualColor()); 
+            });
         return result;
     }
 
-    Utils::ColorLayers colorsFromParameters(const Utils::ColorParameterLayers& _pararmeters)
+    // Преобразование параметров темы в фиксированные цвета
+    Utils::ColorLayers colorsFromParameters(const Utils::ColorParameterLayers& _parameters)
     {
         Utils::ColorLayers result;
-        result.reserve(_pararmeters.size());
+        result.reserve(_parameters.size());
         std::transform(
-            _pararmeters.begin(),
-            _pararmeters.end(),
+            _parameters.begin(),
+            _parameters.end(),
             std::back_inserter(result),
-            [](const auto& _parameter) { return std::make_pair(_parameter.first, _parameter.second.color()); });
+            [](const auto& _parameter) 
+            { 
+                return std::make_pair(_parameter.first, _parameter.second.color()); 
+            });
         return result;
     }
 
-    Utils::ColorContainerLayers containersFromParameters(const Utils::ColorParameterLayers& _pararmeters)
+    // Создание контейнеров из параметров для отслеживания изменений темы
+    Utils::ColorContainerLayers containersFromParameters(const Utils::ColorParameterLayers& _parameters)
     {
         Utils::ColorContainerLayers result;
-        result.reserve(_pararmeters.size());
+        result.reserve(_parameters.size());
         std::transform(
-            _pararmeters.begin(),
-            _pararmeters.end(),
+            _parameters.begin(),
+            _parameters.end(),
             std::back_inserter(result),
-            [](const auto& _parameter) { return std::make_pair(_parameter.first, Styling::ColorContainer { _parameter.second }); });
+            [](const auto& _parameter) 
+            { 
+                return std::make_pair(_parameter.first, Styling::ColorContainer { _parameter.second }); 
+            });
         return result;
     }
 } // namespace
 
-QPixmap Utils::renderSvg(const QString& _filePath, const QSize& _scaledSize, const QColor& _tintColor, const KeepRatio _keepRatio)
+namespace Utils
+{
+
+QPixmap renderSvg(const QString& _filePath, const QSize& _scaledSize, const QColor& _tintColor, const KeepRatio _keepRatio)
 {
     if (Q_UNLIKELY(!QFileInfo::exists(_filePath)))
         return QPixmap();
 
     QSvgRenderer renderer(_filePath);
-    const auto defSize = renderer.defaultSize();
+    if (!renderer.isValid())
+        return QPixmap();
 
+    const auto defSize = renderer.defaultSize();
     if (Q_UNLIKELY(_scaledSize.isEmpty() && defSize.isEmpty()))
         return QPixmap();
 
     QSize resultSize;
-    QRect bounds;
+    QRectF bounds;
 
     if (!_scaledSize.isEmpty())
     {
         resultSize = scale_bitmap(_scaledSize);
-        bounds = QRect(QPoint(), resultSize);
+        bounds = QRectF(QPointF(0, 0), QSizeF(resultSize));
 
         if (_keepRatio == KeepRatio::yes)
         {
@@ -70,7 +95,8 @@ QPixmap Utils::renderSvg(const QString& _filePath, const QSize& _scaledSize, con
             if (Q_UNLIKELY(std::fabs(wRatio - hRatio) > epsilon))
             {
                 const auto resultCenter = bounds.center();
-                bounds.setSize(defSize.scaled(resultSize, Qt::KeepAspectRatio));
+                QSizeF s = QSizeF(defSize).scaled(QSizeF(resultSize), Qt::KeepAspectRatio);
+                bounds.setSize(s);
                 bounds.moveCenter(resultCenter);
             }
         }
@@ -78,7 +104,7 @@ QPixmap Utils::renderSvg(const QString& _filePath, const QSize& _scaledSize, con
     else
     {
         resultSize = scale_bitmap_with_value(defSize);
-        bounds = QRect(QPoint(), resultSize);
+        bounds = QRectF(QPointF(0, 0), QSizeF(resultSize));
     }
 
     QPixmap pixmap(resultSize);
@@ -86,33 +112,37 @@ QPixmap Utils::renderSvg(const QString& _filePath, const QSize& _scaledSize, con
 
     {
         QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        
         renderer.render(&painter, bounds);
 
-        if (_tintColor.isValid())
+        if (_tintColor.isValid() && _tintColor.alpha() > 0)
         {
             painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-            painter.fillRect(bounds, _tintColor);
+            painter.fillRect(pixmap.rect(), _tintColor);
         }
     }
 
     check_pixel_ratio(pixmap);
-
     return pixmap;
 }
 
-QPixmap Utils::renderSvgScaled(const QString& _resourcePath, const QSize& _unscaledSize, const QColor& _tintColor, const KeepRatio _keepRatio)
+QPixmap renderSvgScaled(const QString& _resourcePath, const QSize& _unscaledSize, const QColor& _tintColor, const KeepRatio _keepRatio)
 {
-    return renderSvg(_resourcePath, Utils::scale_value(_unscaledSize), _tintColor, _keepRatio);
+    return renderSvg(_resourcePath, scale_value(_unscaledSize), _tintColor, _keepRatio);
 }
 
-QPixmap Utils::renderSvgLayered(const QString& _filePath, const ColorLayers& _layers, const QSize& _scaledSize)
+QPixmap renderSvgLayered(const QString& _filePath, const ColorLayers& _layers, const QSize& _scaledSize)
 {
     if (Q_UNLIKELY(!QFileInfo::exists(_filePath)))
         return QPixmap();
 
     QSvgRenderer renderer(_filePath);
-    const auto defSize = scale_bitmap_with_value(renderer.defaultSize());
+    if (!renderer.isValid())
+        return QPixmap();
 
+    const auto defSize = scale_bitmap_with_value(renderer.defaultSize());
     if (Q_UNLIKELY(_scaledSize.isEmpty() && defSize.isEmpty()))
         return QPixmap();
 
@@ -120,15 +150,17 @@ QPixmap Utils::renderSvgLayered(const QString& _filePath, const ColorLayers& _la
     QPixmap pixmap(resultSize);
     pixmap.fill(Qt::transparent);
 
-    QMatrix scaleMatrix;
+    QTransform scaleTransform;
     if (!_scaledSize.isEmpty() && defSize != resultSize)
     {
-        const auto s = double(resultSize.width()) / defSize.width();
-        scaleMatrix.scale(s, s);
+        const double s = double(resultSize.width()) / defSize.width();
+        scaleTransform.scale(s, s);
     }
 
     {
         QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
         if (!_layers.empty())
         {
@@ -137,112 +169,124 @@ QPixmap Utils::renderSvgLayered(const QString& _filePath, const ColorLayers& _la
                 if (!layerColor.isValid() || layerColor.alpha() == 0)
                     continue;
 
-                im_assert(renderer.elementExists(layerName));
                 if (!renderer.elementExists(layerName))
                     continue;
 
-                QPixmap layer(resultSize);
-                layer.fill(Qt::transparent);
-
-                const auto elMatrix = renderer.matrixForElement(layerName);
+                const auto elTransform = renderer.transformForElement(layerName);
                 const auto elBounds = renderer.boundsOnElement(layerName);
-                const auto mappedRect = scale_bitmap_with_value(elMatrix.mapRect(elBounds));
-                auto layerBounds = scaleMatrix.mapRect(mappedRect);
-                layerBounds.moveTopLeft(QPointF(fscale_bitmap_with_value(layerBounds.topLeft().x()), fscale_bitmap_with_value(layerBounds.topLeft().y())));
+                
+                // Масштабируем и позиционируем слой
+                const auto mappedRect = scale_bitmap_with_value(elTransform.mapRect(elBounds));
+                auto layerBounds = scaleTransform.mapRect(mappedRect);
+                
+                // Корректировка координат для субпиксельного рендеринга
+                layerBounds.moveTopLeft(QPointF(
+                    fscale_bitmap_with_value(layerBounds.topLeft().x()), 
+                    fscale_bitmap_with_value(layerBounds.topLeft().y())
+                ));
+
+                QPixmap layerPix(resultSize);
+                layerPix.fill(Qt::transparent);
 
                 {
-                    QPainter layerPainter(&layer);
+                    QPainter layerPainter(&layerPix);
                     renderer.render(&layerPainter, layerName, layerBounds);
 
                     layerPainter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-                    layerPainter.fillRect(layer.rect(), layerColor);
+                    layerPainter.fillRect(layerPix.rect(), layerColor);
                 }
-                painter.drawPixmap(QPoint(), layer);
+                painter.drawPixmap(0, 0, layerPix);
             }
         }
         else
         {
-            renderer.render(&painter, QRect(QPoint(), resultSize));
+            renderer.render(&painter, QRectF(QPointF(0,0), QSizeF(resultSize)));
         }
     }
 
     check_pixel_ratio(pixmap);
-
     return pixmap;
 }
 
-bool Utils::operator==(const StyledPixmap& _lhs, const StyledPixmap& _rhs)
-{
-    return _lhs.path() == _rhs.path() && _lhs.size() == _rhs.size() && _lhs.color_ == _rhs.color_ && _lhs.keepRatio_ == _rhs.keepRatio_;
-}
+// Реализация классов контейнеров
 
-Utils::BasePixmap::BasePixmap(const QPixmap& _pixmap)
-    : pixmap_ { _pixmap }
+BasePixmap::BasePixmap(const QPixmap& _pixmap)
+    : pixmap_(_pixmap)
 {}
 
-void Utils::BasePixmap::setPixmap(const QPixmap& _pixmap)
+void BasePixmap::setPixmap(const QPixmap& _pixmap)
 {
     pixmap_ = _pixmap;
 }
 
-QPixmap Utils::BaseStyledPixmap::actualPixmap()
+QPixmap BaseStyledPixmap::actualPixmap()
 {
     updatePixmap();
     return cachedPixmap();
 }
 
-void Utils::BaseStyledPixmap::updatePixmap()
+void BaseStyledPixmap::updatePixmap()
 {
     if (canUpdate())
         setPixmap(generatePixmap());
 }
 
-Utils::BaseStyledPixmap::BaseStyledPixmap(const QPixmap& _pixmap, const QString& _path, const QSize& _size)
+BaseStyledPixmap::BaseStyledPixmap(const QPixmap& _pixmap, const QString& _path, const QSize& _size)
     : BasePixmap(_pixmap)
-    , path_ { _path }
-    , size_ { _size }
+    , path_(_path)
+    , size_(_size)
 {}
 
-Utils::StyledPixmap::StyledPixmap()
-    : StyledPixmap(QString {}, QSize {}, Styling::ColorParameter {})
+StyledPixmap::StyledPixmap()
+    : StyledPixmap(QString(), QSize(), Styling::ColorParameter())
 {}
 
-Utils::StyledPixmap::StyledPixmap(const QString& _resourcePath, const QSize& _scaledSize, const Styling::ColorParameter& _tintColor, KeepRatio _keepRatio)
-    : BaseStyledPixmap(Utils::renderSvg(_resourcePath, _scaledSize, _tintColor.color(), _keepRatio), _resourcePath, _scaledSize)
-    , color_ { _tintColor }
-    , keepRatio_ { _keepRatio }
+StyledPixmap::StyledPixmap(const QString& _resourcePath, const QSize& _scaledSize, const Styling::ColorParameter& _tintColor, KeepRatio _keepRatio)
+    : BaseStyledPixmap(renderSvg(_resourcePath, _scaledSize, _tintColor.color(), _keepRatio), _resourcePath, _scaledSize)
+    , color_(_tintColor)
+    , keepRatio_(_keepRatio)
 {}
 
-Utils::StyledPixmap Utils::StyledPixmap::scaled(const QString& _resourcePath, const QSize& _unscaledSize, const Styling::ColorParameter& _tintColor, KeepRatio _keepRatio)
+StyledPixmap StyledPixmap::scaled(const QString& _resourcePath, const QSize& _unscaledSize, const Styling::ColorParameter& _tintColor, KeepRatio _keepRatio)
 {
-    return StyledPixmap(_resourcePath, Utils::scale_value(_unscaledSize), _tintColor, _keepRatio);
+    return StyledPixmap(_resourcePath, scale_value(_unscaledSize), _tintColor, _keepRatio);
 }
 
-bool Utils::StyledPixmap::canUpdate() const
+bool StyledPixmap::canUpdate() const
 {
     return color_.canUpdateColor();
 }
 
-QPixmap Utils::StyledPixmap::generatePixmap()
+QPixmap StyledPixmap::generatePixmap()
 {
-    return Utils::renderSvg(path(), size(), color_.actualColor(), keepRatio_);
+    return renderSvg(path(), size(), color_.actualColor(), keepRatio_);
 }
 
-Utils::LayeredPixmap::LayeredPixmap()
-    : LayeredPixmap(QString {}, ColorParameterLayers {}, QSize {})
+bool operator==(const StyledPixmap& _lhs, const StyledPixmap& _rhs)
+{
+    return _lhs.path() == _rhs.path() && _lhs.size() == _rhs.size() && _lhs.color_ == _rhs.color_ && _lhs.keepRatio_ == _rhs.keepRatio_;
+}
+
+LayeredPixmap::LayeredPixmap()
+    : LayeredPixmap(QString(), ColorParameterLayers(), QSize())
 {}
 
-Utils::LayeredPixmap::LayeredPixmap(const QString& _filePath, const ColorParameterLayers& _layers, const QSize& _scaledSize)
-    : BaseStyledPixmap(Utils::renderSvgLayered(_filePath, colorsFromParameters(_layers), _scaledSize), _filePath, _scaledSize)
-    , layers_ { containersFromParameters(_layers) }
+LayeredPixmap::LayeredPixmap(const QString& _filePath, const ColorParameterLayers& _layers, const QSize& _scaledSize)
+    : BaseStyledPixmap(renderSvgLayered(_filePath, colorsFromParameters(_layers), _scaledSize), _filePath, _scaledSize)
+    , layers_(containersFromParameters(_layers))
 {}
 
-bool Utils::LayeredPixmap::canUpdate() const
+bool LayeredPixmap::canUpdate() const
 {
-    return std::any_of(layers_.begin(), layers_.end(), [](const auto& _layer) { return _layer.second.canUpdateColor(); });
+    return std::any_of(layers_.begin(), layers_.end(), [](const auto& _layer) 
+    { 
+        return _layer.second.canUpdateColor(); 
+    });
 }
 
-QPixmap Utils::LayeredPixmap::generatePixmap()
+QPixmap LayeredPixmap::generatePixmap()
 {
-    return Utils::renderSvgLayered(path(), colorsFromContainers(layers_), size());
+    return renderSvgLayered(path(), colorsFromContainers(layers_), size());
 }
+
+} // namespace Utils
