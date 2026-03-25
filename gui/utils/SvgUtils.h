@@ -6,6 +6,9 @@
 #include <QColor>
 #include <vector>
 #include <utility>
+#include <memory>
+
+// Включаем параметры тем, так как они используются в аргументах функций
 #include "styles/ThemeColor.h"
 
 namespace Utils
@@ -16,7 +19,9 @@ namespace Utils
         yes
     };
 
+    // Базовые функции рендеринга
     QPixmap renderSvg(const QString& _resourcePath, const QSize& _scaledSize = {}, const QColor& _tintColor = {}, const KeepRatio _keepRatio = KeepRatio::yes);
+    
     QPixmap renderSvgScaled(
         const QString& _resourcePath,
         const QSize& _unscaledSize = {},
@@ -29,9 +34,10 @@ namespace Utils
     using ColorLayers = Layers<QColor>;
     QPixmap renderSvgLayered(const QString& _filePath, const ColorLayers& _layers = {}, const QSize& _scaledSize = {});
 
+    // Базовый класс для хранения Pixmap
     struct BasePixmap
     {
-        BasePixmap(const QPixmap& _pixmap);
+        explicit BasePixmap(const QPixmap& _pixmap);
         virtual ~BasePixmap() = default;
 
         QPixmap cachedPixmap() const { return pixmap_; }
@@ -44,8 +50,11 @@ namespace Utils
         QPixmap pixmap_;
     };
 
+    // Класс для стилизованных (меняющих цвет) иконок
     struct BaseStyledPixmap : BasePixmap
     {
+        virtual ~BaseStyledPixmap() override = default;
+        
         QPixmap actualPixmap() override final;
         virtual bool canUpdate() const = 0;
         void updatePixmap();
@@ -65,7 +74,8 @@ namespace Utils
 
     struct StyledPixmap final : BaseStyledPixmap
     {
-        StyledPixmap(); // Исправлено: убран explicit для корректной работы внутри std::pair и контейнеров
+        StyledPixmap();
+        
         explicit StyledPixmap(
             const QString& _resourcePath,
             const QSize& _scaledSize = {},
