@@ -1,7 +1,7 @@
 #pragma once
 
 #include "lastseen.h"
-#include "utils/SvgUtils.h"
+#include "../utils/SvgUtils.h" // Исправлен путь на уровень выше
 #include <QString>
 #include <QStringList>
 #include <QMap>
@@ -103,7 +103,7 @@ namespace Data
     class Contact : public Buddy
     {
     public:
-        virtual ~Contact() = default; // Исправлено: Использован default для виртуального деструктора вместо {}
+        virtual ~Contact() = default;
 
         virtual const QString& GetDisplayName() const
         {
@@ -239,4 +239,4 @@ namespace Data
 
 Q_DECLARE_METATYPE(Data::Buddy*);
 Q_DECLARE_METATYPE(Data::Contact*);
-Q_DECLARE_METATYPE(Data::UserInfo*); // Исправлено: Добавлена пропущенная точка с запятой
+Q_DECLARE_METATYPE(Data::UserInfo*);
