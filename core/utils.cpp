@@ -69,6 +69,28 @@ namespace core
 {
     namespace utils
     {
+#ifdef __ANDROID__
+        extern std::string g_android_data_path; // Переменная инициализируется в jni_bridge.cpp
+#endif
+
+        std::wstring get_product_data_path()
+        {
+#ifdef __ANDROID__
+            if (!g_android_data_path.empty()) {
+                return core::tools::from_utf8(g_android_data_path);
+            }
+            // Fallback путь, если JNI не успел прокинуть данные
+            return L"/data/data/com.icq.mobile/files";
+#else
+            return su::wconcat(core::tools::from_utf8(common::get_home_directory()), L"/.config/dzyn");
+#endif
+        }
+
+        std::wstring get_local_product_data_path()
+        {
+            return get_product_data_path();
+        }
+
         std::string_view get_dev_id()
         {
             return common::get_dev_id();
