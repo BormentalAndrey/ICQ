@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #ifdef _WIN32
 #pragma warning( disable : 35038)
 #include <WinSDKVer.h>
@@ -77,7 +81,7 @@ do { if(!(condition)){ std::cerr << "ASSERT FAILED: " << #condition << " " << __
 #include <QDebug>
 // --------------------------------------
 
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__ANDROID__)
 #include <filesystem>
 #endif
 
@@ -96,9 +100,9 @@ do { if(!(condition)){ std::cerr << "ASSERT FAILED: " << #condition << " " << __
 #include <boost/system/config.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/xpressive/xpressive.hpp>
-#include <boost/uuid/uuid.hpp>            // uuid class
-#include <boost/uuid/uuid_generators.hpp> // generators
-#include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
+#include <boost/uuid/uuid.hpp>            
+#include <boost/uuid/uuid_generators.hpp> 
+#include <boost/uuid/uuid_io.hpp>         
 #include <boost/thread.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <boost/filesystem/fstream.hpp>
