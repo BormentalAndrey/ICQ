@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include "../common_defs.h"
+#include <QtQml/Platform.h>
+
 
 #ifdef _WIN32
 
