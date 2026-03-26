@@ -1,5 +1,9 @@
 #pragma once
 
+#include <QString>
+#include <QDateTime>
+#include <optional>
+
 namespace core
 {
     class coll_helper;
