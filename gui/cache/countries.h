@@ -1,5 +1,9 @@
 #pragma once
 
+#include <vector>
+#include <QString>
+#include <QStringView>
+
 namespace Ui
 {
     namespace countries
@@ -23,4 +27,3 @@ namespace Ui
         const countries_list& get();
     }
 }
-
