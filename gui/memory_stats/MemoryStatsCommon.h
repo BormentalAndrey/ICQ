@@ -3,13 +3,10 @@
 #include <cstdint>
 #include <string>
 #include <unordered_set>
-#include "namespaces.h"
+#include "../namespaces.h"
 
-#ifndef MEMSTATS_NS_BEGIN
-#define MEMSTATS_NS_BEGIN namespace memory_stats {
-#define MEMSTATS_NS_END }
-#endif
-
+// namespace-макросы уже определены в namespaces.h, 
+// поэтому напрямую их используем без #ifndef
 MEMSTATS_NS_BEGIN
 
 enum class StatType
