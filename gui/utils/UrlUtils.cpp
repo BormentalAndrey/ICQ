@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#include "../../common.shared/common_defs.h"
+#include <QtQml/Platform.h> 
+
 #include "UrlUtils.h"
 #include "utils.h"
 
