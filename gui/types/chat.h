@@ -1,5 +1,10 @@
 #pragma once
 
+#include <QString>
+#include <QVector>
+#include <memory>
+#include <cstdint>
+
 #include "message.h"
 #include "chat_member.h"
 
