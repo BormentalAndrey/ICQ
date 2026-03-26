@@ -52,24 +52,6 @@ namespace
         }
     }
 
-    /*!
-     * Exclude smaller range from a sorted vector of ranges
-     * \param ranges vector of splitted ranges
-     * \param victim range to exclude
-     * \detail
-     * Algorithm excludes victim range from list of ranges represented by ranges argument.
-     * The common case is when we start from single full range and then exclude some ranges
-     * one-by-one.
-     * On each call of exclude_range_inplace the ranges vector is being modified in a
-     * following way:
-     * - the last element is popped from back and stored in a temporary variable.
-     * - if offset of victim is same as offset of last popped element, than it trimmed to the length of victim.
-     * - otherwise it splits into two (leftwise and rightwise beside the victim).
-     * - all the received ranges are stored back into ranges vector.
-     * \note: Algorithm rely on that ranges vector is sorted in ascending order by offsets of ranges,
-     * and also suppose that victim range is always contained in the very last one element of ranges
-     * vector (i.e. in the greatest one). All empty ranges are discarded.
-     */
     inline void exclude_range_inplace(std::vector<core::data::range>& _ranges, const core::data::range& _victim)
     {
         im_assert(std::is_sorted(_ranges.begin(), _ranges.end()));
@@ -227,9 +209,9 @@ void common::tools::message_tokenizer::parse_range(const core::data::range& _ran
     auto p = matcher.search(sv.begin(), sv.end(), result, scheme, helper_parse_url::check_punct_url({ sv.begin(), sv.end() }));
     while (p != sv.end())
     {
-        // compute size and offset
+        // compute size and offset - явное приведение к size_t для Android NDK
         size_t size = result.size();
-        size_t offset = _range.offset_ + std::distance(sv.begin(), p - size);
+        size_t offset = _range.offset_ + static_cast<size_t>(std::distance(sv.begin(), p - size));
         if (offset > pos) // add whitespaces tokens
             tokens_.emplace_back(_message.substr(pos, offset - pos), token_text_type_, pos);
         pos = offset + size; // adjust current position
@@ -247,9 +229,9 @@ void common::tools::message_tokenizer::parse_range(const core::data::range& _ran
     // process the last result
     if (!result.empty())
     {
-        // compute size and offset
+        // compute size and offset - явное приведение к size_t
         size_t size = result.size();
-        size_t offset = _range.offset_ + std::distance(sv.begin(), p - size);
+        size_t offset = _range.offset_ + static_cast<size_t>(std::distance(sv.begin(), p - size));
         if (offset > pos) // add the whitespaces token
             tokens_.emplace_back(_message.substr(pos, offset - pos), token_text_type_, pos);
         tokens_.emplace_back((tokenizer_string)result, (int32_t)scheme, offset);
