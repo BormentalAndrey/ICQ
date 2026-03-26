@@ -1,3 +1,5 @@
+# app/src/main/cpp/CMakeLists.txt
+
 cmake_minimum_required(VERSION 3.22.1)
 
 project("icq_mobile_core" LANGUAGES CXX C)
@@ -15,8 +17,6 @@ if(NOT ICQ_PROJECT_ROOT)
 else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
-
-message(STATUS "[ICQ] Root directory: ${ICQ_ROOT}")
 
 # =============================================
 # Поиск Qt6 для Android
@@ -42,10 +42,9 @@ set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
 set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
 set(Qt6Gui_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Gui" CACHE PATH "" FORCE)
 set(Qt6Svg_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Svg" CACHE PATH "" FORCE)
-set(Qt6Concurrent_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Concurrent" CACHE PATH "" FORCE)
 set(Qt6Widgets_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Widgets" CACHE PATH "" FORCE)
 
-find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network Gui Svg Concurrent)
+find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network Gui Svg)
 
 message(STATUS "---------------------------------------------------")
 message(STATUS "Qt6 FOUND SUCCESS: ${Qt6_VERSION}")
@@ -67,20 +66,7 @@ set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
 set(CURL_DISABLE_TESTS ON CACHE INTERNAL "")
 set(CURL_USE_OPENSSL OFF CACHE INTERNAL "")
-set(HTTP_ONLY ON CACHE INTERNAL "")
 FetchContent_MakeAvailable(curl)
-
-# =============================================
-# Автогенерация config_data.h
-# =============================================
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config_data.h.in")
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/config_data.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/config_data.h"
-        @ONLY
-    )
-endif()
 
 # =============================================
 # Подключение подпроектов (libomicron)
@@ -98,7 +84,6 @@ endif()
 add_compile_definitions(
     ANDROID
     PLATFORM_ANDROID
-    __ANDROID__
     _ANDROID_
     STRIP_CRASH_HANDLER
     SUPPORT_EXTERNAL_CONFIG
@@ -108,10 +93,7 @@ add_compile_definitions(
     QT_NETWORK_LIB
     QT_GUI_LIB
     QT_SVG_LIB
-    QT_CONCURRENT_LIB
     CORE_USED_IN_ANDROID
-    TARGET_OS=android
-    QT_NO_KEYWORDS
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
@@ -126,7 +108,6 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
     "${ICQ_ROOT}/corelib/*.cpp"
-    "${ICQ_ROOT}/gui/*.cpp"
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
@@ -152,15 +133,14 @@ target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
     ${ICQ_ROOT}/core
-    ${ICQ_ROOT}/gui
-    ${ICQ_ROOT}/core/Voip/libvoip/include
-    ${ICQ_ROOT}/core/Voip
+    ${ICQ_ROOT}/core/Voip/libvoip/
+    ${ICQ_ROOT}/core/Voip/libvoip/include   # Добавлено для voip3.h
+    ${ICQ_ROOT}/core/Voip/libvoip/include/voip   # Прямой путь к voip3.h
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
-    ${ICQ_ROOT}/libomicron/include
+    ${ICQ_ROOT}/libomicron/
     ${curl_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 # Пути Qt6 модулей (для SvgUtils.h и QPixmap)
@@ -169,7 +149,6 @@ target_include_directories(icq_core PRIVATE
     ${Qt6Network_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
     ${Qt6Svg_INCLUDE_DIRS}
-    ${Qt6Concurrent_INCLUDE_DIRS}
 )
 
 # Boost и RapidJSON (если присутствуют)
@@ -190,8 +169,6 @@ set_target_properties(icq_core PROPERTIES
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME "icq_core"
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
 )
 
 target_compile_options(icq_core PRIVATE
@@ -222,7 +199,6 @@ target_link_libraries(icq_core
     Qt6::Network
     Qt6::Gui
     Qt6::Svg
-    Qt6::Concurrent
     ${log-lib}
     ${z-lib}
     ${android-lib}
@@ -252,5 +228,5 @@ message(STATUS "==============================================================")
 message(STATUS "DZIN CORE BUILD CONFIGURATION COMPLETE")
 message(STATUS "Target ABI: ${ANDROID_ABI}")
 message(STATUS "Project: ${PROJECT_NAME}")
-message(STATUS "Qt Modules: Core, Network, Gui, Svg, Concurrent")
+message(STATUS "Qt Modules: Core, Network, Gui, Svg")
 message(STATUS "==============================================================")
