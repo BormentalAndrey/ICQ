@@ -61,6 +61,7 @@ android {
                     "-I$root/corelib",
                     "-I$root/common.shared",
                     "-I$root/core/Voip",
+                    "-I$root/gui",
                     "-I$root/gui.shared",
                     "-I$boostRoot",
                     "-I$rapidjsonRoot"
