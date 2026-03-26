@@ -1,57 +1,41 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("icq_mobile_core" LANGUAGES CXX C)
 
-# Устанавливаем политику для корректной обработки префиксов (важно для Qt6)
 cmake_policy(SET CMP0074 NEW)
 
-# ---
-# Настройка корня проекта
-# ---
+# --- Настройка корня ---
 if(NOT ICQ_PROJECT_ROOT)
-    # Из app/src/main/cpp поднимаемся на 4 уровня вверх до корня репозитория
     get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
 else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
 
-# ---
-# Поиск Qt6 для Android (Production логика кросс-компиляции)
-# ---
+message(STATUS "[ICQ] Root directory: ${ICQ_ROOT}")
 
-# 1. Определяем путь к Host-инструментам (Linux gcc_64)
+# --- Qt6 настройка (ИСПРАВЛЕННЫЙ ПУТЬ) ---
 if(NOT QT_HOST_PATH)
     set(QT_HOST_PATH "${ICQ_ROOT}/Qt/gcc_64" CACHE PATH "Path to host Qt installation" FORCE)
 endif()
 
-# 2. Определяем путь к Android SDK (Target)
 if(NOT QT_ANDROID_PATH)
-    set(QT_ANDROID_PATH "${ICQ_ROOT}/qt/android_arm64_v8a" CACHE PATH "Path to target Qt" FORCE)
+    set(QT_ANDROID_PATH "${ICQ_ROOT}/Qt/android_arm64_v8a" CACHE PATH "Path to target Qt" FORCE)  # ← Qt с большой буквы!
 endif()
 
-# 3. Настройка путей поиска
 list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
 
-# Явно указываем пути к конфигам для всех необходимых модулей
 set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
 set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
 set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
 set(Qt6Gui_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Gui" CACHE PATH "" FORCE)
 set(Qt6Svg_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Svg" CACHE PATH "" FORCE)
-set(Qt6Widgets_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Widgets" CACHE PATH "" FORCE)
 
-# Ищем Qt6 с компонентами Gui и Svg (необходимы для QPixmap и рендеринга иконок)
 find_package(Qt6 6.5.0 REQUIRED COMPONENTS Core Network Gui Svg)
 
-message(STATUS "---")
-message(STATUS "Qt6 FOUND SUCCESS: ${Qt6_VERSION}")
-message(STATUS "Using Host Qt: ${QT_HOST_PATH}")
-message(STATUS "Using Target Qt: ${QT_ANDROID_PATH}")
-message(STATUS "---")
+message(STATUS "Qt6 FOUND: ${Qt6_VERSION}")
+message(STATUS "Qt path: ${QT_ANDROID_PATH}")
 
-# ---
-# Подготовка зависимостей (CURL для Android NDK)
-# ---
+# --- CURL ---
 include(FetchContent)
 FetchContent_Declare(
     curl
@@ -60,169 +44,85 @@ FetchContent_Declare(
 )
 set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
-set(CURL_DISABLE_TESTS ON CACHE INTERNAL "")
-set(CURL_USE_OPENSSL OFF CACHE INTERNAL "")
+set(HTTP_ONLY ON CACHE INTERNAL "")
 FetchContent_MakeAvailable(curl)
 
-# ---
-# Автогенерация config_data.h
-# ---
-# (Ожидается, что config_data определена где-то выше, например, через configure_file)
-# Если config_data не определена, этот блок нужно адаптировать.
-# Для примера оставлен как есть, но с корректным синтаксисом:
-if(DEFINED config_data)
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/config_data.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/config_data.h"
-        @ONLY
-    )
-endif()
-
-# ---
-# Подключение подпроектов (libomicron)
-# ---
+# --- libomicron (если нужен) ---
 if(EXISTS "${ICQ_ROOT}/libomicron/CMakeLists.txt")
-    message(STATUS "[CORE] Adding libomicron to build tree")
+    message(STATUS "Adding libomicron")
     add_subdirectory("${ICQ_ROOT}/libomicron" libomicron_build)
 endif()
 
-# ---
-# Глобальные определения (Production флаги)
-# ---
+# --- Определения ---
 add_compile_definitions(
     ANDROID
     PLATFORM_ANDROID
     __ANDROID__
     STRIP_CRASH_HANDLER
-    SUPPORT_EXTERNAL_CONFIG
-    HAVE_SECURE_GETENV=1
-    _FORTIFY_SOURCE=2
-    QT_CORE_LIB
-    QT_NETWORK_LIB
-    QT_GUI_LIB
-    QT_SVG_LIB
     CORE_USED_IN_ANDROID
-    TARGET_OS=android
+    SUPPORT_EXTERNAL_CONFIG
+    QT_NO_KEYWORDS
 )
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    add_compile_definitions(QT_NO_DEBUG NDEBUG)
-endif()
-
-# ---
-# Сбор исходных файлов
-# ---
-file(GLOB_RECURSE
-    CORE_SOURCES
+# --- Исходники (выберите нужные пути) ---
+file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
-    "${ICQ_ROOT}/corelib/*.cpp"
-    "${ICQ_ROOT}/gui.shared/*.cpp"
+    "${ICQ_ROOT}/gui/*.cpp"           # или gui.shared/ - проверьте структуру!
+    "${ICQ_ROOT}/corelib/*.cpp"        # если нужен
 )
 
-# Исключаем платформозависимый код других ОС
-list(FILTER CORE_SOURCES EXCLUDE REGEX ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp")
+list(FILTER CORE_SOURCES EXCLUDE REGEX ".*win32.*|.*_win\\..*|.*macos.*|.*_mac\\..*|.*_ios\\..*|.*stdafx\\.cpp")
 
-# ---
-# Создание библиотеки
-# ---
+# --- Библиотека ---
 add_library(icq_core SHARED
     jni_bridge.cpp
     ${CORE_SOURCES}
 )
 
-# ---
-# Пути заголовков
-# ---
+# --- Пути инклудов ---
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
     ${ICQ_ROOT}/core
-    ${ICQ_ROOT}/core/Voip/libvoip/include
-    ${ICQ_ROOT}/corelib
+    ${ICQ_ROOT}/gui                      # ← важно для styles/ и cache/
     ${ICQ_ROOT}/common.shared
-    ${ICQ_ROOT}/gui.shared
     ${ICQ_ROOT}/libomicron/include
     ${curl_SOURCE_DIR}/include
 )
 
-# Добавлены пути для Gui и Svg, чтобы SvgUtils.h нашел QPixmap
 target_include_directories(icq_core PRIVATE
     ${Qt6Core_INCLUDE_DIRS}
-    ${Qt6Network_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
     ${Qt6Svg_INCLUDE_DIRS}
 )
 
-# Внешние зависимости (Boost, RapidJSON)
-if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
-    target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
-endif()
-
-if(EXISTS "${ICQ_ROOT}/rapidjson/include")
-    target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
-endif()
-
-# ---
-# Свойства и Флаги компиляции
-# ---
-set_target_properties(icq_core PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    POSITION_INDEPENDENT_CODE ON
-    OUTPUT_NAME "icq_core"
-)
-
-target_compile_options(icq_core PRIVATE
-    -fexceptions
-    -frtti
-    -fPIC
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    -Wno-unused-variable
-    -Wno-mismatched-tags
-    -Wno-deprecated-declarations
-    -fdata-sections
-    -ffunction-sections
-)
-
-# ---
-# Линковка
-# ---
-find_library(log-lib log REQUIRED)
-find_library(z-lib z REQUIRED)
-find_library(android-lib android REQUIRED)
-
+# --- Линковка ---
 target_link_libraries(icq_core
-    libomicron
     Qt6::Core
     Qt6::Network
     Qt6::Gui
     Qt6::Svg
-    ${log-lib}
-    ${z-lib}
-    ${android-lib}
     libcurl
-    -Wl,--gc-sections
+    log
+    z
+    android
 )
 
-# ---
-# Финализация (Критически важно для Android в Qt6)
-# ---
+# Если есть libomicron:
+# target_link_libraries(icq_core libomicron)
+
+# --- Свойства ---
+set_target_properties(icq_core PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+
+# --- Android финализация (ВАЖНО!) ---
 if(ANDROID)
-    # Гарантируем, что JNI_OnLoad не будет вырезан оптимизатором
     target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
-    # Генерация json файлов для развертывания
     qt_finalize_target(icq_core)
 endif()
-
-# ---
-# Итоговый лог
-# ---
-message(STATUS "===================================================")
-message(STATUS "DZIN CORE BUILD CONFIGURATION COMPLETE")
-message(STATUS "Target ABI: ${ANDROID_ABI}")
-message(STATUS "Project: ${PROJECT_NAME}")
-message(STATUS "Qt Modules: Core, Network, Gui, Svg")
-message(STATUS "===================================================")
