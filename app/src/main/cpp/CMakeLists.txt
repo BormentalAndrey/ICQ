@@ -1,5 +1,3 @@
-# app/src/main/cpp/CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.22.1)
 
 project("icq_mobile_core" LANGUAGES CXX C)
@@ -18,16 +16,18 @@ else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
 
+message(STATUS "[DZIN] Project Root: ${ICQ_ROOT}")
+
 # =============================================
 # Поиск Qt6 для Android
 # =============================================
 
-# 1. Host-инструменты
+# 1. Host-инструменты (нужны для сборки)
 if(NOT QT_HOST_PATH)
     set(QT_HOST_PATH "${ICQ_ROOT}/Qt/gcc_64" CACHE PATH "Path to host Qt installation" FORCE)
 endif()
 
-# 2. Target Android
+# 2. Target Android (библиотеки под архитектуру)
 if(NOT QT_ANDROID_PATH)
     set(QT_ANDROID_PATH "${ICQ_ROOT}/Qt/android_arm64_v8a" CACHE PATH "Path to target Qt" FORCE)
 endif()
@@ -36,7 +36,7 @@ endif()
 list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
 
-# Явное указание путей к модулям Qt6
+# Явное указание путей к модулям Qt6 для стабильности в CI/Android Studio
 set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
 set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
 set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
@@ -53,7 +53,7 @@ message(STATUS "Using Target Qt: ${QT_ANDROID_PATH}")
 message(STATUS "---------------------------------------------------")
 
 # =============================================
-# CURL (для Android NDK)
+# CURL (интеграция через FetchContent)
 # =============================================
 
 include(FetchContent)
@@ -66,7 +66,20 @@ set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
 set(CURL_DISABLE_TESTS ON CACHE INTERNAL "")
 set(CURL_USE_OPENSSL OFF CACHE INTERNAL "")
+set(HTTP_ONLY ON CACHE INTERNAL "") # Оптимизация размера для мобильных устройств
 FetchContent_MakeAvailable(curl)
+
+# =============================================
+# Автогенерация конфигурации (если требуется)
+# =============================================
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config_data.h.in")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/config_data.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/config_data.h"
+        @ONLY
+    )
+endif()
 
 # =============================================
 # Подключение подпроектов (libomicron)
@@ -78,7 +91,7 @@ if(EXISTS "${ICQ_ROOT}/libomicron/CMakeLists.txt")
 endif()
 
 # =============================================
-# Глобальные определения
+# Глобальные определения (Production флаги)
 # =============================================
 
 add_compile_definitions(
@@ -94,6 +107,7 @@ add_compile_definitions(
     QT_GUI_LIB
     QT_SVG_LIB
     CORE_USED_IN_ANDROID
+    QT_NO_KEYWORDS # Защита от конфликтов emit/signals/slots
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
@@ -108,10 +122,11 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
     "${ICQ_ROOT}/corelib/*.cpp"
+    "${ICQ_ROOT}/gui/*.cpp"        # Добавлено для корректной сборки логики интерфейса
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Исключаем код других платформ
+# Исключаем код других платформ (Windows, macOS, iOS)
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
     ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
 )
@@ -126,25 +141,24 @@ add_library(icq_core SHARED
 )
 
 # =============================================
-# Пути заголовков
+# Пути заголовков (FIX: Исправляет ошибку cache/countries.h)
 # =============================================
 
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${ICQ_ROOT}
+    ${CMAKE_CURRENT_BINARY_DIR}       # Путь к сгенерирован config_data.h
+    ${ICQ_ROOT}                       # Базовый путь для всех инклюдов
     ${ICQ_ROOT}/core
-    ${ICQ_ROOT}/core/Voip/libvoip/
-    ${ICQ_ROOT}/core/Voip/libvoip/include         # для voip3.h
-    ${ICQ_ROOT}/core/Voip/libvoip/include/voip    # прямой путь к voip3.h
+    ${ICQ_ROOT}/gui                   # КРИТИЧНО: позволяет находить "cache/countries.h" и "styles/..."
+    ${ICQ_ROOT}/core/Voip/libvoip/include
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
-    ${ICQ_ROOT}/gui/cache                         # Добавлено для countries.h
-    ${ICQ_ROOT}/libomicron/
+    ${ICQ_ROOT}/libomicron/include
     ${curl_SOURCE_DIR}/include
 )
 
-# Пути Qt6 модулей (для SvgUtils.h и QPixmap)
+# Пути Qt6 модулей (необходимы для QPixmap, QSvgRenderer и SvgUtils.h)
 target_include_directories(icq_core PRIVATE
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Network_INCLUDE_DIRS}
@@ -152,7 +166,7 @@ target_include_directories(icq_core PRIVATE
     ${Qt6Svg_INCLUDE_DIRS}
 )
 
-# Boost и RapidJSON (если присутствуют)
+# Внешние зависимости: Boost и RapidJSON
 if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
 endif()
@@ -170,6 +184,9 @@ set_target_properties(icq_core PROPERTIES
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME "icq_core"
+    # Скрываем символы для уменьшения размера и безопасности (Production)
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
 
 target_compile_options(icq_core PRIVATE
@@ -204,7 +221,7 @@ target_link_libraries(icq_core
     ${z-lib}
     ${android-lib}
     libcurl
-    -Wl,--gc-sections
+    -Wl,--gc-sections # Удаление неиспользуемого кода при линковке
 )
 
 # =============================================
@@ -212,17 +229,17 @@ target_link_libraries(icq_core
 # =============================================
 
 if(ANDROID)
-    # Гарантируем, что JNI_OnLoad не будет вырезан оптимизатором
+    # Гарантируем, что точка входа JNI не будет вырезана оптимизатором
     target_link_options(icq_core PRIVATE
         "-Wl,--undefined=JNI_OnLoad"
     )
 
-    # Генерация .json файлов для развертывания
+    # Генерация .json файлов деплоя, необходимых для работы Qt на Android
     qt_finalize_target(icq_core)
 endif()
 
 # =============================================
-# Итоговый лог
+# Итоговый лог сборки
 # =============================================
 
 message(STATUS "==============================================================")
