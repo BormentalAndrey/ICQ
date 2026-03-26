@@ -231,7 +231,8 @@ namespace Data
 
     inline QString normalizeAimId(const QString& _aimId)
     {
-        const int pos = _aimId.indexOf(ql1s("@uin.icq"));
+        // ИСПРАВЛЕНИЕ: Замена ql1s на явный вызов QLatin1String
+        const int pos = _aimId.indexOf(QLatin1String("@uin.icq"));
         return pos == -1 ? _aimId : _aimId.left(pos);
     }
 
