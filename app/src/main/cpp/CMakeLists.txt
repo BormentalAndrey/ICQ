@@ -139,6 +139,7 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
+    ${ICQ_ROOT}/gui/cache                    # Добавлено для countries.h
     ${ICQ_ROOT}/libomicron/
     ${curl_SOURCE_DIR}/include
 )
