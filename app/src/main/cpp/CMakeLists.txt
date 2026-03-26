@@ -134,12 +134,12 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}
     ${ICQ_ROOT}/core
     ${ICQ_ROOT}/core/Voip/libvoip/
-    ${ICQ_ROOT}/core/Voip/libvoip/include   # Добавлено для voip3.h
-    ${ICQ_ROOT}/core/Voip/libvoip/include/voip   # Прямой путь к voip3.h
+    ${ICQ_ROOT}/core/Voip/libvoip/include         # для voip3.h
+    ${ICQ_ROOT}/core/Voip/libvoip/include/voip    # прямой путь к voip3.h
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
-    ${ICQ_ROOT}/gui/cache                    # Добавлено для countries.h
+    ${ICQ_ROOT}/gui/cache                         # Добавлено для countries.h
     ${ICQ_ROOT}/libomicron/
     ${curl_SOURCE_DIR}/include
 )
