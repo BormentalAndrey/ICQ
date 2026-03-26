@@ -18,7 +18,6 @@ android {
 
         externalNativeBuild {
             cmake {
-                // 1. Определяем корни библиотек (приоритет: Gradle Properties -> Env -> Default)
                 val boostRoot = project.findProperty("boost.root")?.toString() 
                     ?: System.getenv("BOOST_ROOT") ?: ""
                 
@@ -31,10 +30,8 @@ android {
                 val qtHostPath = project.findProperty("qt.host.path")?.toString()
                     ?: System.getenv("Qt6_DIR") ?: ""
 
-                // 2. Настройка путей проекта
                 val root = "${project.projectDir}/.."
 
-                // 3. Передача аргументов напрямую в CMake (Production Style)
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DBOOST_ROOT=$boostRoot",
@@ -44,7 +41,6 @@ android {
                     "-DICQ_PROJECT_ROOT=$root"
                 )
 
-                // 4. Флаги компилятора
                 cppFlags += listOf(
                     "-std=c++17",
                     "-fexceptions",
@@ -55,13 +51,12 @@ android {
                     "-O3",
                     "-flto",
                     "-Wall",
-                    // Передаем инклуды через флаги для совместимости с кодом
                     "-I$root",
                     "-I$root/core",
+                    "-I$root/gui", // Исправляет 'cache/countries.h'
                     "-I$root/corelib",
                     "-I$root/common.shared",
                     "-I$root/core/Voip",
-                    "-I$root/gui",
                     "-I$root/gui.shared",
                     "-I$boostRoot",
                     "-I$rapidjsonRoot"
@@ -75,23 +70,11 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            // Оптимизация нативного кода для релиза
-            externalNativeBuild {
-                cmake {
-                    arguments += "-DCMAKE_BUILD_TYPE=Release"
-                }
-            }
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Release" } }
         }
         debug {
-            externalNativeBuild {
-                cmake {
-                    arguments += "-DCMAKE_BUILD_TYPE=Debug"
-                }
-            }
+            externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Debug" } }
         }
     }
 
@@ -103,13 +86,7 @@ android {
     }
 
     packaging {
-        jniLibs {
-            // Важно для Qt и WebRTC: предотвращаем конфликты дубликатов STL
-            pickFirsts.add("lib/**/libc++_shared.so")
-        }
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
+        jniLibs { pickFirsts.add("lib/**/libc++_shared.so") }
     }
 
     compileOptions {
@@ -117,9 +94,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
     buildFeatures {
         viewBinding = true
@@ -128,18 +103,11 @@ android {
 }
 
 dependencies {
-    // Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    
-    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    
-    // VoIP / WebRTC
     implementation("io.github.webrtc-sdk:android:137.7151.05")
-    
-    // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 }
