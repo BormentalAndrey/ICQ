@@ -1,6 +1,10 @@
 #pragma once
 
 #include "StyleVariable.h"
+#include <QString>
+#include <QColor>
+#include <optional>
+#include <variant>
 
 namespace Styling
 {
