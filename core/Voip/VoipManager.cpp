@@ -1,5 +1,8 @@
 #include "stdafx.h"
 #include <memory>
+#include "../../common.shared/common_defs.h"
+#include <QtQml/Platform.h> // или #include "platform.h" в зависимости от вашей архитектуры
+
 #include <time.h>
 #include <string>
 #ifdef _WIN32
