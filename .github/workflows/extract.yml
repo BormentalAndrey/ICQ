@@ -1,19 +1,43 @@
-name: Extract OpenSSL
+name: Extract and Commit OpenSSL
 
 on: workflow_dispatch
 
 jobs:
   extract:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
     steps:
       - uses: actions/checkout@v4
       
-      - name: Extract
+      - name: Extract OpenSSL
         run: |
           tar -xzf openssl-android-arm64-only.tar.gz
-          ls -la
+          echo "✅ Extracted"
           
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openssl-files
-          path: ssl_3/
+      - name: Show structure
+        run: |
+          ls -la
+          echo ""
+          echo "OpenSSL files:"
+          find . -name "*.a" -o -name "*.h" | head -20
+          
+      - name: Commit extracted files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # Добавляем распакованные файлы
+          git add ssl_3/ 2>/dev/null || true
+          git add openssl-android/ 2>/dev/null || true
+          git add include/ 2>/dev/null || true
+          
+          # Коммитим если есть изменения
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Extract OpenSSL from archive"
+            git push
+            echo "✅ Committed extracted files"
+          fi
