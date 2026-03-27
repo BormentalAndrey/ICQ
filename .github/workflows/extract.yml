@@ -1,4 +1,4 @@
-name: Android Build
+name: Android Build with OpenSSL
 
 on:
   push:
@@ -13,7 +13,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Подгружаем сабмодули, если они есть
+          submodules: recursive
+          lfs: true  # Если архив больше 100MB
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -24,38 +25,34 @@ jobs:
       - name: Setup Android SDK/NDK
         uses: android-actions/setup-android@v3
 
+      - name: Extract OpenSSL archive
+        run: |
+          # Если архив в корне репозитория
+          if [ -f "openssl-android-arm64-only.tar.gz" ]; then
+            echo "📦 Extracting OpenSSL..."
+            mkdir -p openssl-android
+            tar -xzf openssl-android-arm64-only.tar.gz -C openssl-android/
+            ls -la openssl-android/
+            echo "✅ OpenSSL extracted to openssl-android/"
+          else
+            echo "⚠️ OpenSSL archive not found, skipping..."
+          fi
+          
+      - name: Setup OpenSSL environment
+        run: |
+          if [ -d "openssl-android" ]; then
+            # Найти путь к OpenSSL
+            OPENSSL_DIR=$(find openssl-android -type d -name "arm64-v8a" -o -name "ssl_3" | head -1 | xargs dirname 2>/dev/null || echo "openssl-android")
+            echo "OPENSSL_ROOT_DIR=$PWD/$OPENSSL_DIR" >> $GITHUB_ENV
+            echo "OPENSSL_INCLUDE_DIR=$PWD/$OPENSSL_DIR/include" >> $GITHUB_ENV
+            echo "OPENSSL_CRYPTO_LIBRARY=$PWD/$OPENSSL_DIR/arm64-v8a/libcrypto.a" >> $GITHUB_ENV
+            echo "OPENSSL_SSL_LIBRARY=$PWD/$OPENSSL_DIR/arm64-v8a/libssl.a" >> $GITHUB_ENV
+            
+            # Проверка файлов
+            ls -la $OPENSSL_DIR/arm64-v8a/
+          fi
+          
       - name: Build with Gradle
-        # Если в корне есть gradlew, собираем через него
-        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease 2>&1 | tee build.log
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk
-
-      - name: Upload build logs
-        if: always()  # Загружаем логи даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build.log
-            app/build/reports/
-            app/build/outputs/logs/
-            ~/.gradle/daemon/*/daemon-*.out.log
-          if-no-files-found: warn
-
-      - name: Upload Gradle reports
-        if: always()  # Загружаем отчеты даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-reports
-          path: |
-            **/build/reports/
-            **/build/outputs/logs/
-            **/build/test-results/
-          if-no-files-found: warn
+          ./gradlew assembleRelease
