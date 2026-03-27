@@ -1,58 +1,19 @@
-name: Android Build with OpenSSL
+name: Extract OpenSSL
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
-  build:
+  extract:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          lfs: true  # Если архив больше 100MB
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK/NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Extract OpenSSL archive
+      - uses: actions/checkout@v4
+      
+      - name: Extract
         run: |
-          # Если архив в корне репозитория
-          if [ -f "openssl-android-arm64-only.tar.gz" ]; then
-            echo "📦 Extracting OpenSSL..."
-            mkdir -p openssl-android
-            tar -xzf openssl-android-arm64-only.tar.gz -C openssl-android/
-            ls -la openssl-android/
-            echo "✅ OpenSSL extracted to openssl-android/"
-          else
-            echo "⚠️ OpenSSL archive not found, skipping..."
-          fi
+          tar -xzf openssl-android-arm64-only.tar.gz
+          ls -la
           
-      - name: Setup OpenSSL environment
-        run: |
-          if [ -d "openssl-android" ]; then
-            # Найти путь к OpenSSL
-            OPENSSL_DIR=$(find openssl-android -type d -name "arm64-v8a" -o -name "ssl_3" | head -1 | xargs dirname 2>/dev/null || echo "openssl-android")
-            echo "OPENSSL_ROOT_DIR=$PWD/$OPENSSL_DIR" >> $GITHUB_ENV
-            echo "OPENSSL_INCLUDE_DIR=$PWD/$OPENSSL_DIR/include" >> $GITHUB_ENV
-            echo "OPENSSL_CRYPTO_LIBRARY=$PWD/$OPENSSL_DIR/arm64-v8a/libcrypto.a" >> $GITHUB_ENV
-            echo "OPENSSL_SSL_LIBRARY=$PWD/$OPENSSL_DIR/arm64-v8a/libssl.a" >> $GITHUB_ENV
-            
-            # Проверка файлов
-            ls -la $OPENSSL_DIR/arm64-v8a/
-          fi
-          
-      - name: Build with Gradle
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openssl-files
+          path: ssl_3/
