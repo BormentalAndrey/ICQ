@@ -14,10 +14,21 @@ else()
 endif()
 
 # =============================================
-# Настройка Qt6
+# Настройка Qt6 (Исправление для Android NDK)
 # =============================================
+# 1. ОБЯЗАТЕЛЬНО: Разрешаем NDK искать пакеты в папке Qt для Android
+list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
-set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6")
+
+# 2. Указываем Qt путь к утилитам хоста (gcc_64), переданный из Gradle
+set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Host Qt tools path" FORCE)
+
+# 3. Жестко задаем пути к конфигурационным файлам модулей, чтобы избежать путаницы
+set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
+set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
+set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
+set(Qt6Gui_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Gui" CACHE PATH "" FORCE)
+set(Qt6Svg_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Svg" CACHE PATH "" FORCE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
 
