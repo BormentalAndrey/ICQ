@@ -1,43 +1,61 @@
-name: Extract and Commit OpenSSL
+name: Android Build
 
-on: workflow_dispatch
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
-  extract:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Extract OpenSSL
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # Подгружаем сабмодули, если они есть
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build with Gradle
+        # Если в корне есть gradlew, собираем через него
+        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
         run: |
-          tar -xzf openssl-android-arm64-only.tar.gz
-          echo "✅ Extracted"
-          
-      - name: Show structure
-        run: |
-          ls -la
-          echo ""
-          echo "OpenSSL files:"
-          find . -name "*.a" -o -name "*.h" | head -20
-          
-      - name: Commit extracted files
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          
-          # Добавляем распакованные файлы
-          git add ssl_3/ 2>/dev/null || true
-          git add openssl-android/ 2>/dev/null || true
-          git add include/ 2>/dev/null || true
-          
-          # Коммитим если есть изменения
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Extract OpenSSL from archive"
-            git push
-            echo "✅ Committed extracted files"
-          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease 2>&1 | tee build.log
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload build logs
+        if: always()  # Загружаем логи даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            app/build/reports/
+            app/build/outputs/logs/
+            ~/.gradle/daemon/*/daemon-*.out.log
+          if-no-files-found: warn
+
+      - name: Upload Gradle reports
+        if: always()  # Загружаем отчеты даже при ошибке сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/
+            **/build/outputs/logs/
+            **/build/test-results/
+          if-no-files-found: warn
