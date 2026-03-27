@@ -1,61 +1,46 @@
-name: Android Build
+name: Debug OpenSSL Extraction
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
-  build:
+  debug:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive # Подгружаем сабмодули, если они есть
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK/NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build with Gradle
-        # Если в корне есть gradlew, собираем через него
-        # Это соберет и C++ часть (через CMake/ndk-build), и Java часть
+      - uses: actions/checkout@v4
+      
+      - name: List files BEFORE extraction
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease 2>&1 | tee build.log
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk
-
-      - name: Upload build logs
-        if: always()  # Загружаем логи даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build.log
-            app/build/reports/
-            app/build/outputs/logs/
-            ~/.gradle/daemon/*/daemon-*.out.log
-          if-no-files-found: warn
-
-      - name: Upload Gradle reports
-        if: always()  # Загружаем отчеты даже при ошибке сборки
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-reports
-          path: |
-            **/build/reports/
-            **/build/outputs/logs/
-            **/build/test-results/
-          if-no-files-found: warn
+          echo "=== FILES BEFORE EXTRACTION ==="
+          ls -la
+          echo ""
+          echo "=== CHECK ARCHIVE SIZE ==="
+          ls -lh openssl-android-arm64-only.tar.gz
+          
+      - name: Extract archive
+        run: |
+          echo "=== EXTRACTING ==="
+          tar -xzvf openssl-android-arm64-only.tar.gz 2>&1
+          echo "Exit code: $?"
+          
+      - name: List files AFTER extraction
+        run: |
+          echo "=== FILES AFTER EXTRACTION ==="
+          ls -la
+          echo ""
+          echo "=== NEW DIRECTORIES ==="
+          find . -maxdepth 2 -type d | sort
+          echo ""
+          echo "=== SEARCH FOR .a FILES ==="
+          find . -name "*.a"
+          echo ""
+          echo "=== SEARCH FOR .h FILES ==="
+          find . -name "*.h" | head -20
+          echo ""
+          echo "=== SEARCH FOR openssl ANYTHING ==="
+          find . -name "*openssl*" -o -name "*ssl*" | head -20
+          
+      - name: Show archive contents
+        run: |
+          echo "=== WHAT'S INSIDE THE ARCHIVE? ==="
+          tar -tzf openssl-android-arm64-only.tar.gz | head -30
