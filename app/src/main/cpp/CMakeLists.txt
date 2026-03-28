@@ -88,11 +88,11 @@ list(FILTER CORE_SOURCES EXCLUDE REGEX
 add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
 
 # =============================================
-# Precompiled Headers (Эмуляция оригинала)
+# Precompiled Headers (Исправление NDK)
 # =============================================
-# Мы создаем stdafx.h в текущей папке и заставляем компилятор его использовать
+# ИСПРАВЛЕНИЕ 2: Замена target_precompiled_headers на прямое внедрение через флаги компилятора
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-    target_precompiled_headers(icq_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
+    target_compile_options(icq_core PRIVATE "-include" "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
 endif()
 
 # =============================================
