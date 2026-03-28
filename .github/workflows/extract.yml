@@ -38,7 +38,7 @@ jobs:
           find . -name "*.h" | head -20
           echo ""
           echo "=== SEARCH FOR openssl ANYTHING ==="
-          find . -name "*openssl*" -o -name "*ssl*" | head -20
+          find . \( -name "*openssl*" -o -name "*ssl*" \) | head -20
           
       - name: Show archive contents
         run: |
