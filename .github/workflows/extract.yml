@@ -8,6 +8,9 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       
       - name: List files BEFORE extraction
         run: |
@@ -44,3 +47,23 @@ jobs:
         run: |
           echo "=== WHAT'S INSIDE THE ARCHIVE? ==="
           tar -tzf openssl-android-arm64-only.tar.gz | head -30
+
+      - name: Commit and push extracted OpenSSL folder
+        run: |
+          echo "=== COMMITTING EXTRACTED FOLDER TO REPOSITORY ==="
+          
+          # Настраиваем git для коммита от имени GitHub Actions
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Добавляем все новые файлы и папки, которые появились после распаковки
+          git add .
+          
+          # Проверяем, есть ли изменения
+          if git diff --cached --quiet; then
+            echo "Нет новых изменений для коммита (папка уже была распакована ранее)"
+          else
+            git commit -m "Extract and commit OpenSSL Android arm64-only prebuilt libraries"
+            git push
+            echo "✅ Папка успешно распакована и сохранена в репозитории!"
+          fi
