@@ -33,10 +33,27 @@ set(Qt6Svg_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Svg" CACHE PATH "" FORCE)
 find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
 
 # =============================================
+# OPENSSL (Точные пути для нестандартной структуры)
+# =============================================
+# Указываем папку, внутри которой лежит папка openssl/ (с ssl.h и crypto.h)
+set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "OpenSSL include directory" FORCE)
+
+# Указываем точные пути к скомпилированным статическим библиотекам
+set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "OpenSSL crypto library" FORCE)
+set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "OpenSSL ssl library" FORCE)
+
+# Подтверждаем, что мы хотим статическую сборку (на всякий случай)
+set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Use static OpenSSL" FORCE)
+
+# =============================================
 # CURL
 # =============================================
 include(FetchContent)
 FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG curl-8_4_0)
+
+# Принудительно включаем поддержку OpenSSL в curl
+set(CURL_USE_OPENSSL ON CACHE BOOL "Enable OpenSSL in CURL" FORCE)
+
 set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(curl)
