@@ -14,46 +14,26 @@ else()
 endif()
 
 # =============================================
-# Настройка Qt6 (Исправление для Android NDK)
+# Настройка Qt6
 # =============================================
-# 1. ОБЯЗАТЕЛЬНО: Разрешаем NDK искать пакеты в папке Qt для Android
 list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
-
-# 2. Указываем Qt путь к утилитам хоста (gcc_64), переданный из Gradle
 set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Host Qt tools path" FORCE)
 
-# 3. Жестко задаем пути к конфигурационным файлам модулей, чтобы избежать путаницы
 set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
-set(Qt6Core_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Core" CACHE PATH "" FORCE)
-set(Qt6Network_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Network" CACHE PATH "" FORCE)
-set(Qt6Gui_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Gui" CACHE PATH "" FORCE)
-set(Qt6Svg_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6Svg" CACHE PATH "" FORCE)
-
 find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
 
 # =============================================
-# OPENSSL (Точные пути для нестандартной структуры)
+# OPENSSL & CURL
 # =============================================
-# Указываем папку, внутри которой лежит папка openssl/ (с ssl.h и crypto.h)
-set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "OpenSSL include directory" FORCE)
+set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "" FORCE)
+set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "" FORCE)
+set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "" FORCE)
+set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "" FORCE)
 
-# Указываем точные пути к скомпилированным статическим библиотекам
-set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "OpenSSL crypto library" FORCE)
-set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "OpenSSL ssl library" FORCE)
-
-# Подтверждаем, что мы хотим статическую сборку (на всякий случай)
-set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Use static OpenSSL" FORCE)
-
-# =============================================
-# CURL
-# =============================================
 include(FetchContent)
 FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG curl-8_4_0)
-
-# Принудительно включаем поддержку OpenSSL в curl
-set(CURL_USE_OPENSSL ON CACHE BOOL "Enable OpenSSL in CURL" FORCE)
-
+set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
 set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(curl)
@@ -80,7 +60,7 @@ file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/gui.shared/*.cpp"
 )
 
-# Исключаем несовместимое
+# Исключаем специфичные для платформ файлы
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
     ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
 )
@@ -88,10 +68,14 @@ list(FILTER CORE_SOURCES EXCLUDE REGEX
 add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
 
 # =============================================
-# Precompiled Headers (Исправление NDK)
+# ИСПРАВЛЕНИЕ: Инъекция Precompiled Header (PCH)
 # =============================================
-# ИСПРАВЛЕНИЕ 2: Замена target_precompiled_headers на прямое внедрение через флаги компилятора
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
+# Поскольку файлы в common.shared и gui не включают QFont и im_assert напрямую,
+# мы принудительно внедряем главный stdafx.h из core или создаем свой.
+if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
+    # Используем существующий stdafx.h как глобальный заголовок
+    target_compile_options(icq_core PRIVATE "-include" "${ICQ_ROOT}/core/stdafx.h")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
     target_compile_options(icq_core PRIVATE "-include" "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
 endif()
 
@@ -102,7 +86,7 @@ target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
     ${ICQ_ROOT}/core
-    ${ICQ_ROOT}/gui        # Важно для cache/countries.h
+    ${ICQ_ROOT}/gui
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
@@ -110,7 +94,7 @@ target_include_directories(icq_core PRIVATE
     ${curl_SOURCE_DIR}/include
 )
 
-# Подключаем Qt инклуды явно
+# Явное подключение Qt инклудов для всех файлов
 target_include_directories(icq_core SYSTEM PRIVATE
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Gui_INCLUDE_DIRS}
@@ -127,7 +111,7 @@ if(EXISTS "${ICQ_ROOT}/rapidjson/include")
 endif()
 
 # =============================================
-# Флаги и Линковка
+# Линковка
 # =============================================
 set_target_properties(icq_core PROPERTIES 
     CXX_STANDARD 17 
