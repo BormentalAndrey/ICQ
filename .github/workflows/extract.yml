@@ -22,28 +22,95 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      # СОЗДАЕМ ПАПКУ ДЛЯ ЛОГОВ САМЫМ ПЕРВЫМ ШАГОМ
       - name: Создание директории для логов
         run: |
           mkdir -p logs
           mkdir -p build/reports
+          echo "=== Логи сборки CI ===" > logs/ci.log
+          echo "Дата: $(date)" >> logs/ci.log
+          echo "Раннер: ${{ runner.os }}" >> logs/ci.log
+          echo "Ветка: ${{ github.ref_name }}" >> logs/ci.log
+          echo "Коммит: ${{ github.sha }}" >> logs/ci.log
+          echo "" >> logs/ci.log
 
       - name: Установка Java 17
+        id: java_setup
+        run: |
+          echo "=== Установка Java 17 ===" | tee -a logs/ci.log
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Установка Android SDK
+      - name: Установка Android SDK (с сохранением логов ошибок)
+        id: android_sdk
+        continue-on-error: true  # Не останавливаем workflow при ошибке
+        run: |
+          echo "=== Установка Android SDK ===" | tee -a logs/android_sdk.log
+          echo "Время: $(date)" >> logs/android_sdk.log
+          echo "Попытка установки Android SDK..." >> logs/android_sdk.log
         uses: android-actions/setup-android@v3
         with:
-          # Каждый пакет на новой строке
           packages: |
             platform-tools
             platforms;android-33
             platforms;android-34
             build-tools;34.0.0
           ndk-version: "26.1.10909125"
+
+      # Если установка SDK не удалась, сохраняем подробную диагностику
+      - name: Диагностика ошибки Android SDK
+        if: steps.android_sdk.outcome == 'failure'
+        run: |
+          echo "=== ❌ ОШИБКА УСТАНОВКИ ANDROID SDK ===" | tee -a logs/android_sdk_error.log
+          echo "Дата: $(date)" >> logs/android_sdk_error.log
+          echo "" >> logs/android_sdk_error.log
+          
+          echo "1. Проверка переменных окружения:" >> logs/android_sdk_error.log
+          echo "ANDROID_HOME: $ANDROID_HOME" >> logs/android_sdk_error.log
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT" >> logs/android_sdk_error.log
+          echo "" >> logs/android_sdk_error.log
+          
+          echo "2. Проверка наличия sdkmanager:" >> logs/android_sdk_error.log
+          if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "✅ sdkmanager найден" >> logs/android_sdk_error.log
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --version >> logs/android_sdk_error.log 2>&1
+          elif [ -f "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+            echo "✅ sdkmanager найден (старая версия)" >> logs/android_sdk_error.log
+            $ANDROID_HOME/tools/bin/sdkmanager --version >> logs/android_sdk_error.log 2>&1
+          else
+            echo "❌ sdkmanager НЕ НАЙДЕН" >> logs/android_sdk_error.log
+            echo "Поиск sdkmanager:" >> logs/android_sdk_error.log
+            find /usr/local/lib/android/sdk -name "sdkmanager" 2>/dev/null >> logs/android_sdk_error.log
+          fi
+          echo "" >> logs/android_sdk_error.log
+          
+          echo "3. Содержимое SDK:" >> logs/android_sdk_error.log
+          ls -la /usr/local/lib/android/sdk/ >> logs/android_sdk_error.log 2>&1 || echo "SDK не найден" >> logs/android_sdk_error.log
+          echo "" >> logs/android_sdk_error.log
+          
+          echo "4. Попытка установки вручную:" >> logs/android_sdk_error.log
+          if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "Попытка установки platform-tools:" >> logs/android_sdk_error.log
+            echo y | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" >> logs/android_sdk_error.log 2>&1
+            echo "Попытка установки platform 33:" >> logs/android_sdk_error.log
+            echo y | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" >> logs/android_sdk_error.log 2>&1
+          fi
+          
+          echo "" >> logs/android_sdk_error.log
+          echo "=== Диагностика завершена ===" >> logs/android_sdk_error.log
+          
+          # Выводим ошибку в консоль
+          cat logs/android_sdk_error.log
+
+      - name: Проверка успешности установки SDK
+        if: steps.android_sdk.outcome == 'failure'
+        run: |
+          echo "❌ Установка Android SDK не удалась!"
+          echo "Логи сохранены в артефактах"
+          exit 1
 
       - name: Кэширование Gradle
         uses: actions/cache@v4
@@ -104,18 +171,23 @@ jobs:
           chmod +x gradlew
           ./gradlew test --stacktrace >> logs/tests.log 2>&1 || echo "⚠️ Тесты не выполнены" | tee -a logs/tests.log
 
+      # СОХРАНЯЕМ ВСЕ ЛОГИ, ДАЖЕ ЕСЛИ ОШИБКА НА РАННИХ ЭТАПАХ
       - name: Сохранение ВСЕХ логов и артефактов
-        if: always()
+        if: always()  # ВСЕГДА сохраняем, даже при ошибке
         uses: actions/upload-artifact@v4
         with:
-          name: ci-artifacts-${{ github.run_number }}
+          name: ci-artifacts-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
             logs/
             **/build/reports/
             **/build/test-results/
             **/.cxx/**/*.log
             app/build/outputs/apk/
+            # Сохраняем информацию о системе
+            /usr/local/lib/android/sdk/sdkmanager-list.txt
           retention-days: 7
+          # Если нет файлов, не падаем
+          if-no-files-found: ignore
 
       - name: Вывод ошибки в консоль (если есть)
         if: failure()
@@ -123,10 +195,35 @@ jobs:
           echo "========================================="
           echo "❌ СБОРКА ПРОВАЛИЛАСЬ ❌"
           echo "========================================="
-          echo "Код ошибки: $BUILD_EXIT_CODE"
-          echo "Полные логи в артефакте: ci-artifacts-${{ github.run_number }}"
-          echo "========================================="
-          if [ -f logs/error_summary.txt ]; then
-            echo "Краткое описание ошибки:"
+          echo "Причина:"
+          if [ -f logs/android_sdk_error.log ]; then
+            echo "Ошибка установки Android SDK:"
+            head -20 logs/android_sdk_error.log
+          elif [ -f logs/error_summary.txt ]; then
+            echo "Ошибка сборки:"
             cat logs/error_summary.txt
+          else
+            echo "Смотрите полные логи в артефактах: ci-artifacts-${{ github.run_number }}-${{ github.run_attempt }}"
           fi
+          echo "========================================="
+
+      # Дополнительный шаг для сохранения полной диагностики при любой ошибке
+      - name: Сбор диагностической информации
+        if: failure()
+        run: |
+          echo "=== ДИАГНОСТИЧЕСКАЯ ИНФОРМАЦИЯ ===" > logs/diagnostic.log
+          echo "Дата: $(date)" >> logs/diagnostic.log
+          echo "OS: ${{ runner.os }}" >> logs/diagnostic.log
+          echo "GitHub Run ID: ${{ github.run_id }}" >> logs/diagnostic.log
+          echo "" >> logs/diagnostic.log
+          
+          echo "=== Переменные окружения ===" >> logs/diagnostic.log
+          env | sort >> logs/diagnostic.log
+          echo "" >> logs/diagnostic.log
+          
+          echo "=== Информация о диске ===" >> logs/diagnostic.log
+          df -h >> logs/diagnostic.log
+          echo "" >> logs/diagnostic.log
+          
+          echo "=== Процессы ===" >> logs/diagnostic.log
+          ps aux >> logs/diagnostic.log
