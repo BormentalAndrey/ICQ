@@ -1,59 +1,221 @@
-# .github/workflows/ci.yml
-
-name: CI Pipeline
+name: Android CI Build
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
+  workflow_dispatch: # Возможность ручного запуска
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+    # Таймаут для предотвращения зависания
+    timeout-minutes: 30
     
-    - name: Create logs directory
-      run: mkdir -p logs
-    
-    - name: Build project
-      run: |
-        echo "Starting build..." | tee logs/build.log
-        your-build-command 2>&1 | tee -a logs/build.log
-      continue-on-error: true
-    
-    - name: Upload build logs
-      if: always()  # Всегда загружать логи, даже при ошибке
-      uses: actions/upload-artifact@v3
-      with:
-        name: build-logs
-        path: logs/
-        retention-days: 7
+    # Стратегия для отладки
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
 
-  test:
-    runs-on: ubuntu-latest
-    needs: build
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Create logs directory
-      run: mkdir -p logs
-    
-    - name: Run tests
-      run: |
-        echo "Running tests..." | tee logs/test.log
-        your-test-command 2>&1 | tee -a logs/test.log
-      continue-on-error: true
-    
-    - name: Upload test logs
-      if: always()
-      uses: actions/upload-artifact@v3
-      with:
-        name: test-logs
-        path: logs/
-        retention-days: 7
+      - name: Checkout репозитория
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Создание директории для логов
+        run: |
+          mkdir -p logs
+          mkdir -p build/reports
+
+      - name: Установка Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Установка Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: "26.1.10909125"
+          packages: |
+            platform-tools
+            platforms;android-33
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;26.1.10909125
+
+      - name: Кэширование Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            **/.cxx
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Проверка зависимостей Qt
+        run: |
+          echo "=== Проверка Qt зависимостей ===" | tee -a logs/deps_check.log
+          if [ -d "Qt/android_arm64_v8a" ]; then
+            echo "✅ Qt найден в Qt/android_arm64_v8a" | tee -a logs/deps_check.log
+            ls -la Qt/android_arm64_v8a >> logs/deps_check.log 2>&1
+          else
+            echo "⚠️  ВНИМАНИЕ: Qt не найден в Qt/android_arm64_v8a" | tee -a logs/deps_check.log
+            echo "Поиск Qt в альтернативных путях:" | tee -a logs/deps_check.log
+            find . -type d -name "*qt*" -o -name "*Qt*" 2>/dev/null | tee -a logs/deps_check.log
+          fi
+          
+      - name: Проверка зависимостей OpenSSL
+        run: |
+          echo "=== Проверка OpenSSL зависимостей ===" | tee -a logs/deps_check.log
+          if [ -d "Openssl-android-arm64/arm64-v8a" ]; then
+            echo "✅ OpenSSL найден в Openssl-android-arm64/arm64-v8a" | tee -a logs/deps_check.log
+            ls -la Openssl-android-arm64/arm64-v8a >> logs/deps_check.log 2>&1
+          else
+            echo "⚠️  ВНИМАНИЕ: OpenSSL не найден в Openssl-android-arm64/arm64-v8a" | tee -a logs/deps_check.log
+            echo "Поиск OpenSSL в альтернативных путях:" | tee -a logs/deps_check.log
+            find . -type d -name "*openssl*" -o -name "*OpenSSL*" 2>/dev/null | tee -a logs/deps_check.log
+          fi
+
+      - name: Разрешение на выполнение gradlew
+        run: chmod +x gradlew
+
+      - name: Проверка Gradle Wrapper
+        run: |
+          echo "=== Проверка Gradle Wrapper ===" | tee -a logs/gradle_check.log
+          ./gradlew --version >> logs/gradle_check.log 2>&1
+          if [ $? -ne 0 ]; then
+            echo "❌ Gradle Wrapper не работает" | tee -a logs/gradle_check.log
+            exit 1
+          fi
+
+      - name: Очистка предыдущих сборок
+        run: |
+          echo "=== Очистка предыдущих сборок ===" | tee -a logs/clean.log
+          ./gradlew clean --stacktrace >> logs/clean.log 2>&1 || true
+
+      - name: Сборка проекта (Assemble Release)
+        id: build
+        run: |
+          echo "=== Начало сборки $(date) ===" | tee -a logs/build.log
+          echo "Запуск: ./gradlew assembleRelease --stacktrace --info" | tee -a logs/build.log
+          
+          # Сохраняем полный вывод и код ошибки
+          ./gradlew assembleRelease --stacktrace --info >> logs/build.log 2>&1
+          BUILD_EXIT_CODE=$?
+          
+          echo "=== Код завершения сборки: $BUILD_EXIT_CODE ===" | tee -a logs/build.log
+          echo "BUILD_EXIT_CODE=$BUILD_EXIT_CODE" >> $GITHUB_ENV
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "❌ Сборка завершилась с ошибкой!" | tee -a logs/build.log
+            echo "Последние 50 строк лога:" | tee -a logs/build.log
+            tail -50 logs/build.log | tee -a logs/build.log
+            exit $BUILD_EXIT_CODE
+          else
+            echo "✅ Сборка успешно завершена!" | tee -a logs/build.log
+          fi
+        continue-on-error: true
+
+      - name: Сборка тестов (опционально)
+        if: always()
+        run: |
+          echo "=== Запуск тестов ===" | tee -a logs/tests.log
+          ./gradlew test --stacktrace >> logs/tests.log 2>&1 || echo "⚠️ Тесты не найдены или не выполнены" | tee -a logs/tests.log
+
+      - name: Сбор артефактов (Все логи и отчеты)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            logs/
+            **/build/reports/
+            **/build/outputs/logs/
+            **/build/test-results/
+            **/.cxx/**/*.log
+            **/.cxx/**/build_output.txt
+            **/build/outputs/apk/debug/output-metadata.json
+            **/build/intermediates/
+          retention-days: 7
+          compression-level: 6
+
+      - name: Сбор артефактов (APK при успешной сборке)
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.aab
+          retention-days: 14
+          compression-level: 0
+
+      - name: Сбор артефактов (Debug APK для отладки)
+        if: steps.build.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/
+            app/build/intermediates/
+            **/build/tmp/
+          retention-days: 3
+          compression-level: 6
+
+      - name: Генерация отчета об ошибках
+        if: failure()
+        run: |
+          echo "=== 📋 ОТЧЕТ ОБ ОШИБКЕ ===" > error_report.md
+          echo "Дата: $(date)" >> error_report.md
+          echo "Репозиторий: ${{ github.repository }}" >> error_report.md
+          echo "Ветка: ${{ github.ref_name }}" >> error_report.md
+          echo "Коммит: ${{ github.sha }}" >> error_report.md
+          echo "" >> error_report.md
+          echo "## Код ошибки сборки: $BUILD_EXIT_CODE" >> error_report.md
+          echo "" >> error_report.md
+          echo "## Последние 100 строк лога сборки:" >> error_report.md
+          echo '```' >> error_report.md
+          tail -100 logs/build.log >> error_report.md 2>/dev/null || echo "Лог не найден" >> error_report.md
+          echo '```' >> error_report.md
+          echo "" >> error_report.md
+          echo "## Проверка зависимостей:" >> error_report.md
+          echo '```' >> error_report.md
+          cat logs/deps_check.log >> error_report.md 2>/dev/null || echo "Лог зависимостей не найден" >> error_report.md
+          echo '```' >> error_report.md
+          
+      - name: Загрузка отчета об ошибках
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-report
+          path: error_report.md
+          retention-days: 30
+
+      - name: Очистка Gradle кэша при ошибке
+        if: failure()
+        run: |
+          echo "=== Очистка Gradle кэша для следующего запуска ==="
+          rm -rf ~/.gradle/caches/transforms-*
+          rm -rf ~/.gradle/caches/build-cache-*
+
+      - name: Отправка уведомления в Telegram (опционально)
+        if: failure() && secrets.TELEGRAM_BOT_TOKEN != ''
+        run: |
+          MESSAGE="❌ *Ошибка сборки Android*%0A"
+          MESSAGE="${MESSAGE}Репозиторий: ${{ github.repository }}%0A"
+          MESSAGE="${MESSAGE}Ветка: ${{ github.ref_name }}%0A"
+          MESSAGE="${MESSAGE}Коммит: ${{ github.sha }}%0A"
+          MESSAGE="${MESSAGE}Статус: ${{ job.status }}%0A"
+          MESSAGE="${MESSAGE}Ссылка: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -d text="$MESSAGE" \
+            -d parse_mode="Markdown" || true
