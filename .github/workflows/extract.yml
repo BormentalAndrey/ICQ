@@ -111,7 +111,9 @@ jobs:
         if: always()
         run: |
           echo "=== Тесты ===" | tee -a logs/tests.log
-          ./gradlew test --stacktrace >> logs/tests.log 2>&1 || true
+          # Убеждаемся, что gradlew имеет права на выполнение
+          chmod +x gradlew
+          ./gradlew test --stacktrace >> logs/tests.log 2>&1 || echo "⚠️ Тесты не найдены или не выполнены" | tee -a logs/tests.log
 
       - name: Сохранение логов и отчетов
         if: always()
