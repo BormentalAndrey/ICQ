@@ -1,72 +1,62 @@
-name: Debug OpenSSL Extraction
+name: Android CI Build
 
-on: workflow_dispatch
-
-permissions:
-  contents: write
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  debug:
+  build:
     runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-      
-      - name: List files BEFORE extraction
-        run: |
-          echo "=== FILES BEFORE EXTRACTION ==="
-          ls -la
-          echo ""
-          echo "=== CHECK ARCHIVE SIZE ==="
-          ls -lh openssl-android-arm64-only.tar.gz
-          
-      - name: Extract archive
-        run: |
-          echo "=== EXTRACTING ==="
-          tar -xzvf openssl-android-arm64-only.tar.gz 2>&1
-          echo "Exit code: $?"
-          
-      - name: List files AFTER extraction
-        run: |
-          echo "=== FILES AFTER EXTRACTION ==="
-          ls -la
-          echo ""
-          echo "=== NEW DIRECTORIES ==="
-          find . -maxdepth 2 -type d | sort
-          echo ""
-          echo "=== SEARCH FOR .a FILES ==="
-          find . -name "*.a"
-          echo ""
-          echo "=== SEARCH FOR .h FILES ==="
-          find . -name "*.h" | head -20
-          echo ""
-          echo "=== SEARCH FOR openssl ANYTHING ==="
-          find . \( -name "*openssl*" -o -name "*ssl*" \) | head -20
-          
-      - name: Show archive contents
-        run: |
-          echo "=== WHAT'S INSIDE THE ARCHIVE? ==="
-          tar -tzf openssl-android-arm64-only.tar.gz | head -30
 
-      - name: Commit and push extracted OpenSSL folder
+    steps:
+      - name: Checkout Репозитория
+        uses: actions/checkout@v4
+
+      - name: Установка Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Установка Android SDK и NDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Указываем NDK, который прописан у вас в build.gradle.kts
+          ndk-version: "26.1.10909125"
+
+      # ВАЖНО: Если Qt и OpenSSL не в репозитории, здесь должен быть шаг их загрузки.
+      # Если они лежат в папках в корне проекта, проверяем их наличие.
+      - name: Проверка зависимостей (Qt & OpenSSL)
         run: |
-          echo "=== COMMITTING EXTRACTED FOLDER TO REPOSITORY ==="
-          
-          # Настраиваем git для коммита от имени GitHub Actions
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Добавляем все новые файлы и папки, которые появились после распаковки
-          git add .
-          
-          # Проверяем, есть ли изменения
-          if git diff --cached --quiet; then
-            echo "Нет новых изменений для коммита (папка уже была распакована ранее)"
-          else
-            git commit -m "Extract and commit OpenSSL Android arm64-only prebuilt libraries"
-            git push
-            echo "✅ Папка успешно распакована и сохранена в репозитории!"
-          fi
+          ls -d Qt/android_arm64_v8a || echo "Внимание: Папка Qt не найдена!"
+          ls -d Openssl-android-arm64/arm64-v8a || echo "Внимание: Папка OpenSSL не найдена!"
+
+      - name: Разрешение на выполнение gradlew
+        run: chmod +x gradlew
+
+      - name: Сборка проекта (Assemble Release)
+        run: ./gradlew assembleRelease --stacktrace
+        # Мы используем continue-on-error: false, чтобы билд падал при ошибке, 
+        # но шаг выгрузки артефактов ниже сработает в любом случае.
+
+      - name: Сбор Артефактов (Логи сборки)
+        if: always() # Выполнять даже если сборка упала
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            **/.cxx/
+            build.log
+          retention-days: 5
+
+      - name: Сбор Артефактов (APK)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
