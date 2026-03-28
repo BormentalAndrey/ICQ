@@ -24,7 +24,7 @@ android {
                 val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() 
                     ?: System.getenv("RAPIDJSON_ROOT") ?: ""
 
-                // ИСПРАВЛЕНИЕ 1: Ищем Qt так же надежно, как мы это сделали в модуле core
+                // ИСПРАВЛЕНИЕ: Автоматическое определение путей к Qt в корне проекта
                 val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
                 val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
 
@@ -51,16 +51,15 @@ android {
                     "-Wall",
                     "-I$root",
                     "-I$root/core",
-                    "-I$root/gui", // Исправляет 'cache/countries.h'
+                    "-I$root/gui", 
                     "-I$root/corelib",
                     "-I$root/common.shared",
-                    "-I$root/core/Voip",
                     "-I$root/gui.shared",
                     "-I$boostRoot",
                     "-I$rapidjsonRoot"
                 ).filter { it.isNotEmpty() }
 
-                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+                abiFilters.addAll(listOf("arm64-v8a")) // Оставляем arm64 для ускорения сборки
             }
         }
     }
