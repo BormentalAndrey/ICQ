@@ -24,11 +24,9 @@ android {
                 val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() 
                     ?: System.getenv("RAPIDJSON_ROOT") ?: ""
 
-                val qtAndroidPath = project.findProperty("qt.android.path")?.toString()
-                    ?: System.getenv("Qt6_ANDROID_DIR") ?: ""
-
-                val qtHostPath = project.findProperty("qt.host.path")?.toString()
-                    ?: System.getenv("Qt6_DIR") ?: ""
+                // ИСПРАВЛЕНИЕ 1: Ищем Qt так же надежно, как мы это сделали в модуле core
+                val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
+                val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
 
                 val root = "${project.projectDir}/.."
 
