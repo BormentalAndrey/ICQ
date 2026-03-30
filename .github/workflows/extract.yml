@@ -1,10 +1,10 @@
 name: Auto Fix Project Files
 
 on:
-  workflow_dispatch: # Позволяет запустить исправление вручную одной кнопкой
+  workflow_dispatch:
 
 permissions:
-  contents: write # Даем полные права на изменение кода
+  contents: write
 
 jobs:
   fix-files:
@@ -15,7 +15,11 @@ jobs:
 
       - name: Fix app/src/main/cpp/CMakeLists.txt
         run: |
-          cat << 'EOF' > app/src/main/cpp/CMakeLists.txt
+          # Ищем файл CMakeLists.txt в cpp директории, чтобы избежать ошибок в пути
+          CMAKE_FILE=$(find . -path "*/src/main/cpp/CMakeLists.txt" | head -n 1)
+          if [ -z "$CMAKE_FILE" ]; then echo "CMakeLists.txt not found"; exit 1; fi
+          
+          cat << 'EOF' > "$CMAKE_FILE"
           cmake_minimum_required(VERSION 3.22.1)
           project("icq_mobile_core" LANGUAGES CXX C)
           cmake_policy(SET CMP0074 NEW)
@@ -113,15 +117,30 @@ jobs:
           endif()
           EOF
 
-      - name: Fix Requirements/common.cmake
+      - name: Fix common.cmake
         run: |
-          # Вставляем макросы в начало файла, не удаляя остальное
-          sed -i '1i macro(find_sources VAR DBG_PATH EXT)\n    file(GLOB_RECURSE ${VAR} "${DBG_PATH}/*.${EXT}")\nendmacro()\n\nmacro(set_source_group GROUP_NAME ROOT_PATH)\nendmacro()\n\nmacro(use_precompiled_header_linux PCH_VAR PCH_HEADER SOURCES)\n    set(${PCH_VAR} "${PCH_HEADER}")\nendmacro()\n' Requirements/common.cmake
+          # Ищем файл common.cmake игнорируя регистр (Requirements vs requirements)
+          COMMON_FILE=$(find . -iname "common.cmake" | grep -i "requirements" | head -n 1)
+          
+          if [ -z "$COMMON_FILE" ]; then
+            echo "Error: common.cmake not found in any requirements folder"
+            exit 1
+          fi
+          
+          echo "Found common.cmake at: $COMMON_FILE"
+          
+          # Проверяем, не добавлены ли макросы уже ранее
+          if ! grep -q "macro(find_sources" "$COMMON_FILE"; then
+            sed -i '1i macro(find_sources VAR DBG_PATH EXT)\n    file(GLOB_RECURSE ${VAR} "${DBG_PATH}/*.${EXT}")\nendmacro()\n\nmacro(set_source_group GROUP_NAME ROOT_PATH)\nendmacro()\n\nmacro(use_precompiled_header_linux PCH_VAR PCH_HEADER SOURCES)\n    set(${PCH_VAR} "${PCH_HEADER}")\nendmacro()\n' "$COMMON_FILE"
+            echo "Macros added successfully."
+          else
+            echo "Macros already exist, skipping."
+          fi
 
       - name: Commit and Push changes
         run: |
           git config --global user.name "Dzin Fix Bot"
           git config --global user.email "bot@dzin.app"
           git add .
-          git commit -m "chore: auto-fix CMake configurations and missing macros" || echo "No changes to commit"
+          git commit -m "chore: auto-fix CMake configurations and paths" || echo "No changes to commit"
           git push
