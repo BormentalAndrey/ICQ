@@ -1,6 +1,11 @@
 #pragma once
-#include "textrendering/TextRendering.h"
+#include <functional>
+#include <memory>
+#include <vector>
+#include <optional>
+#include <map>
 
+#include "textrendering/TextRendering.h"
 #include "../styles/StyleVariable.h"
 #include "../styles/ThemeColor.h"
 
@@ -20,6 +25,13 @@ namespace Ui
 
     namespace TextRendering
     {
+        // Предварительные объявления типов для устранения ошибок компиляции
+        class BaseDrawingBlock;
+        using BaseDrawingBlockPtr = std::unique_ptr<BaseDrawingBlock>;
+        enum class BlockType : int;
+        struct TextWordWithBoundary;
+        class TextWord;
+
         class TextUnit
         {
         public:
