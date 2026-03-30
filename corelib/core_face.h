@@ -41,9 +41,10 @@ namespace core
     };
 
     // --- Предварительные объявления ---
-    class iconnector;
-    class icore_factory;
-    typedef std::shared_ptr<class icollection> coll_ptr;
+    struct iconnector;
+    struct icore_factory;
+    struct icollection;
+    typedef std::shared_ptr<icollection> coll_ptr;
     typedef std::map<std::string, std::string> event_props_type;
 
     /**
@@ -73,7 +74,6 @@ namespace core
     // --- Вспомогательные структуры (icollection, iarray и т.д.) ---
     struct iarray : ibase
     {
-        // Исправлено: добавлены недостающие методы изменения массива
         virtual void reserve(int32_t size) = 0;
         virtual void push_back(ivalue* value) = 0;
         
