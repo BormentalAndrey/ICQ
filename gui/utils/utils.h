@@ -9,19 +9,26 @@
 #include "SvgUtils.h"
 #include "../styles/ThemeParameters.h"
 
-// Добавленные инклюды для исправления ошибок компиляции
-#include <QMimeData>
-#include <QStyle>
+// Базовые инклюды Qt, которые работают на Android
+#include <QObject>
 #include <QBuffer>
 #include <QIODevice>
 #include <QNetworkProxy>
 #include <QEvent>
 #include <QDebug>
 #include <typeinfo>
+#include <QStringView>
+#include <QDataStream>
+
+// Исключаем QtWidgets для Android, так как их нет в составе сборки
+#if !defined(Q_OS_ANDROID)
+#include <QMimeData>
+#include <QStyle>
+#include <QWidget>
+#endif
 
 class QApplication;
 class QScreen;
-class QWidget; // Добавлено для SetProxyStyle
 
 #ifdef _WIN32
 #include <qt_windows.h>
@@ -37,7 +44,7 @@ namespace Ui
     class PageBase;
     enum class ConferenceType;
 
-    // ИСПРАВЛЕНИЕ: Добавлены пропущенные перечисления, на которые ссылается код ниже
+    // Эти типы должны быть доступны всегда для сигнатур функций
     enum class KeyToSendMessage {
         Enter,
         CtrlEnter,
@@ -59,8 +66,10 @@ namespace Ui
 
 namespace Debug
 {
-    // ИСПРАВЛЕНИЕ: QMimeData теперь известен благодаря инклюду
+#if !defined(Q_OS_ANDROID)
     void debugFormattedText(QMimeData* _mime);
+#endif
+
     void dumpQtEvent(QEvent* _event, QStringView _context = {});
 
     template <typename This, typename FuncName>
@@ -77,16 +86,15 @@ namespace Debug
 
 namespace Utils
 {
-    // ИСПРАВЛЕНИЕ: QStyle теперь известен
+#if !defined(Q_OS_ANDROID)
+    // QStyle и QWidget не существуют в Android-сборке ядра
     void SetProxyStyle(QWidget* _widget, QStyle* _style);
-
-    // ... (остальные существующие объявления функций) ...
+#endif
 
     template <typename T>
     QByteArray serialize(const T& _val)
     {
         QByteArray array;
-        // ИСПРАВЛЕНИЕ: QBuffer и QIODevice теперь известны
         QBuffer b(&array);
         b.open(QIODevice::WriteOnly);
         QDataStream s(&b);
@@ -94,7 +102,6 @@ namespace Utils
         return array;
     }
 
-    // ИСПРАВЛЕНИЕ: Использование определенных выше перечислений Ui
     using SendKeysIndex = std::vector<std::pair<QString, Ui::KeyToSendMessage>>;
     const SendKeysIndex& getSendKeysIndex();
 
@@ -107,11 +114,8 @@ namespace Utils
 
     struct ProxySettings
     {
-        // ИСПРАВЛЕНИЕ: QNetworkProxy теперь известен
         static QNetworkProxy::ProxyType proxyType(core::proxy_type _type);
     };
-
-    // --- Оригинальное содержимое файла продолжается здесь ---
 
     class CloseWindowInfo
     {
@@ -172,17 +176,6 @@ namespace FileSharing
 {
     enum class FileType
     {
-        archive,
-        xls,
-        html,
-        keynote,
-        pdf,
-        ppt,
-        txt,
-        doc,
-        image,
-        video,
-        audio,
-        unknown
+        archive, xls, html, keynote, pdf, ppt, txt, doc, image, video, audio, unknown
     };
 }
