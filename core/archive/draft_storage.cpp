@@ -99,7 +99,8 @@ bool draft::unserialize(const core::tools::binary_stream& _data)
     {
         core::tools::binary_stream stream = message_item->get_value<core::tools::binary_stream>();
         auto message = std::make_shared<history_message>();
-        if (!message->unserialize(stream))
+        // ИСПРАВЛЕНО: Сохраняем сообщение только если десериализация прошла успешно
+        if (message->unserialize(stream))
             message_ = message;
     }
 
