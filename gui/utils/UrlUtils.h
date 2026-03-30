@@ -1,5 +1,11 @@
 #pragma once
 
+#include <QString>
+#include <QStringView>
+#include <QUrl>
+#include <QUrlQuery>
+#include <vector>
+
 namespace Utils
 {
     const std::vector<QString>& urlSchemes();
