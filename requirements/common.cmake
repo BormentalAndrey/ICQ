@@ -5,6 +5,40 @@ message(STATUS "[CMAKE]")
 message(STATUS "[CMAKE] including <requirements/common.cmake>")
 message(STATUS "[CMAKE]")
 
+# ==============================================================================
+# ИСПРАВЛЕНИЕ: МАКРОСЫ ДЛЯ ПОИСКА ИСХОДНИКОВ И PCH (PRECOMPILED HEADERS)
+# Добавлены для успешной конфигурации corelib/CMakeLists.txt и других модулей
+# ==============================================================================
+
+macro(find_sources VAR DBG_PATH EXT)
+    file(GLOB_RECURSE ${VAR} "${DBG_PATH}/*.${EXT}")
+endmacro()
+
+macro(set_source_group GROUP_NAME ROOT_PATH)
+    # Группировка файлов (полезно для IDE, для Android/Linux не влияет на билд, 
+    # но обязательно для предотвращения ошибки синтаксиса)
+    source_group("${GROUP_NAME}" FILES ${ARGN})
+endmacro()
+
+macro(use_precompiled_header_linux PCH_VAR PCH_HEADER SOURCES)
+    # Возвращаем заголовок в переменную, чтобы он добавился в исходники таргета.
+    # Фактическое применение PCH в современном CMake делается через target_precompile_headers
+    set(${PCH_VAR} "${PCH_HEADER}")
+endmacro()
+
+macro(use_precompiled_header_mac PCH_VAR PCH_HEADER SOURCES)
+    set(${PCH_VAR} "${PCH_HEADER}")
+endmacro()
+
+macro(use_precompiled_header_msvc PCH_HEADER PCH_SOURCE SOURCES)
+    # Для MSVC сборок. В Android не используется, но предотвращает падение 
+    # конфигурации, если этот блок будет эвалюироваться.
+endmacro()
+
+# ==============================================================================
+# ОРИГИНАЛЬНАЯ ЛОГИКА common.cmake
+# ==============================================================================
+
 if(NOT DOWNLOADS_PATH)
     message(STATUS "[CMAKE] Set custom DOWNLOADS_PATH")
     set(DOWNLOADS_PATH "${ICQ_ROOT}/downloads")
@@ -401,4 +435,3 @@ function(common_print_dependencies_info)
     message(STATUS "")
     message(STATUS "")
 endfunction(common_print_dependencies_info)
-
