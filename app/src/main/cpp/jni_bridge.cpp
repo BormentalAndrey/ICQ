@@ -44,7 +44,7 @@ public:
         }
     }
 
-    \~JniThreadGuard() {
+    ~JniThreadGuard() {
         if (mustDetach && g_jvm) {
             g_jvm->DetachCurrentThread();
         }
@@ -62,7 +62,7 @@ private:
 class AndroidGuiCallback : public core::icore_interface {
 public:
     AndroidGuiCallback() : ref_count_(1) {}
-    virtual \~AndroidGuiCallback() = default;
+    virtual ~AndroidGuiCallback() = default;
 
     int32_t addref() override { return ++ref_count_; }
     int32_t release() override {
@@ -71,12 +71,12 @@ public:
         return res;
     }
 
-    void receive_variable(const std::string& _name, core::coll_ptr _value) override {
-        notifyJavaEvent(_name, _value);
+    void receive_variable(const std::string& _name, core::coll_ptr /*_value*/) override {
+        notifyJavaEvent(_name, nullptr);
     }
 
-    void receive_package(const std::string& _name, core::coll_ptr _value) override {
-        notifyJavaEvent(_name, _value);
+    void receive_package(const std::string& _name, core::coll_ptr /*_value*/) override {
+        notifyJavaEvent(_name, nullptr);
     }
 
     void on_voip_proto_msg(const std::string& _account, const std::vector<char>& _data) override {
@@ -107,9 +107,54 @@ public:
 private:
     std::atomic<int32_t> ref_count_;
 
-    void notifyJavaEvent(const std::string& _name, core::coll_ptr /*value*/) { ... } // (реализация как в предыдущей версии)
-    void notifyJavaVoipEvent(const std::string& _account, const std::vector<char>& _data) { ... }
-    void notifyJavaStatisticEvent(const std::string& _event, const core::event_props_type& _props) { ... }
+    void notifyJavaEvent(const std::string& _name, core::coll_ptr /*value*/) {
+        JniThreadGuard guard;
+        JNIEnv* env = guard.getEnv();
+        if (!env || !g_event_callback_obj || !g_on_event_method) return;
+
+        jstring jname = env->NewStringUTF(_name.c_str());
+        env->CallVoidMethod(g_event_callback_obj, g_on_event_method, jname);
+        env->DeleteLocalRef(jname);
+    }
+
+    void notifyJavaVoipEvent(const std::string& _account, const std::vector<char>& _data) {
+        JniThreadGuard guard;
+        JNIEnv* env = guard.getEnv();
+        if (!env || !g_event_callback_obj || !g_on_voip_event_method) return;
+
+        jstring jaccount = env->NewStringUTF(_account.c_str());
+        jbyteArray jdata = env->NewByteArray(_data.size());
+        if (jdata) {
+            env->SetByteArrayRegion(jdata, 0, _data.size(), reinterpret_cast<const jbyte*>(_data.data()));
+        }
+
+        env->CallVoidMethod(g_event_callback_obj, g_on_voip_event_method, jaccount, jdata);
+
+        if (jaccount) env->DeleteLocalRef(jaccount);
+        if (jdata) env->DeleteLocalRef(jdata);
+    }
+
+    void notifyJavaStatisticEvent(const std::string& _event, const core::event_props_type& _props) {
+        JniThreadGuard guard;
+        JNIEnv* env = guard.getEnv();
+        if (!env || !g_event_callback_obj || !g_on_statistic_method) return;
+
+        jstring jevent = env->NewStringUTF(_event.c_str());
+        
+        std::string props_str;
+        for (auto it = _props.begin(); it != _props.end(); ++it) {
+            props_str += it->first + "=" + it->second;
+            if (std::next(it) != _props.end()) {
+                props_str += ";";
+            }
+        }
+        jstring jprops = env->NewStringUTF(props_str.c_str());
+
+        env->CallVoidMethod(g_event_callback_obj, g_on_statistic_method, jevent, jprops);
+
+        if (jevent) env->DeleteLocalRef(jevent);
+        if (jprops) env->DeleteLocalRef(jprops);
+    }
 };
 
 // JNI OnLoad
@@ -133,9 +178,27 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
     return JNI_VERSION_1_6;
 }
 
-// nativeInit (уже была в предыдущей версии)
+// nativeInit
 extern "C" JNIEXPORT void JNICALL
-Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(...) { ... } // (полная реализация из предыдущего сообщения)
+Java_com_icq_mobile_core_IcqCoreEngine_nativeInit(JNIEnv* env, jobject thiz, jstring device_id) {
+    std::lock_guard<std::mutex> lock(g_core_mutex);
+    if (g_initialized) return;
+
+    if (device_id) {
+        const char* d_id = env->GetStringUTFChars(device_id, nullptr);
+        if (d_id) {
+            g_device_id = d_id;
+            env->ReleaseStringUTFChars(device_id, d_id);
+        }
+    }
+
+    g_event_callback_obj = env->NewGlobalRef(thiz);
+    g_core = std::make_unique<Ui::core_dispatcher>();
+    g_gui_callback = std::make_shared<AndroidGuiCallback>();
+
+    g_initialized = true;
+    LOGI("Core Engine initialized");
+}
 
 // nativeShutdown
 extern "C" JNIEXPORT void JNICALL
