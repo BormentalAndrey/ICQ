@@ -18,15 +18,21 @@
 #include "../styles/StyleVariable.h"
 #include "../styles/ThemeColor.h"
 
+// ИСПРАВЛЕНИЕ: Вместо class MentionMap, подключаем заголовок, где определен MentionMap и Data::FString
+#include "../types/message.h"
+
 namespace Data
 {
-    class FString;
-    class MentionMap;
     struct LinkInfo;
 }
 
 namespace Ui
 {
+    // ИСПРАВЛЕНИЕ: Предварительное объявление UI-типов, которых не было видно
+    enum class KeyToSendMessage;
+    enum class ShortcutsCloseAction;
+    enum class ShortcutsSearchAction;
+
     using highlightsV = std::vector<QString>;
 
     // Определения типов для корректной сборки под Android
@@ -250,7 +256,9 @@ namespace Ui
             int64_t blockId_ = 0;
 
             std::shared_ptr<bool> guard_;
-            TextRendering::VerPosition lastVerPosition_ = TextRendering::VerPosition::TOP;
+
+            // ИСПРАВЛЕНИЕ: VerPosition находится в Ui::, а не в Ui::TextRendering
+            VerPosition lastVerPosition_ = VerPosition::TOP;
         };
 
         using TextUnitPtr = std::unique_ptr<TextUnit>;
