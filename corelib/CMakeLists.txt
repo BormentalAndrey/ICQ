@@ -70,22 +70,6 @@ elseif(APPLE)
     find_library(MAC_AV_FOUNDATION AVFoundation)
     find_library(MAC_FOUNDATION Foundation)
 
-    mark_as_advanced(
-        MAC_VIDEO_TOOLBOX
-        MAC_CORE_VIDEO
-        MAC_APP_KIT
-        MAC_AUDIO_TOOLBOX
-        MAC_AUDIO_UNIT
-        MAC_IO_KIT
-        MAC_SECURITY
-        MAC_SYSTEM_CONFIGURATION
-        MAC_CORE_MEDIA
-        MAC_OPEN_GL
-        MAC_CORE_GRAPHICS
-        MAC_CORE_AUDIO
-        MAC_AV_FOUNDATION
-        MAC_FOUNDATION)
-
     set(SYSTEM_LIBRARIES
         ${MAC_VIDEO_TOOLBOX}
         ${MAC_CORE_VIDEO}
@@ -101,10 +85,13 @@ elseif(APPLE)
         ${MAC_CORE_AUDIO}
         ${MAC_AV_FOUNDATION}
         ${MAC_FOUNDATION})
+elseif(ANDROID)
+    find_library(log-lib log)
+    find_library(android-lib android)
+    set(SYSTEM_LIBRARIES ${log-lib} ${android-lib})
 endif()
 
 # --------------------------   corelib   -------------------------
-# ИСПРАВЛЕНИЕ: Безопасное определение SUBPROJECT_ROOT
 if(DEFINED ICQ_ROOT)
     set(SUBPROJECT_ROOT "${ICQ_ROOT}/corelib")
 else()
@@ -119,7 +106,7 @@ set_source_group("sources" "${SUBPROJECT_ROOT}" ${SUBPROJECT_SOURCES} ${SUBPROJE
 # ----------------------------------------------------------------
 include_directories(${SUBPROJECT_ROOT})
 
-# ИСПРАВЛЕНИЕ: Добавляем ветвление для Android, чтобы собирать STATIC, 
+# Добавляем ветвление для Android, чтобы собирать STATIC, 
 # если мы компилируем Android-версию (чтобы не было дублей).
 if(ANDROID)
     add_library(${PROJECT_NAME} STATIC ${SUBPROJECT_SOURCES} ${SUBPROJECT_HEADERS})
