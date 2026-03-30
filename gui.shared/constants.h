@@ -1,10 +1,14 @@
 #pragma once
 
+#include <QStringView>
+#include <QChar>
+#include <qnamespace.h>
+
 #if defined (_WIN32)
 #define CORELIBRARY "corelib.dll"
 #elif defined (__APPLE__)
 #define CORELIBRARY "libcorelib.dylib"
-#elif defined (__linux__)
+#elif defined (__linux__) || defined(__ANDROID__)
 #define CORELIBRARY "libcorelib.so"
 #endif
 
@@ -14,7 +18,7 @@ constexpr auto delete_updates_command() noexcept { return QStringView(u"-delete_
 constexpr auto installer_start_client_minimized() noexcept { return QStringView(u"-startup"); }
 constexpr auto arg_start_client_minimized() noexcept { return QStringView(u"/startup"); }
 constexpr auto autoupdate_from_8x() noexcept { return QStringView(u"-autoupdate"); }
-constexpr auto nolaunch_from_8x() noexcept { return QStringView(u"-nolaunch"); };
+constexpr auto nolaunch_from_8x() noexcept { return QStringView(u"-nolaunch"); }
 constexpr auto send_dump_arg() noexcept { return QStringView(u"-send_dump"); }
 
 #define crossprocess_pipe_name_postfix ".client"
@@ -45,8 +49,6 @@ constexpr auto url_command_copy_to_clipboard() noexcept { return u"copy_to_buffe
 
 constexpr auto mimetype_marker() noexcept { return "imdesktop"; }
 
-// special hash, looks line filesharing, but invalid
-// used for restricted files, same on all platforms
 constexpr QStringView filesharingPlaceholder() noexcept { return u"N08262af1561a4e1a936b07287cb49101"; }
 
 namespace Ui
@@ -54,32 +56,28 @@ namespace Ui
     enum KeyToSendMessage
     {
         Enter       = 0,
-        Enter_Old   = 1,                // deprecated
-        Shift_Enter = Qt::Key_Shift,    // 0x01000020
-        Ctrl_Enter  = Qt::Key_Control,  // 0x01000021 - cmd+enter on mac
-        CtrlMac_Enter = Qt::Key_Meta    // 0x01000022 - ctrl+enter, mac only
+        Enter_Old   = 1,
+        Shift_Enter = Qt::Key_Shift,
+        Ctrl_Enter  = Qt::Key_Control,
+        CtrlMac_Enter = Qt::Key_Meta
     };
 
     enum class ShortcutsCloseAction
     {
         min = 0,
-
         RollUpWindow,
         Default = RollUpWindow,
         RollUpWindowAndChat,
         CloseChat,
-
         max
     };
 
     enum class ShortcutsSearchAction
     {
         min = 0,
-
         SearchInChat,
         Default = SearchInChat,
         GlobalSearch,
-
         max
     };
 
