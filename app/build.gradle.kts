@@ -24,7 +24,6 @@ android {
                 val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() 
                     ?: System.getenv("RAPIDJSON_ROOT") ?: ""
 
-                // ИСПРАВЛЕНИЕ: Автоматическое определение путей к Qt в корне проекта
                 val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
                 val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
 
@@ -36,7 +35,8 @@ android {
                     "-DBoost_INCLUDE_DIR=$boostRoot",
                     "-DQT_ANDROID_PATH=$qtAndroidPath",
                     "-DQT_HOST_PATH=$qtHostPath",
-                    "-DICQ_PROJECT_ROOT=$root"
+                    "-DICQ_PROJECT_ROOT=$root",
+                    "-DBUILD_TESTING=OFF" // Важно: предотвращает сборку тестов curl
                 )
 
                 cppFlags += listOf(
@@ -59,7 +59,7 @@ android {
                     "-I$rapidjsonRoot"
                 ).filter { it.isNotEmpty() }
 
-                abiFilters.addAll(listOf("arm64-v8a")) // Оставляем arm64 для ускорения сборки
+                abiFilters.addAll(listOf("arm64-v8a"))
             }
         }
     }
