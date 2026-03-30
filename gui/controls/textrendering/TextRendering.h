@@ -2,9 +2,7 @@
 #include <QString>
 #include <QVector>
 
-namespace Data {
-    using FStringView = QStringView;
-}
+#include "../../types/fstring.h" // Подключаем настоящий Data::FStringView
 
 class TextRendering {
 public:
