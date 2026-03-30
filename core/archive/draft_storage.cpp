@@ -1,7 +1,9 @@
 #include "stdafx.h"
 #include "draft_storage.h"
+#include "history_message.h"
 #include "../corelib/collection_helper.h"
 #include "../../common.shared/json_helper.h"
+#include "../../tools/tlv.h"
 #include "tools/system.h"
 
 namespace
@@ -64,7 +66,7 @@ void draft::serialize(core::tools::binary_stream& _data) const
     core::tools::binary_stream bs_message;
     if (message_)
         message_->serialize(bs_message);
-    pack.push_child(tools::tlv(tlv_message, bs_message));
+    pack.push_child(core::tools::tlv(tlv_message, bs_message));
 
     pack.serialize(_data);
 }
