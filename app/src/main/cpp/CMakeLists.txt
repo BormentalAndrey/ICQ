@@ -68,19 +68,8 @@ list(FILTER CORE_SOURCES EXCLUDE REGEX
 add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
 
 # =============================================
-# ИСПРАВЛЕНИЕ: Инъекция Precompiled Header (PCH)
-# =============================================
-# Поскольку файлы в common.shared и gui не включают QFont и im_assert напрямую,
-# мы принудительно внедряем главный stdafx.h из core или создаем свой.
-if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
-    # Используем существующий stdafx.h как глобальный заголовок
-    target_compile_options(icq_core PRIVATE "-include" "${ICQ_ROOT}/core/stdafx.h")
-elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-    target_compile_options(icq_core PRIVATE "-include" "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-endif()
-
-# =============================================
-# Include Directories
+# Include Directories 
+# (ВАЖНО: Должны быть объявлены ДО инъекции PCH)
 # =============================================
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -108,6 +97,22 @@ if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
 endif()
 if(EXISTS "${ICQ_ROOT}/rapidjson/include")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
+endif()
+
+# =============================================
+# ИСПРАВЛЕНИЕ: Инъекция Precompiled Header (PCH)
+# =============================================
+# Используем современную команду CMake (target_precompile_headers).
+# Это безопасно внедряет stdafx.h, не вызывая конфликтов и учитывая 
+# вышеописанные пути Include Directories для rapidjson и boost.
+if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
+    target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
+    target_precompile_headers(icq_core PRIVATE "${ICQ_ROOT}/core/stdafx.h")
+    message(STATUS "[DZIN_BUILD] Используется главный PCH из Core: ${ICQ_ROOT}/core/stdafx.h")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
+    target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
+    target_precompile_headers(icq_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
+    message(STATUS "[DZIN_BUILD] Используется локальный PCH: ${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
 endif()
 
 # =============================================
