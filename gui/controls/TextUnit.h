@@ -6,7 +6,7 @@
 #include <optional>
 #include <map>
 
-// Qt includes
+// Qt core & gui
 #include <QString>
 #include <QFont>
 #include <QPainter>
@@ -29,66 +29,16 @@ namespace Ui
 {
     using highlightsV = std::vector<QString>;
 
-    // Перечисления, необходимые для компиляции TextUnit
-    enum class HorAligment
-    {
-        LEFT,
-        RIGHT,
-        CENTER,
-        JUSTIFY
-    };
-
-    enum class VerPosition
-    {
-        TOP,
-        MIDDLE,
-        BOTTOM
-    };
-
-    enum class LineBreakType
-    {
-        PREFER_WIDTH,
-        PREFER_SPACES,
-        FORCE_BREAK
-    };
-
-    enum class EmojiSizeType
-    {
-        REGULAR,
-        SMALL,
-        MEDIUM,
-        LARGE
-    };
-
-    enum class LinksStyle
-    {
-        PLAIN,
-        UNDERLINED
-    };
-
-    enum class LinksVisible
-    {
-        SHOW_LINKS,
-        HIDE_LINKS
-    };
-
-    enum class ProcessLineFeeds
-    {
-        KEEP_LINE_FEEDS,
-        REMOVE_LINE_FEEDS
-    };
-
-    enum class CallType
-    {
-        USUAL,
-        EXTENDED
-    };
-
-    enum class TextType
-    {
-        VISIBLE,
-        SOURCE
-    };
+    // Определения типов для корректной сборки под Android
+    enum class HorAligment { LEFT, RIGHT, CENTER, JUSTIFY };
+    enum class VerPosition { TOP, MIDDLE, BOTTOM };
+    enum class LineBreakType { PREFER_WIDTH, PREFER_SPACES, FORCE_BREAK };
+    enum class EmojiSizeType { REGULAR, SMALL, MEDIUM, LARGE };
+    enum class LinksStyle { PLAIN, UNDERLINED };
+    enum class LinksVisible { SHOW_LINKS, HIDE_LINKS };
+    enum class ProcessLineFeeds { KEEP_LINE_FEEDS, REMOVE_LINE_FEEDS };
+    enum class CallType { USUAL, EXTENDED };
+    enum class TextType { VISIBLE, SOURCE };
 
     [[nodiscard]] QString getEllipsis();
 
