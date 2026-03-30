@@ -1,146 +1,59 @@
-name: Auto Fix Project Files
+name: Android CI Build
 
 on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  fix-files:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive # На случай, если зависимости подключены как субмодули
 
-      - name: Fix app/src/main/cpp/CMakeLists.txt
-        run: |
-          # Ищем файл CMakeLists.txt в cpp директории, чтобы избежать ошибок в пути
-          CMAKE_FILE=$(find . -path "*/src/main/cpp/CMakeLists.txt" | head -n 1)
-          if [ -z "$CMAKE_FILE" ]; then echo "CMakeLists.txt not found"; exit 1; fi
-          
-          cat << 'EOF' > "$CMAKE_FILE"
-          cmake_minimum_required(VERSION 3.22.1)
-          project("icq_mobile_core" LANGUAGES CXX C)
-          cmake_policy(SET CMP0074 NEW)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
 
-          if(NOT ICQ_PROJECT_ROOT)
-              get_filename_component(ICQ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
-          else()
-              set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
-          endif()
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: "26.1.10909125"
 
-          list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
-          list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
-          set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Host Qt tools path" FORCE)
-          set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
-          find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
+      - name: Make Gradlew Executable
+        run: chmod +x gradlew
 
-          set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "" FORCE)
-          set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "" FORCE)
-          set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "" FORCE)
-          set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "" FORCE)
+      - name: Build with Gradle
+        # 2>&1 | tee build.log объединяет ошибки и текст в один файл и выводит в консоль
+        run: ./gradlew assembleRelease --info --stacktrace 2>&1 | tee build.log
 
-          include(FetchContent)
-          FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG curl-8_4_0)
-          set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
-          set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
-          set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
-          set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-          FetchContent_MakeAvailable(curl)
+      - name: Upload Build Artifacts (Logs)
+        # if: always() гарантирует выполнение, даже если предыдущий шаг упал
+        if: always() 
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-build-logs
+          path: |
+            build.log
+            **/build/reports/
+            **/build/test-results/
+            **/.cxx/**/CMakeCache.txt
+            **/.cxx/**/ninja_log
+            **/.cxx/**/android_gradle_build_stderr.txt
+            **/build/intermediates/cxx/**/ninja.log
+          retention-days: 7
 
-          add_compile_definitions(
-              ANDROID PLATFORM_ANDROID _ANDROID_
-              STRIP_CRASH_HANDLER SUPPORT_EXTERNAL_CONFIG
-              HAVE_SECURE_GETENV=1 QT_CORE_LIB QT_NETWORK_LIB
-              QT_GUI_LIB QT_SVG_LIB CORE_USED_IN_ANDROID
-              QT_NO_KEYWORDS
-          )
-
-          file(GLOB_RECURSE CORE_SOURCES
-              "${ICQ_ROOT}/core/*.cpp"
-              "${ICQ_ROOT}/common.shared/*.cpp"
-              "${ICQ_ROOT}/corelib/*.cpp"
-              "${ICQ_ROOT}/gui/*.cpp"
-              "${ICQ_ROOT}/gui.shared/*.cpp"
-          )
-
-          list(FILTER CORE_SOURCES EXCLUDE REGEX 
-              ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
-          )
-
-          add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
-
-          target_include_directories(icq_core PRIVATE
-              ${CMAKE_CURRENT_SOURCE_DIR}
-              ${ICQ_ROOT}
-              ${ICQ_ROOT}/core
-              ${ICQ_ROOT}/gui
-              ${ICQ_ROOT}/corelib
-              ${ICQ_ROOT}/common.shared
-              ${ICQ_ROOT}/gui.shared
-              ${ICQ_ROOT}/core/Voip/libvoip/include
-              ${curl_SOURCE_DIR}/include
-          )
-
-          target_include_directories(icq_core SYSTEM PRIVATE
-              ${Qt6Core_INCLUDE_DIRS}
-              ${Qt6Gui_INCLUDE_DIRS}
-              ${Qt6Network_INCLUDE_DIRS}
-              ${Qt6Svg_INCLUDE_DIRS}
-          )
-
-          if(EXISTS "${ICQ_ROOT}/boost_1_83_0")
-              target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/boost_1_83_0")
-          endif()
-          if(EXISTS "${ICQ_ROOT}/rapidjson/include")
-              target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
-          endif()
-
-          if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
-              target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
-              target_precompile_headers(icq_core PRIVATE "${ICQ_ROOT}/core/stdafx.h")
-          elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-              target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
-              target_precompile_headers(icq_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-          endif()
-
-          set_target_properties(icq_core PROPERTIES CXX_STANDARD 17 CXX_VISIBILITY_PRESET hidden)
-          find_library(log-lib log REQUIRED)
-          find_library(android-lib android REQUIRED)
-
-          target_link_libraries(icq_core Qt6::Core Qt6::Network Qt6::Gui Qt6::Svg ${log-lib} ${android-lib} libcurl -Wl,--gc-sections)
-
-          if(ANDROID)
-              target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
-              qt_finalize_target(icq_core)
-          endif()
-          EOF
-
-      - name: Fix common.cmake
-        run: |
-          # Ищем файл common.cmake игнорируя регистр (Requirements vs requirements)
-          COMMON_FILE=$(find . -iname "common.cmake" | grep -i "requirements" | head -n 1)
-          
-          if [ -z "$COMMON_FILE" ]; then
-            echo "Error: common.cmake not found in any requirements folder"
-            exit 1
-          fi
-          
-          echo "Found common.cmake at: $COMMON_FILE"
-          
-          # Проверяем, не добавлены ли макросы уже ранее
-          if ! grep -q "macro(find_sources" "$COMMON_FILE"; then
-            sed -i '1i macro(find_sources VAR DBG_PATH EXT)\n    file(GLOB_RECURSE ${VAR} "${DBG_PATH}/*.${EXT}")\nendmacro()\n\nmacro(set_source_group GROUP_NAME ROOT_PATH)\nendmacro()\n\nmacro(use_precompiled_header_linux PCH_VAR PCH_HEADER SOURCES)\n    set(${PCH_VAR} "${PCH_HEADER}")\nendmacro()\n' "$COMMON_FILE"
-            echo "Macros added successfully."
-          else
-            echo "Macros already exist, skipping."
-          fi
-
-      - name: Commit and Push changes
-        run: |
-          git config --global user.name "Dzin Fix Bot"
-          git config --global user.email "bot@dzin.app"
-          git add .
-          git commit -m "chore: auto-fix CMake configurations and paths" || echo "No changes to commit"
-          git push
+      - name: Upload Release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/*.apk
