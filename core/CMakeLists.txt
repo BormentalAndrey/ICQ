@@ -14,6 +14,11 @@ if(NOT COMMAND find_sources)
         macro(use_precompiled_header_linux PCH_VAR PCH_HEADER SOURCES)
             set(${PCH_VAR} "${PCH_HEADER}")
         endmacro()
+        macro(use_precompiled_header_msvc PCH_HEADER PCH_SOURCE SOURCES)
+        endmacro()
+        macro(use_precompiled_header_mac PCH_VAR PCH_HEADER SOURCES)
+            set(${PCH_VAR} "${PCH_HEADER}")
+        endmacro()
     endif()
 endif()
 
@@ -31,7 +36,6 @@ set_source_group("sources" "${SUBPROJECT_ROOT}" ${SUBPROJECT_SOURCES} ${SUBPROJE
 if(NOT ANDROID)
     if (STRIP_NET_CHANGE_NOTIFY)
         add_definitions(-DSTRIP_NET_CHANGE_NOTIFY)
-        # ... (фильтры списков остаются прежними)
     endif()
 endif()
 
@@ -42,7 +46,7 @@ if(MSVC)
     use_precompiled_header_msvc("stdafx.h" "${SUBPROJECT_ROOT}/stdafx.cpp" ${SUBPROJECT_SOURCES} ${COMMON_SOURCES})
 elseif(APPLE)
     use_precompiled_header_mac(PCH_BIN "${SUBPROJECT_ROOT}/stdafx.h" ${SUBPROJECT_SOURCES} ${COMMON_SOURCES})
-elseif(LINUX OR ANDROID) # На Android используем логику Linux для PCH или пропускаем
+elseif(LINUX OR ANDROID)
     use_precompiled_header_linux(PCH_BIN "${SUBPROJECT_ROOT}/stdafx.h" ${SUBPROJECT_SOURCES} ${COMMON_SOURCES})
 endif()
 
@@ -56,5 +60,4 @@ add_library(${PROJECT_NAME} STATIC
 # Пост-сборка только для Windows
 if(MSVC)
     set (CMAKE_CXX_FLAGS "/EHsc /bigobj")
-    # ... (все команды add_custom_command POST_BUILD для копирования DLL остаются здесь)
 endif()
