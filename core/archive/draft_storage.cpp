@@ -8,7 +8,6 @@
 
 namespace
 {
-
 enum data_tlv_fields : uint32_t
 {
     tlv_state = 1,
@@ -26,12 +25,10 @@ bool is_first_same_or_newer(const core::archive::draft& first, const core::archi
 
     return first.timestamp_ >= second.timestamp_;
 }
-
 }
 
 namespace core::archive
 {
-
 bool draft::empty() const
 {
     return !message_ || (message_->get_text().empty() && message_->get_quotes().empty());
@@ -99,7 +96,7 @@ bool draft::unserialize(const core::tools::binary_stream& _data)
     {
         core::tools::binary_stream stream = message_item->get_value<core::tools::binary_stream>();
         auto message = std::make_shared<history_message>();
-        // ИСПРАВЛЕНО: Сохраняем сообщение только если десериализация прошла успешно
+        // Android fix: корректная проверка результата
         if (message->unserialize(stream))
             message_ = message;
     }
@@ -120,10 +117,7 @@ draft_storage::draft_storage(std::wstring _data_path)
     load();
 }
 
-const draft& draft_storage::get_draft() noexcept
-{
-    return draft_;
-}
+const draft& draft_storage::get_draft() noexcept { return draft_; }
 
 void draft_storage::set_draft(const draft& _draft)
 {
@@ -153,5 +147,4 @@ void draft_storage::write_file()
     draft_.serialize(bstream);
     bstream.save_2_file(path_);
 }
-
 }
