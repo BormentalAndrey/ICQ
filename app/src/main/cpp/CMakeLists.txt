@@ -8,24 +8,19 @@ else()
     set(ICQ_ROOT "${ICQ_PROJECT_ROOT}")
 endif()
 
-# =============================================
 # Настройка Qt6
-# =============================================
 list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
 set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Host Qt tools path" FORCE)
 set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
 find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
 
-# =============================================
-# OPENSSL & CURL
-# =============================================
+# OPENSSL & CURL (с отключенными тестами)
 set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "" FORCE)
 set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "" FORCE)
 set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "" FORCE)
 set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "" FORCE)
 
-# ИСПРАВЛЕНИЕ: Отключаем сборку тестов и утилит Curl для Android (решает проблему из лога)
 include(FetchContent)
 FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG curl-8_4_0)
 set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
@@ -35,9 +30,7 @@ set(CURL_DISABLE_TESTS ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(curl)
 
-# =============================================
 # Глобальные настройки
-# =============================================
 add_compile_definitions(
     ANDROID PLATFORM_ANDROID _ANDROID_
     STRIP_CRASH_HANDLER SUPPORT_EXTERNAL_CONFIG
@@ -46,9 +39,7 @@ add_compile_definitions(
     QT_NO_KEYWORDS CORELIB_EXPORTS
 )
 
-# =============================================
 # Исходники
-# =============================================
 file(GLOB_RECURSE CORE_SOURCES
     "${ICQ_ROOT}/core/*.cpp"
     "${ICQ_ROOT}/common.shared/*.cpp"
@@ -61,12 +52,9 @@ list(FILTER CORE_SOURCES EXCLUDE REGEX
     ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
 )
 
+# Создание основной библиотеки
 add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
 
-# =============================================
-# Include Directories
-# ВАЖНО: SYSTEM PRIVATE для Qt заголовков предотвращает часть конфликтов.
-# =============================================
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${ICQ_ROOT}
@@ -93,23 +81,13 @@ if(EXISTS "${ICQ_ROOT}/rapidjson/include")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
 endif()
 
-# =============================================
-# ИСПРАВЛЕНИЕ: PCH (Precompiled Header)
-# =============================================
-# Использование target_precompile_headers вместо '-include' решает проблемы с 
-# двойным определением типов (typedef redefinition 'QStringView'), так как CMake 
-# умнее внедряет заголовок в компиляцию, учитывая пути инклудов.
+# PCH (Precompiled Header)
 if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
     target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
     target_precompile_headers(icq_core PRIVATE "${ICQ_ROOT}/core/stdafx.h")
-elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-    target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
-    target_precompile_headers(icq_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
 endif()
 
-# =============================================
 # Линковка
-# =============================================
 set_target_properties(icq_core PROPERTIES CXX_STANDARD 17 CXX_VISIBILITY_PRESET hidden)
 find_library(log-lib log REQUIRED)
 find_library(android-lib android REQUIRED)
