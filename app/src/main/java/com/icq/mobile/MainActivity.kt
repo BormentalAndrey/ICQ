@@ -15,57 +15,49 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    // Список разрешений из вашего Manifest
     private val requiredPermissions = mutableListOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.INTERNET,
         Manifest.permission.ACCESS_NETWORK_STATE
     ).apply {
-        // Разрешения для Android 13+ (API 33)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             add(Manifest.permission.POST_NOTIFICATIONS)
         }
-        // Разрешения для Bluetooth (звонки) на Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             add(Manifest.permission.BLUETOOTH_CONNECT)
         }
     }.toTypedArray()
 
-    // Регистрация обработчика разрешений
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
+        if (permissions.entries.all { it.value }) {
             onPermissionsGranted()
         } else {
-            Toast.makeText(this, "Permissions are required for calls and messaging", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Permissions required for ICQ", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Инициализация ViewBinding (как включено в build.gradle.kts)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         checkAndRequestPermissions()
         
-        // Пример вызова нативного метода для получения статуса ядра
         binding.root.post {
             val status = getCoreStatus()
-            Log.d("ICQ_CORE", "Current Status: $status")
+            binding.statusTextView.text = status
+            Log.d("ICQ_CORE", "Status: $status")
         }
     }
 
     private fun checkAndRequestPermissions() {
-        val missingPermissions = requiredPermissions.filter {
+        val missing = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
-        if (missingPermissions.isEmpty()) {
+        if (missing.isEmpty()) {
             onPermissionsGranted()
         } else {
             requestPermissionLauncher.launch(requiredPermissions)
@@ -73,35 +65,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onPermissionsGranted() {
-        // Уведомляем C++ ядро о том, что разрешения получены и можно запускать сетевые службы
         notifyPermissionsReady()
     }
 
     override fun onResume() {
         super.onResume()
-        setNativeAppState(true) // Приложение в фокусе
+        setNativeAppState(true)
     }
 
     override fun onPause() {
         super.onPause()
-        setNativeAppState(false) // Приложение в фоне
+        setNativeAppState(false)
     }
 
-    // --- Нативные методы (JNI) ---
-    
-    /**
-     * Получает строковый статус от Qt/C++ ядра
-     */
     private external fun getCoreStatus(): String
-
-    /**
-     * Уведомляет ядро о готовности разрешений
-     */
     private external fun notifyPermissionsReady()
-
-    /**
-     * Передает состояние жизненного цикла в C++
-     * @param active true если на переднем плане
-     */
     private external fun setNativeAppState(active: Boolean)
 }
