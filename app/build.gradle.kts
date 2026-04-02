@@ -18,15 +18,11 @@ android {
 
         externalNativeBuild {
             cmake {
-                val boostRoot = project.findProperty("boost.root")?.toString() 
-                    ?: System.getenv("BOOST_ROOT") ?: ""
-                
-                val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() 
-                    ?: System.getenv("RAPIDJSON_ROOT") ?: ""
+                val boostRoot = project.findProperty("boost.root")?.toString() ?: ""
+                val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() ?: ""
 
                 val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
                 val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
-
                 val root = "${project.projectDir}/.."
 
                 arguments += listOf(
@@ -36,7 +32,7 @@ android {
                     "-DQT_ANDROID_PATH=$qtAndroidPath",
                     "-DQT_HOST_PATH=$qtHostPath",
                     "-DICQ_PROJECT_ROOT=$root",
-                    "-DBUILD_TESTING=OFF" // Важно: предотвращает сборку тестов curl
+                    "-DBUILD_TESTING=OFF"
                 )
 
                 cppFlags += listOf(
@@ -56,10 +52,10 @@ android {
                     "-I$root/common.shared",
                     "-I$root/gui.shared",
                     "-I$boostRoot",
-                    "-I$rapidjsonRoot"
+                    "-I$rapidjsonRoot/include"
                 ).filter { it.isNotEmpty() }
 
-                abiFilters.addAll(listOf("arm64-v8a"))
+                abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
             }
         }
     }
