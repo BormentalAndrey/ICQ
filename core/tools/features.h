@@ -60,7 +60,9 @@ namespace features
 
     size_t wim_parallel_packets_count();
     
-    // Используем std::string на всех платформах для совместимости
-    // При необходимости конвертируем в std::wstring внутри реализации
+#ifdef _WIN32
+    void cleanup_cache(const std::wstring& content_cache_dir_);
+#else
     void cleanup_cache(const std::string& content_cache_dir_);
+#endif
 }
