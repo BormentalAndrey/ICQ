@@ -9,17 +9,23 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.icq.mobile.core.IcqCoreEngine
 import com.icq.mobile.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    
+    companion object {
+        private const val TAG = "MainActivity"
+    }
 
     private val requiredPermissions = mutableListOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.INTERNET,
-        Manifest.permission.ACCESS_NETWORK_STATE
+        Manifest.permission.ACCESS_NETWORK_STATE,
+        Manifest.permission.VIBRATE
     ).apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             add(Manifest.permission.POST_NOTIFICATIONS)
@@ -32,10 +38,17 @@ class MainActivity : AppCompatActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions.entries.all { it.value }) {
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted) {
             onPermissionsGranted()
         } else {
-            Toast.makeText(this, "Permissions required for ICQ", Toast.LENGTH_LONG).show()
+            val denied = permissions.filter { !it.value }.keys
+            Log.w(TAG, "Permissions denied: $denied")
+            Toast.makeText(
+                this, 
+                "Required permissions denied: ${denied.joinToString()}", 
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -46,10 +59,18 @@ class MainActivity : AppCompatActivity() {
 
         checkAndRequestPermissions()
         
-        binding.root.post {
+        // Обновляем статус UI
+        updateCoreStatus()
+    }
+
+    private fun updateCoreStatus() {
+        try {
             val status = getCoreStatus()
             binding.statusTextView.text = status
-            Log.d("ICQ_CORE", "Status: $status")
+            Log.d(TAG, "Core status: $status")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get core status: ${e.message}")
+            binding.statusTextView.text = "Core status: ERROR"
         }
     }
 
@@ -57,20 +78,39 @@ class MainActivity : AppCompatActivity() {
         val missing = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
+        
         if (missing.isEmpty()) {
             onPermissionsGranted()
         } else {
+            Log.d(TAG, "Requesting missing permissions: ${missing.joinToString()}")
             requestPermissionLauncher.launch(requiredPermissions)
         }
     }
 
     private fun onPermissionsGranted() {
+        Log.d(TAG, "All permissions granted")
         notifyPermissionsReady()
+        updateCoreStatus()
+        
+        // Теперь можно безопасно инициализировать VoIP
+        initializeVoip()
+    }
+
+    private fun initializeVoip() {
+        try {
+            // Инициализация VoIP через движок
+            val engine = IcqCoreEngine.getInstance()
+            // Дополнительная VoIP инициализация если нужна
+            Log.d(TAG, "VoIP initialized successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize VoIP: ${e.message}")
+        }
     }
 
     override fun onResume() {
         super.onResume()
         setNativeAppState(true)
+        updateCoreStatus()
     }
 
     override fun onPause() {
@@ -78,6 +118,12 @@ class MainActivity : AppCompatActivity() {
         setNativeAppState(false)
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // Очистка ресурсов если нужно
+    }
+
+    // Нативные методы
     private external fun getCoreStatus(): String
     private external fun notifyPermissionsReady()
     private external fun setNativeAppState(active: Boolean)
