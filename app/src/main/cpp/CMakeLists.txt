@@ -9,25 +9,28 @@ else()
 endif()
 
 # =============================================
-# Настройка Qt6
+# Qt6
 # =============================================
 list(APPEND CMAKE_FIND_ROOT_PATH "${QT_ANDROID_PATH}")
 list(APPEND CMAKE_PREFIX_PATH "${QT_ANDROID_PATH}")
-set(QT_HOST_PATH "${QT_HOST_PATH}" CACHE PATH "Host Qt tools path" FORCE)
 set(Qt6_DIR "${QT_ANDROID_PATH}/lib/cmake/Qt6" CACHE PATH "" FORCE)
 find_package(Qt6 REQUIRED COMPONENTS Core Network Gui Svg)
 
+add_compile_definitions(QT_DISABLE_DEPRECATED_BEFORE=0x050000)
+
 # =============================================
-# OPENSSL & CURL
+# OpenSSL + CURL
 # =============================================
 set(OPENSSL_INCLUDE_DIR "${ICQ_ROOT}/openssl-android-arm64/ssl_3" CACHE PATH "" FORCE)
 set(OPENSSL_CRYPTO_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libcrypto.a" CACHE FILEPATH "" FORCE)
 set(OPENSSL_SSL_LIBRARY "${ICQ_ROOT}/openssl-android-arm64/arm64-v8a/libssl.a" CACHE FILEPATH "" FORCE)
 set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "" FORCE)
 
-# Отключаем сборку тестов и утилит Curl для Android (решает проблему из лога)
 include(FetchContent)
-FetchContent_Declare(curl GIT_REPOSITORY https://github.com/curl/curl.git GIT_TAG curl-8_4_0)
+FetchContent_Declare(curl 
+    GIT_REPOSITORY https://github.com/curl/curl.git 
+    GIT_TAG curl-8_4_0
+)
 set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
 set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -36,14 +39,14 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(curl)
 
 # =============================================
-# Глобальные настройки
+# Глобальные определения
 # =============================================
 add_compile_definitions(
     ANDROID PLATFORM_ANDROID _ANDROID_
     STRIP_CRASH_HANDLER SUPPORT_EXTERNAL_CONFIG
-    HAVE_SECURE_GETENV=1 QT_CORE_LIB QT_NETWORK_LIB
-    QT_GUI_LIB QT_SVG_LIB CORE_USED_IN_ANDROID
-    QT_NO_KEYWORDS CORELIB_EXPORTS
+    HAVE_SECURE_GETENV=1
+    QT_CORE_LIB QT_NETWORK_LIB QT_GUI_LIB QT_SVG_LIB
+    CORE_USED_IN_ANDROID QT_NO_KEYWORDS CORELIB_EXPORTS
 )
 
 # =============================================
@@ -58,14 +61,36 @@ file(GLOB_RECURSE CORE_SOURCES
 )
 
 list(FILTER CORE_SOURCES EXCLUDE REGEX 
-    ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp|.*stdafx\\.cpp|.*main\\.cpp"
+    ".*win32.*|.*macos.*|.*apple.*|.*_win\\.cpp|.*_mac\\.cpp|.*_ios\\.cpp"
 )
 
-# ДОБАВЛЕНО: voip/android_video_renderer.cpp
-add_library(icq_core SHARED jni_bridge.cpp voip/android_video_renderer.cpp ${CORE_SOURCES})
+# Критически важные файлы, которые могут быть пропущены GLOB_RECURSE
+set(CRITICAL_SOURCES
+    "${ICQ_ROOT}/gui/core_dispatcher.cpp"
+    "${ICQ_ROOT}/core/connections/wim/events/fetch_event_thread_update.cpp"
+    "${ICQ_ROOT}/core/archive/draft_storage.cpp"
+    "${ICQ_ROOT}/core/Voip/voip_memory_reporter.cpp"
+    "${ICQ_ROOT}/common.shared/message_processing/text_formatting.cpp"
+    "${ICQ_ROOT}/common.shared/message_processing/message_tokenizer.cpp"
+    "${ICQ_ROOT}/gui/my_info.cpp"
+    "${ICQ_ROOT}/gui/types/search_result.cpp"
+)
+
+foreach(CRITICAL_SOURCE ${CRITICAL_SOURCES})
+    if(EXISTS ${CRITICAL_SOURCE})
+        list(APPEND CORE_SOURCES ${CRITICAL_SOURCE})
+    endif()
+endforeach()
+
+# VoIP рендерер для Android
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/voip/android_video_renderer.cpp")
+    list(APPEND CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/voip/android_video_renderer.cpp")
+endif()
+
+add_library(icq_core SHARED jni_bridge.cpp ${CORE_SOURCES})
 
 # =============================================
-# Include Directories
+# Include directories
 # =============================================
 target_include_directories(icq_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -75,7 +100,9 @@ target_include_directories(icq_core PRIVATE
     ${ICQ_ROOT}/corelib
     ${ICQ_ROOT}/common.shared
     ${ICQ_ROOT}/gui.shared
+    ${ICQ_ROOT}/core/Voip
     ${ICQ_ROOT}/core/Voip/libvoip/include
+    ${ICQ_ROOT}/core/tools
     ${curl_SOURCE_DIR}/include
 )
 
@@ -93,27 +120,80 @@ if(EXISTS "${ICQ_ROOT}/rapidjson/include")
     target_include_directories(icq_core PRIVATE "${ICQ_ROOT}/rapidjson/include")
 endif()
 
+# Определение для voip_proxy
+if(EXISTS "${ICQ_ROOT}/core/Voip/voip_proxy.h")
+    target_compile_definitions(icq_core PRIVATE HAVE_VOIP_PROXY)
+endif()
+
 # =============================================
-# PCH (Precompiled Header)
+# PCH
 # =============================================
 if(EXISTS "${ICQ_ROOT}/core/stdafx.h")
-    target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
+    target_compile_definitions(icq_core PRIVATE HAVE_STDAFX_H)
     target_precompile_headers(icq_core PRIVATE "${ICQ_ROOT}/core/stdafx.h")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
-    target_compile_definitions(icq_core PRIVATE -DHAVE_STDAFX_H)
+    target_compile_definitions(icq_core PRIVATE HAVE_STDAFX_H)
     target_precompile_headers(icq_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stdafx.h")
+endif()
+
+# =============================================
+# Свойства
+# =============================================
+set_target_properties(icq_core PROPERTIES 
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_target_properties(icq_core PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
 # =============================================
 # Линковка
 # =============================================
-set_target_properties(icq_core PROPERTIES CXX_STANDARD 17 CXX_VISIBILITY_PRESET hidden)
 find_library(log-lib log REQUIRED)
 find_library(android-lib android REQUIRED)
+find_library(GLESv2-lib GLESv2 REQUIRED)
+find_library(EGL-lib EGL REQUIRED)
 
-target_link_libraries(icq_core Qt6::Core Qt6::Network Qt6::Gui Qt6::Svg ${log-lib} ${android-lib} libcurl -Wl,--gc-sections)
+target_link_libraries(icq_core
+    Qt6::Core
+    Qt6::Network
+    Qt6::Gui
+    Qt6::Svg
+    ${log-lib}
+    ${android-lib}
+    ${GLESv2-lib}
+    ${EGL-lib}
+    libcurl
+    -Wl,--gc-sections
+)
 
 if(ANDROID)
-    target_link_options(icq_core PRIVATE "-Wl,--undefined=JNI_OnLoad")
+    target_link_options(icq_core PRIVATE 
+        "-Wl,--undefined=JNI_OnLoad"
+        "-Wl,-z,max-page-size=16384"
+    )
     qt_finalize_target(icq_core)
 endif()
+
+# =============================================
+# Оптимизации для разных типов сборки
+# =============================================
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(icq_core PRIVATE -O3 -flto -DNDEBUG)
+    target_link_options(icq_core PRIVATE -flto)
+else()
+    target_compile_options(icq_core PRIVATE -g -O0 -fno-omit-frame-pointer)
+endif()
+
+# =============================================
+# Дополнительные флаги для подавления предупреждений
+# =============================================
+target_compile_options(icq_core PRIVATE
+    -Wno-macro-redefined
+    -Wno-unused-function
+    -Wno-deprecated-declarations
+)
