@@ -18,6 +18,10 @@
 #include "../configuration/app_config.h"
 #include "../configuration/external_config.h"
 
+#include <vector>
+#include <boost/filesystem.hpp>
+#include <boost/system/error_code.hpp>
+
 namespace
 {
     bool myteam_config_or_omicron_feature_enabled(config::features _feature, const char* _omicron_key)
@@ -280,7 +284,11 @@ namespace features
         return omicron_count > 0 ? omicron_count : default_count;
     }
 
+#ifdef _WIN32
     void cleanup_cache(const std::wstring& content_cache_dir_)
+#else
+    void cleanup_cache(const std::string& content_cache_dir_)
+#endif
     {
         const auto max_files_to_delete = maximum_delete_files();
         const auto delete_files_older = delete_files_older_hours();
@@ -300,40 +308,54 @@ namespace features
 
         try
         {
-            std::vector<boost::filesystem::wpath> files_to_delete;
+            std::vector<boost::filesystem::path> files_to_delete;
 
             boost::filesystem::directory_iterator end_iter;
 
             boost::system::error_code error;
 
-            if (boost::filesystem::exists(content_cache_dir_, error) && boost::filesystem::is_directory(content_cache_dir_, error))
+#ifdef _WIN32
+            boost::filesystem::path cache_path(content_cache_dir_);
+#else
+            boost::filesystem::path cache_path = boost::filesystem::path(content_cache_dir_);
+#endif
+
+            if (boost::filesystem::exists(cache_path, error) && boost::filesystem::is_directory(cache_path, error))
             {
-                for (boost::filesystem::directory_iterator dir_iter(content_cache_dir_, error); (dir_iter != end_iter) && (files_to_delete.size() < max_files_to_delete) && !error; dir_iter.increment(error))
+                for (boost::filesystem::directory_iterator dir_iter(cache_path, error); 
+                     (dir_iter != end_iter) && (files_to_delete.size() < max_files_to_delete) && !error; 
+                     dir_iter.increment(error))
                 {
                     if (boost::filesystem::is_regular_file(dir_iter->status()))
                     {
-                        const auto write_time = std::chrono::system_clock::from_time_t(core::tools::system::get_file_lastmodified(dir_iter->path().wstring()));
+                        const auto write_time = std::chrono::system_clock::from_time_t(
+                            core::tools::system::get_file_lastmodified(dir_iter->path().string())
+                        );
                         if ((current_time - write_time) > delete_files_older)
                             files_to_delete.push_back(*dir_iter);
                     }
                 }
             }
 
-            for (const auto& _file_path : files_to_delete)
+            for (const auto& file_path : files_to_delete)
             {
-                boost::filesystem::remove(_file_path, error);
+                boost::filesystem::remove(file_path, error);
 
                 bs.write<std::string_view>("Delete file: ");
-                bs.write<std::string_view>(_file_path.string());
+                bs.write<std::string_view>(file_path.string());
                 bs.write<std::string_view>("\r\n");
             }
         }
-        catch (const std::exception&)
+        catch (const std::exception& e)
         {
-
+            bs.write<std::string_view>("Exception during cleanup: ");
+            bs.write<std::string_view>(e.what());
+            bs.write<std::string_view>("\r\n");
         }
 
         bs.write<std::string_view>("Finish cleanup\r\n");
-        core::g_core->write_data_to_network_log(std::move(bs));
+        
+        if (core::g_core)
+            core::g_core->write_data_to_network_log(std::move(bs));
     }
 }
