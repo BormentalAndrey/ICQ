@@ -1,5 +1,9 @@
 #pragma once
 
+#include <string>
+#include <chrono>
+#include <cstddef>
+
 namespace features
 {
     int get_zstd_compression_level();
@@ -55,5 +59,8 @@ namespace features
     size_t maximum_history_file_size();
 
     size_t wim_parallel_packets_count();
-    void cleanup_cache(const std::wstring& content_cache_dir_);
+    
+    // Используем std::string на всех платформах для совместимости
+    // При необходимости конвертируем в std::wstring внутри реализации
+    void cleanup_cache(const std::string& content_cache_dir_);
 }
