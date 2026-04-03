@@ -1,4 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Названия приложения -->
     <string name="app_name">ICQ Mobile</string>
     <string name="app_name_full">ICQ Messenger</string>
     
@@ -9,6 +11,18 @@
     <string name="no">No</string>
     <string name="close">Close</string>
     <string name="retry">Retry</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="edit">Edit</string>
+    <string name="share">Share</string>
+    <string name="copy">Copy</string>
+    <string name="paste">Paste</string>
+    <string name="search">Search</string>
+    <string name="loading">Loading...</string>
+    <string name="error">Error</string>
+    <string name="success">Success</string>
+    <string name="warning">Warning</string>
+    <string name="info">Info</string>
     
     <!-- Строки для звонков -->
     <string name="call_incoming">Incoming call...</string>
@@ -18,8 +32,99 @@
     <string name="call_ended">Call ended</string>
     <string name="call_missed">Missed call</string>
     <string name="call_rejected">Call rejected</string>
+    <string name="call_accept">Accept</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_end">End call</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_unmute">Unmute</string>
+    <string name="call_speaker_on">Speaker on</string>
+    <string name="call_speaker_off">Speaker off</string>
+    <string name="call_video_on">Video on</string>
+    <string name="call_video_off">Video off</string>
+    <string name="call_switch_camera">Switch camera</string>
     
     <!-- Строки для разрешений -->
     <string name="permission_camera_required">Camera permission is required for video calls</string>
     <string name="permission_microphone_required">Microphone permission is required for calls</string>
+    <string name="permission_notifications_required">Notification permission is required to receive message alerts</string>
+    <string name="permission_storage_required">Storage permission is required to save files</string>
+    <string name="permission_contacts_required">Contacts permission is required to find friends</string>
+    <string name="permission_bluetooth_required">Bluetooth permission is required for hands-free calls</string>
+    
+    <!-- Строки для настроек -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="settings_general">General</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_chats">Chats</string>
+    <string name="settings_calls">Calls</string>
+    <string name="settings_data">Data and Storage</string>
+    <string name="settings_about">About</string>
+    <string name="settings_help">Help</string>
+    
+    <!-- Строки для уведомлений -->
+    <string name="notification_new_message">New message</string>
+    <string name="notification_incoming_call">Incoming call</string>
+    <string name="notification_missed_call">Missed call</string>
+    
+    <!-- Строки для ошибок -->
+    <string name="error_network">Network error. Please check your connection.</string>
+    <string name="error_server">Server error. Please try again later.</string>
+    <string name="error_unknown">An unknown error occurred</string>
+    <string name="error_no_internet">No internet connection</string>
+    <string name="error_timeout">Connection timeout</string>
+    <string name="error_auth">Authentication failed</string>
+    
+    <!-- Строки для чата -->
+    <string name="chat_type_message">Type a message...</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_attach_file">Attach file</string>
+    <string name="chat_take_photo">Take photo</string>
+    <string name="chat_choose_from_gallery">Choose from gallery</string>
+    <string name="chat_record_audio">Record audio</string>
+    <string name="chat_send_location">Send location</string>
+    
+    <!-- Строки для контактов -->
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_add">Add contact</string>
+    <string name="contacts_delete">Delete contact</string>
+    <string name="contacts_block">Block contact</string>
+    <string name="contacts_unblock">Unblock contact</string>
+    <string name="contacts_search_hint">Search contacts...</string>
+    
+    <!-- Строки для версии и информации -->
+    <string name="version_format">Version %s (%d)</string>
+    <string name="version_unknown">Version unknown</string>
+    <string name="core_version_format">Core version: %s</string>
+    <string name="core_version_unknown">Core version unknown</string>
+    <string name="core_not_initialized">Core not initialized</string>
+    
+    <!-- Строки для очистки кэша -->
+    <string name="clear_cache">Clear cache</string>
+    <string name="clear_cache_title">Clear cache</string>
+    <string name="clear_cache_message">Are you sure you want to clear the cache? This will remove temporary files.</string>
+    <string name="cache_cleared">Cache cleared</string>
+    <string name="clear_cache_error">Failed to clear cache</string>
+    
+    <!-- Строки для логаута -->
+    <string name="logout">Logout</string>
+    <string name="logout_title">Logout</string>
+    <string name="logout_message">Are you sure you want to logout?</string>
+    <string name="logout_success">Logged out successfully</string>
+    <string name="logout_error">Failed to logout</string>
+    
+    <!-- Строки для диалога "О приложении" -->
+    <string name="about_title">About ICQ</string>
+    <string name="about_message">ICQ Mobile Messenger\nVersion 2.0.0\n\n© 2024 ICQ. All rights reserved.</string>
+    
+    <!-- Строки для тем -->
+    <string name="theme_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    
+    <!-- Строки для качества звонков -->
+    <string name="quality_low">Low (Save data)</string>
+    <string name="quality_medium">Medium</string>
+    <string name="quality_high">High (Best quality)</string>
 </resources>
