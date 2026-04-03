@@ -12,14 +12,14 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "2.0.0-Dzin-Mobile"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         externalNativeBuild {
             cmake {
-                val boostRoot = project.findProperty("boost.root")?.toString() ?: ""
-                val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() ?: ""
+                val boostRoot = project.findProperty("boost.root")?.toString() ?: "${project.rootDir}/boost_1_83_0"
+                val rapidjsonRoot = project.findProperty("rapidjson.root")?.toString() ?: "${project.rootDir}/rapidjson"
 
                 val qtAndroidPath = file("${project.rootDir}/Qt/android_arm64_v8a").absolutePath
                 val qtHostPath = file("${project.rootDir}/Qt/gcc_64").absolutePath
@@ -55,7 +55,8 @@ android {
                     "-I$rapidjsonRoot/include"
                 ).filter { it.isNotEmpty() }
 
-                abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+                // Поддерживаемые ABI (архитектуры)
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
             }
         }
     }
@@ -64,10 +65,18 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Release" } }
+            externalNativeBuild { 
+                cmake { 
+                    arguments += "-DCMAKE_BUILD_TYPE=Release" 
+                }
+            }
         }
         debug {
-            externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Debug" } }
+            externalNativeBuild { 
+                cmake { 
+                    arguments += "-DCMAKE_BUILD_TYPE=Debug" 
+                }
+            }
         }
     }
 
@@ -79,7 +88,10 @@ android {
     }
 
     packaging {
-        jniLibs { pickFirsts.add("lib/**/libc++_shared.so") }
+        jniLibs {
+            pickFirsts.add("lib/**/libc++_shared.so")
+            pickFirsts.add("lib/**/libjingle_peerconnection_so.so")
+        }
     }
 
     compileOptions {
@@ -87,20 +99,49 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions { 
+        jvmTarget = "17"
+    }
 
     buildFeatures {
         viewBinding = true
         buildConfig = true
+        dataBinding = true
     }
 }
 
 dependencies {
+    // AndroidX Core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.activity:activity-ktx:1.8.0")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    
+    // UI Components
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("io.github.webrtc-sdk:android:137.7151.05")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.cardview:cardview:1.0.0")
+    
+    // Lifecycle & Coroutines
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    
+    // WebRTC
+    implementation("io.github.webrtc-sdk:android:137.7151.05")
+    
+    // Navigation Component
+    implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
+    implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
+    
+    // DataStore (для настроек)
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
