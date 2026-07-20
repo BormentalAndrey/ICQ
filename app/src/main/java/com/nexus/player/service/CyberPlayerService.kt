@@ -22,13 +22,11 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import com.nexus.player.NexusApplication
 import com.nexus.player.R
 import com.nexus.player.data.local.PreferencesManager
 import com.nexus.player.data.model.PlaybackResult
 import com.nexus.player.di.AppModule
 import com.nexus.player.player.audio.EqualizerEngine
-import com.nexus.player.player.audio.KaraokeProcessor
 import com.nexus.player.player.core.CorruptedFileHandler
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -59,7 +57,6 @@ class CyberPlayerService : Service() {
     private val preferencesManager: PreferencesManager by lazy { AppModule.providePreferencesManager() }
     private val corruptedFileHandler: CorruptedFileHandler by lazy { AppModule.provideCorruptedFileHandler() }
     private val equalizerEngine: EqualizerEngine by lazy { AppModule.provideEqualizerEngine() }
-    private val karaokeProcessor: KaraokeProcessor by lazy { AppModule.provideKaraokeProcessor() }
     
     private val _playbackState = MutableStateFlow<PlaybackResult>(PlaybackResult.Success)
     val playbackState: StateFlow<PlaybackResult> = _playbackState.asStateFlow()
