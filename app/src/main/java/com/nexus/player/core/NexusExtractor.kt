@@ -1,19 +1,14 @@
 package com.nexus.player.player.core
 
-import android.media.MediaCodec
-import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorInput
 import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.PositionHolder
-import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
-import java.io.EOFException
 import java.io.IOException
 
 @UnstableApi
@@ -22,7 +17,7 @@ class NexusExtractor : Extractor {
     companion object {
         private const val TAG = "NexusExtractor"
         private const val MAX_RETRY_COUNT = 3
-        private const val BUFFER_SIZE = 256 * 1024 // 256KB buffer
+        private const val BUFFER_SIZE = 256 * 1024
     }
     
     private var output: ExtractorOutput? = null
@@ -40,10 +35,8 @@ class NexusExtractor : Extractor {
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
         return try {
             if (bytesRead == 0 && currentPosition == 0L) {
-                // First read, try to detect format
                 fileLength = input.length
                 
-                // Read initial data
                 bytesRead = input.read(sampleData, 0, sampleData.size)
                 if (bytesRead == C.RESULT_END_OF_INPUT) {
                     return Extractor.RESULT_END_OF_INPUT
@@ -51,17 +44,16 @@ class NexusExtractor : Extractor {
                 
                 currentPosition = bytesRead.toLong()
                 
-                // Create a track for the media
                 val trackOutput = output?.track(0, C.TRACK_TYPE_UNKNOWN)
                 if (trackOutput != null) {
-                    trackOutput.format(MediaFormat().apply {
-                        setString(MediaFormat.KEY_MIME, "audio/raw")
-                        setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100)
-                        setInteger(MediaFormat.KEY_CHANNEL_COUNT, 2)
-                        setInteger(MediaFormat.KEY_BIT_RATE, 128000)
-                    })
+                    val format = androidx.media3.common.Format.Builder()
+                        .setSampleMimeType("audio/raw")
+                        .setSampleRate(44100)
+                        .setChannelCount(2)
+                        .setAverageBitrate(128000)
+                        .build()
                     
-                    // Output the sample
+                    trackOutput.format(format)
                     trackOutput.sampleData(input, bytesRead, false)
                     trackOutput.sampleMetadata(
                         0,
@@ -74,7 +66,6 @@ class NexusExtractor : Extractor {
                 
                 Extractor.RESULT_CONTINUE
             } else {
-                // Continue reading
                 bytesRead = input.read(sampleData, 0, sampleData.size)
                 if (bytesRead == C.RESULT_END_OF_INPUT) {
                     return Extractor.RESULT_END_OF_INPUT
@@ -100,9 +91,8 @@ class NexusExtractor : Extractor {
             
             if (retryCount < MAX_RETRY_COUNT) {
                 retryCount++
-                // Skip corrupted data and continue
                 try {
-                    input.skip(1024) // Skip 1KB of corrupted data
+                    input.skip(1024)
                     return Extractor.RESULT_CONTINUE
                 } catch (skipException: Exception) {
                     Log.e(TAG, "Failed to skip corrupted data", skipException)
@@ -131,7 +121,6 @@ class NexusExtractor : Extractor {
             val header = ByteArray(16)
             input.peekFully(header, 0, header.size)
             
-            // Check for common audio/video signatures
             val isMp3 = header[0] == 0xFF.toByte() && (header[1].toInt() and 0xE0) == 0xE0
             val isId3 = header[0] == 0x49.toByte() && header[1] == 0x44.toByte() && header[2] == 0x33.toByte()
             val isWav = header[0] == 0x52.toByte() && header[1] == 0x49.toByte() && header[2] == 0x46.toByte() && header[3] == 0x46.toByte()
