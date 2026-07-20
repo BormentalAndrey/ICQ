@@ -4,9 +4,9 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
-import android.provider.OpenableColumns
 import com.nexus.player.data.model.MediaFormat
 import com.nexus.player.data.model.MediaItem
+import com.nexus.player.data.model.PlaybackResult
 import com.nexus.player.player.core.CorruptedFileHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -19,13 +19,8 @@ class MediaRepository(private val context: Context) {
     private val handler = CorruptedFileHandler()
     
     fun scanAllMedia(): Flow<MediaItem> = flow {
-        // Scan audio files
         scanAudioFiles().forEach { emit(it) }
-        
-        // Scan video files
         scanVideoFiles().forEach { emit(it) }
-        
-        // Scan files from custom directories
         scanCustomDirectories().forEach { emit(it) }
     }.flowOn(Dispatchers.IO)
     
@@ -69,18 +64,15 @@ class MediaRepository(private val context: Context) {
                     val albumId = cursor.getLong(albumIdCol)
                     val mimeType = cursor.getString(mimeCol) ?: "audio/*"
                     
-                    // Check if file exists and is readable
                     val file = File(path)
                     if (!file.exists() || !file.canRead()) {
                         continue
                     }
                     
-                    // If duration is invalid, try to estimate it
                     if (duration <= 0) {
                         duration = handler.estimateDuration(path)
                     }
                     
-                    // Get album art URI
                     val albumArtUri = if (albumId > 0) {
                         ContentUris.withAppendedId(
                             Uri.parse("content://media/external/audio/albumart"),
@@ -104,7 +96,6 @@ class MediaRepository(private val context: Context) {
                         )
                     )
                 } catch (e: Exception) {
-                    // Skip corrupted entries
                     continue
                 }
             }
@@ -229,32 +220,37 @@ class MediaRepository(private val context: Context) {
         try {
             val file = File(filePath)
             if (!file.exists()) {
-                emit(PlaybackResult.FatalError(
-                    throwable = IllegalStateException("File not found"),
-                    canAttemptRecovery = false
-                ))
+                emit(
+                    PlaybackResult.FatalError(
+                        throwable = IllegalStateException("File not found"),
+                        canAttemptRecovery = false
+                    )
+                )
                 return@flow
             }
             
             val repairedFile = handler.repairFile(filePath)
-            val progress = 0.5f
-            emit(PlaybackResult.RecoveryInProgress(progress))
+            emit(PlaybackResult.RecoveryInProgress(0.5f))
             
             if (repairedFile != null && repairedFile.exists()) {
                 emit(PlaybackResult.RecoveryInProgress(1.0f))
-                emit(PlaybackResult.RecoveryComplete(
-                    success = true,
-                    recoveredPath = repairedFile.absolutePath
-                ))
+                emit(
+                    PlaybackResult.RecoveryComplete(
+                        success = true,
+                        recoveredPath = repairedFile.absolutePath
+                    )
+                )
             } else {
                 emit(PlaybackResult.RecoveryComplete(success = false))
             }
         } catch (e: Exception) {
-            emit(PlaybackResult.FatalError(
-                throwable = e,
-                canAttemptRecovery = false,
-                userMessage = "Ошибка восстановления: ${e.message}"
-            ))
+            emit(
+                PlaybackResult.FatalError(
+                    throwable = e,
+                    canAttemptRecovery = false,
+                    userMessage = "Ошибка восстановления: ${e.message}"
+                )
+            )
         }
     }.flowOn(Dispatchers.IO)
 }
