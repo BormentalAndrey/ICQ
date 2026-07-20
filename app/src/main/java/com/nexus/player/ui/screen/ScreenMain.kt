@@ -42,7 +42,6 @@ import com.nexus.player.player.service.CyberPlayerService
 import com.nexus.player.ui.components.*
 import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
-import kotlinx.coroutines.flow.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,21 +57,14 @@ fun ScreenMain() {
     var showPlaylist by remember { mutableStateOf(false) }
     var selectedPreset by remember { mutableStateOf("Flat") }
     
-    // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.values.all { it }) {
-            // Load media
-            LaunchedEffect(Unit) {
-                mediaRepository.scanAllMedia().collect { item ->
-                    mediaItems = mediaItems + item
-                }
-            }
+            // Permissions granted, loading handled by LaunchedEffect below
         }
     }
     
-    // Check and request permissions
     LaunchedEffect(Unit) {
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(
@@ -100,35 +92,18 @@ fun ScreenMain() {
         }
     }
     
-    // Service connection
-    var playerService by remember { mutableStateOf<CyberPlayerService?>(null) }
-    val serviceConnection = remember {
-        object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                // In a real implementation, you'd use AIDL or Messenger
-                // For now, we start the service directly
-            }
-            
-            override fun onServiceDisconnected(name: ComponentName?) {
-                playerService = null
-            }
-        }
-    }
-    
     fun startPlayback(item: MediaItem) {
         currentTrack = item
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
         }
-        context.startForegroundService(intent)
         
-        // Bind to service
-        context.bindService(
-            Intent(context, CyberPlayerService::class.java),
-            serviceConnection,
-            Context.BIND_AUTO_CREATE
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
         
         isPlaying = true
     }
@@ -142,7 +117,6 @@ fun ScreenMain() {
     }
     
     Box(modifier = Modifier.fillMaxSize()) {
-        // Particle background
         ParticleBackground()
         
         Column(
@@ -151,7 +125,6 @@ fun ScreenMain() {
                 .padding(16.dp)
                 .systemBarsPadding()
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -163,7 +136,7 @@ fun ScreenMain() {
                 )
                 
                 Row {
-                    IconButton(onClick = { /* Search */ }) {
+                    IconButton(onClick = { }) {
                         Icon(
                             Icons.Default.Search,
                             contentDescription = "Search",
@@ -177,7 +150,7 @@ fun ScreenMain() {
                             tint = NexusColors.Cyan
                         )
                     }
-                    IconButton(onClick = { /* Settings */ }) {
+                    IconButton(onClick = { }) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "Settings",
@@ -189,9 +162,7 @@ fun ScreenMain() {
             
             Spacer(modifier = Modifier.height(24.dp))
             
-            // Main content
             if (showPlaylist) {
-                // Playlist view
                 AnimatedVisibility(
                     visible = showPlaylist,
                     enter = fadeIn() + slideInVertically(),
@@ -211,7 +182,6 @@ fun ScreenMain() {
                     }
                 }
             } else {
-                // Now playing view
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -219,7 +189,6 @@ fun ScreenMain() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Album art
                     GlitchArtWork(
                         modifier = Modifier.size(300.dp),
                         albumArtUri = currentTrack?.albumArtUri,
@@ -229,7 +198,6 @@ fun ScreenMain() {
                     
                     Spacer(modifier = Modifier.height(32.dp))
                     
-                    // Track info
                     currentTrack?.let { track ->
                         NeonText(
                             text = track.name,
@@ -260,7 +228,6 @@ fun ScreenMain() {
                     
                     Spacer(modifier = Modifier.height(24.dp))
                     
-                    // Spectrum visualizer
                     SpectrumVisualizer(
                         modifier = Modifier.fillMaxWidth().height(150.dp),
                         isPlaying = isPlaying
@@ -268,7 +235,6 @@ fun ScreenMain() {
                     
                     Spacer(modifier = Modifier.height(24.dp))
                     
-                    // Equalizer presets
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
@@ -296,18 +262,16 @@ fun ScreenMain() {
             }
         }
         
-        // Bottom player controls
         GlassMorphicPanel(
             modifier = Modifier.align(Alignment.BottomCenter),
             isPlaying = isPlaying,
             currentPosition = currentPosition,
             duration = currentTrack?.duration ?: 0,
             onPlayPauseClick = { togglePlayPause() },
-            onNextClick = { /* Play next track */ },
-            onPreviousClick = { /* Play previous track */ }
+            onNextClick = { },
+            onPreviousClick = { }
         )
         
-        // Error overlay
         AnimatedVisibility(
             visible = playbackResult !is PlaybackResult.Success,
             modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)
@@ -354,9 +318,7 @@ fun ScreenMain() {
                             if (result.canAttemptRecovery) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
-                                    onClick = {
-                                        // Attempt recovery
-                                    },
+                                    onClick = { },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color.White
                                     )
@@ -402,7 +364,6 @@ fun MediaItemRow(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album art thumbnail
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -414,21 +375,12 @@ fun MediaItemRow(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (isPlaying) {
-                    Icon(
-                        Icons.Default.Equalizer,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Equalizer else Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
             }
             
             Spacer(modifier = Modifier.width(12.dp))
@@ -452,7 +404,6 @@ fun MediaItemRow(
                 )
             }
             
-            // Duration
             Text(
                 text = formatDuration(item.duration),
                 style = MaterialTheme.typography.bodySmall,
