@@ -24,7 +24,7 @@ class NexusApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channels = listOf(
                 NotificationChannel(
-                    CyberPlayerService.CHANNEL_ID,
+                    CHANNEL_ID,
                     "Nexus Player Service",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
@@ -32,7 +32,7 @@ class NexusApplication : Application() {
                     setShowBadge(false)
                 },
                 NotificationChannel(
-                    CyberPlayerService.ERROR_CHANNEL_ID,
+                    ERROR_CHANNEL_ID,
                     "Playback Errors",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
@@ -46,6 +46,9 @@ class NexusApplication : Application() {
     }
     
     companion object {
+        const val CHANNEL_ID = "nexus_player_channel"
+        const val ERROR_CHANNEL_ID = "nexus_player_errors"
+        
         lateinit var instance: NexusApplication
             private set
     }
