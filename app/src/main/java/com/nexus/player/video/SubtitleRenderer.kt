@@ -1,4 +1,4 @@
-package com.nexus.player.video
+package com.nexus.player.player.video
 
 import android.content.Context
 import android.graphics.Canvas
@@ -7,14 +7,10 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.Log
 import androidx.media3.common.text.Cue
-import androidx.media3.common.text.CueGroup
-import androidx.media3.exoplayer.text.CueDecoder
-import androidx.media3.extractor.text.SubtitleParser
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStreamReader
-import java.nio.ByteBuffer
 import java.util.regex.Pattern
 
 class SubtitleRenderer(private val context: Context) {
@@ -70,14 +66,15 @@ class SubtitleRenderer(private val context: Context) {
     fun loadSubtitle(filePath: String) {
         subtitleFile = File(filePath)
         
-        if (!subtitleFile?.exists()!!) {
+        val file = subtitleFile
+        if (file == null || !file.exists()) {
             Log.e(TAG, "Subtitle file not found: $filePath")
             return
         }
         
         subtitles = when {
-            filePath.endsWith(".srt", true) -> parseSrtFile(subtitleFile!!)
-            filePath.endsWith(".ass", true) || filePath.endsWith(".ssa", true) -> parseAssFile(subtitleFile!!)
+            filePath.endsWith(".srt", true) -> parseSrtFile(file)
+            filePath.endsWith(".ass", true) || filePath.endsWith(".ssa", true) -> parseAssFile(file)
             else -> {
                 Log.e(TAG, "Unsupported subtitle format: $filePath")
                 emptyList()
@@ -110,12 +107,10 @@ class SubtitleRenderer(private val context: Context) {
         val text = subtitle.text
         if (text.isEmpty()) return
         
-        // Calculate text position
         val textWidth = textPaint.measureText(text)
         val x = width / 2f
         val y = height * 0.85f
         
-        // Draw background
         val padding = 16f
         val bgLeft = x - textWidth / 2 - padding
         val bgRight = x + textWidth / 2 + padding
@@ -123,8 +118,6 @@ class SubtitleRenderer(private val context: Context) {
         val bgBottom = y + padding
         
         canvas.drawRect(bgLeft, bgTop, bgRight, bgBottom, backgroundPaint)
-        
-        // Draw text
         canvas.drawText(text, x, y, textPaint)
     }
     
@@ -151,16 +144,14 @@ class SubtitleRenderer(private val context: Context) {
         
         try {
             BufferedReader(InputStreamReader(FileInputStream(file), "UTF-8")).use { reader ->
-                var line: String?
                 var index = 0
                 
-                while (reader.readLine().also { line = it } != null) {
-                    if (line.isNullOrBlank()) continue
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isBlank()) continue
                     
-                    // Parse index
-                    index = line!!.trim().toIntOrNull() ?: continue
+                    index = line.trim().toIntOrNull() ?: continue
                     
-                    // Parse time
                     val timeLine = reader.readLine() ?: break
                     val timeMatcher = SRT_TIME_PATTERN.matcher(timeLine)
                     
@@ -179,16 +170,14 @@ class SubtitleRenderer(private val context: Context) {
                     val startTime = ((startHours * 3600 + startMinutes * 60 + startSeconds) * 1000L) + startMillis
                     val endTime = ((endHours * 3600 + endMinutes * 60 + endSeconds) * 1000L) + endMillis
                     
-                    // Parse text (may be multiple lines)
                     val textBuilder = StringBuilder()
-                    var textLine: String?
-                    while (reader.readLine().also { textLine = it } != null) {
-                        if (textLine.isNullOrBlank()) break
+                    while (true) {
+                        val textLine = reader.readLine() ?: break
+                        if (textLine.isBlank()) break
                         if (textBuilder.isNotEmpty()) textBuilder.append("\n")
                         textBuilder.append(textLine)
                     }
                     
-                    // Parse style tags
                     val style = parseSrtStyle(textBuilder.toString())
                     val cleanText = stripSrtTags(textBuilder.toString())
                     
@@ -216,14 +205,13 @@ class SubtitleRenderer(private val context: Context) {
         
         try {
             BufferedReader(InputStreamReader(FileInputStream(file), "UTF-8")).use { reader ->
-                var line: String?
                 var index = 0
                 
-                while (reader.readLine().also { line = it } != null) {
-                    if (line == null) break
+                while (true) {
+                    val line = reader.readLine() ?: break
                     
                     when {
-                        line!!.startsWith("[Events]") -> {
+                        line.startsWith("[Events]") -> {
                             inEvents = true
                             continue
                         }
@@ -262,7 +250,6 @@ class SubtitleRenderer(private val context: Context) {
     }
     
     private fun parseAssTime(time: String): Long {
-        // Format: H:MM:SS.CC
         val parts = time.split(":")
         if (parts.size != 3) return 0
         
@@ -288,7 +275,6 @@ class SubtitleRenderer(private val context: Context) {
         if (text.contains("<i>", true)) italic = true
         if (text.contains("<u>", true)) underline = true
         
-        // Parse color if present
         val colorPattern = Pattern.compile("<font\\s+color=[\"']([#\\w]+)[\"']>", Pattern.CASE_INSENSITIVE)
         val colorMatcher = colorPattern.matcher(text)
         if (colorMatcher.find()) {
