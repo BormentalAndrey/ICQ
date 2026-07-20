@@ -26,7 +26,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +53,7 @@ fun ScreenMain() {
     var isPlaying by remember { mutableStateOf(false) }
     var currentTrack by remember { mutableStateOf<MediaItem?>(null) }
     var currentPosition by remember { mutableStateOf(0L) }
+    var duration by remember { mutableStateOf(0L) }
     var playbackResult by remember { mutableStateOf<PlaybackResult>(PlaybackResult.Success) }
     var showPlaylist by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(MediaTab.AUDIO) }
@@ -61,28 +61,46 @@ fun ScreenMain() {
     var isLoading by remember { mutableStateOf(true) }
     var isScanning by remember { mutableStateOf(false) }
 
-    // Продакшен-синхронизация состояния UI и фонового сервиса CyberPlayerService
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
+                if (intent == null) return
+                when (intent.action) {
                     CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED -> {
                         isPlaying = intent.getBooleanExtra(CyberPlayerService.EXTRA_IS_PLAYING, false)
-                    }
-                    CyberPlayerService.ACTION_PROGRESS_UPDATE -> {
                         currentPosition = intent.getLongExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, 0L)
+                        duration = intent.getLongExtra(CyberPlayerService.EXTRA_DURATION, 0L)
+                    }
+                    CyberPlayerService.ACTION_POSITION_UPDATED -> {
+                        currentPosition = intent.getLongExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, 0L)
+                        duration = intent.getLongExtra(CyberPlayerService.EXTRA_DURATION, 0L)
                     }
                     CyberPlayerService.ACTION_TRACK_CHANGED -> {
                         val trackPath = intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH)
-                        val allItems = audioItems + videoItems
-                        currentTrack = allItems.find { it.path == trackPath }
+                        if (trackPath != null) {
+                            val allItems = audioItems + videoItems
+                            currentTrack = allItems.find { it.path == trackPath }
+                        }
                     }
-                    CyberPlayerService.ACTION_ERROR -> {
+                    CyberPlayerService.ACTION_ERROR_OCCURRED -> {
                         val errorMessage = intent.getStringExtra(CyberPlayerService.EXTRA_ERROR_MESSAGE) ?: "Ошибка воспроизведения"
-                        playbackResult = PlaybackResult.FatalError(
-                            userMessage = errorMessage,
-                            canAttemptRecovery = true
-                        )
+                        val damagePercent = intent.getFloatExtra(CyberPlayerService.EXTRA_DAMAGE_PERCENT, 0f)
+                        if (damagePercent > 0f) {
+                            playbackResult = PlaybackResult.CorruptedButPlaying(
+                                damagePercent = damagePercent,
+                                message = errorMessage
+                            )
+                        } else {
+                            playbackResult = PlaybackResult.FatalError(
+                                throwable = Exception(errorMessage),
+                                userMessage = errorMessage,
+                                canAttemptRecovery = true
+                            )
+                        }
+                    }
+                    CyberPlayerService.ACTION_RECOVERY_PROGRESS -> {
+                        val progress = intent.getFloatExtra(CyberPlayerService.EXTRA_RECOVERY_PROGRESS, 0f)
+                        playbackResult = PlaybackResult.RecoveryInProgress(progress)
                     }
                 }
             }
@@ -90,9 +108,10 @@ fun ScreenMain() {
         
         val filter = IntentFilter().apply {
             addAction(CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED)
-            addAction(CyberPlayerService.ACTION_PROGRESS_UPDATE)
+            addAction(CyberPlayerService.ACTION_POSITION_UPDATED)
             addAction(CyberPlayerService.ACTION_TRACK_CHANGED)
-            addAction(CyberPlayerService.ACTION_ERROR)
+            addAction(CyberPlayerService.ACTION_ERROR_OCCURRED)
+            addAction(CyberPlayerService.ACTION_RECOVERY_PROGRESS)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -105,7 +124,7 @@ fun ScreenMain() {
             try {
                 context.unregisterReceiver(receiver)
             } catch (e: Exception) {
-                // Игнорируем исключение, если ресивер уже был отрегистрирован системой
+                // Receiver already unregistered
             }
         }
     }
@@ -114,7 +133,6 @@ fun ScreenMain() {
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.values.all { it }) {
-            // Permissions granted, scan media
             scope.launch {
                 scanMedia(
                     repository = mediaRepository,
@@ -150,9 +168,7 @@ fun ScreenMain() {
                 Manifest.permission.POST_NOTIFICATIONS
             )
         } else {
-            arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            )
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
         
         val needsPermission = permissions.any {
@@ -172,8 +188,6 @@ fun ScreenMain() {
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
-            putExtra(CyberPlayerService.EXTRA_MEDIA_TITLE, item.name)
-            putExtra(CyberPlayerService.EXTRA_MEDIA_ARTIST, item.artist)
         }
         
         try {
@@ -185,6 +199,7 @@ fun ScreenMain() {
             isPlaying = true
         } catch (e: Exception) {
             playbackResult = PlaybackResult.FatalError(
+                throwable = e,
                 userMessage = "Не удалось запустить службу плеера: ${e.localizedMessage}",
                 canAttemptRecovery = true
             )
@@ -231,6 +246,15 @@ fun ScreenMain() {
         }
     }
     
+    fun applyEqualizerPreset(preset: String) {
+        selectedPreset = preset
+        val eqIntent = Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_SET_EQUALIZER
+            putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
+        }
+        context.startService(eqIntent)
+    }
+    
     Box(modifier = Modifier.fillMaxSize()) {
         ParticleBackground()
         
@@ -240,16 +264,12 @@ fun ScreenMain() {
                 .padding(16.dp)
                 .systemBarsPadding()
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NeonGradientText(
-                    text = "NEXUS",
-                    fontSize = 32.sp
-                )
+                NeonGradientText(text = "NEXUS", fontSize = 32.sp)
                 
                 Row {
                     IconButton(onClick = { refreshMedia() }) {
@@ -269,32 +289,20 @@ fun ScreenMain() {
                 }
             }
             
-            // Media counts
             if (!showPlaylist) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "🎵 ${audioItems.size}",
-                        color = NexusColors.Cyan,
-                        fontFamily = CyberpunkFontFamily,
-                        fontSize = 14.sp
-                    )
+                    Text("🎵 ${audioItems.size}", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
                     Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "🎬 ${videoItems.size}",
-                        color = NexusColors.Purple,
-                        fontFamily = CyberpunkFontFamily,
-                        fontSize = 14.sp
-                    )
+                    Text("🎬 ${videoItems.size}", color = NexusColors.Purple, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
                 }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
             
             if (showPlaylist) {
-                // Tabs
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
@@ -302,13 +310,7 @@ fun ScreenMain() {
                     FilterChip(
                         selected = selectedTab == MediaTab.AUDIO,
                         onClick = { selectedTab = MediaTab.AUDIO },
-                        label = {
-                            Text(
-                                "🎵 АУДИО (${audioItems.size})",
-                                fontSize = 12.sp,
-                                fontFamily = CyberpunkFontFamily
-                            )
-                        },
+                        label = { Text("🎵 АУДИО (${audioItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f),
                             selectedLabelColor = NexusColors.NeonPink
@@ -318,13 +320,7 @@ fun ScreenMain() {
                     FilterChip(
                         selected = selectedTab == MediaTab.VIDEO,
                         onClick = { selectedTab = MediaTab.VIDEO },
-                        label = {
-                            Text(
-                                "🎬 ВИДЕО (${videoItems.size})",
-                                fontSize = 12.sp,
-                                fontFamily = CyberpunkFontFamily
-                            )
-                        },
+                        label = { Text("🎬 ВИДЕО (${videoItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f),
                             selectedLabelColor = NexusColors.Purple
@@ -334,29 +330,17 @@ fun ScreenMain() {
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                // Playlist content
                 AnimatedVisibility(
                     visible = showPlaylist,
                     enter = fadeIn() + slideInVertically(),
                     exit = fadeOut() + slideOutVertically()
                 ) {
                     if (isLoading || isScanning) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(
-                                    color = NexusColors.NeonPink,
-                                    modifier = Modifier.size(48.dp)
-                                )
+                                CircularProgressIndicator(color = NexusColors.NeonPink, modifier = Modifier.size(48.dp))
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "СКАНИРОВАНИЕ МЕДИА...",
-                                    color = NexusColors.Cyan,
-                                    fontFamily = CyberpunkFontFamily,
-                                    fontSize = 16.sp
-                                )
+                                Text("СКАНИРОВАНИЕ МЕДИА...", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 16.sp)
                             }
                         }
                     } else {
@@ -366,10 +350,7 @@ fun ScreenMain() {
                         }
                         
                         if (items.isEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
                                         if (selectedTab == MediaTab.AUDIO) Icons.Default.MusicOff else Icons.Default.VideoLibrary,
@@ -379,18 +360,14 @@ fun ScreenMain() {
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
-                                        text = if (selectedTab == MediaTab.AUDIO) "НЕТ АУДИО ФАЙЛОВ" else "НЕТ ВИДЕО ФАЙЛОВ",
+                                        if (selectedTab == MediaTab.AUDIO) "НЕТ АУДИО ФАЙЛОВ" else "НЕТ ВИДЕО ФАЙЛОВ",
                                         color = NexusColors.Cyan.copy(alpha = 0.5f),
                                         fontFamily = CyberpunkFontFamily,
                                         fontSize = 16.sp
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     TextButton(onClick = { refreshMedia() }) {
-                                        Text(
-                                            text = "ОБНОВИТЬ",
-                                            color = NexusColors.NeonPink,
-                                            fontFamily = CyberpunkFontFamily
-                                        )
+                                        Text("ОБНОВИТЬ", color = NexusColors.NeonPink, fontFamily = CyberpunkFontFamily)
                                     }
                                 }
                             }
@@ -411,11 +388,8 @@ fun ScreenMain() {
                     }
                 }
             } else {
-                // Now Playing View
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
+                    modifier = Modifier.fillMaxSize().weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -430,89 +404,35 @@ fun ScreenMain() {
                     
                     val track = currentTrack
                     if (track != null) {
-                        NeonText(
-                            text = track.name,
-                            fontSize = 22.sp,
-                            color = NexusColors.Cyan
-                        )
+                        NeonText(text = track.name, fontSize = 22.sp, color = NexusColors.Cyan)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = track.artist,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = NexusColors.White.copy(alpha = 0.7f),
-                            fontFamily = CyberpunkFontFamily
-                        )
+                        Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = NexusColors.White.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${track.format.name} • ${track.formattedDuration}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NexusColors.Purple.copy(alpha = 0.7f),
-                            fontFamily = CyberpunkFontFamily
-                        )
+                        Text("${track.format.name} • ${track.formattedDuration}", style = MaterialTheme.typography.bodySmall, color = NexusColors.Purple.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily)
                     } else {
-                        NeonText(
-                            text = "NEXUS PLAYER",
-                            fontSize = 28.sp,
-                            color = NexusColors.Cyan
-                        )
+                        NeonText(text = "NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Выберите трек из плейлиста",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = NexusColors.White.copy(alpha = 0.5f),
-                            fontFamily = CyberpunkFontFamily
-                        )
+                        Text("Выберите трек из плейлиста", style = MaterialTheme.typography.bodyLarge, color = NexusColors.White.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Найдено: 🎵${audioItems.size} аудио • 🎬${videoItems.size} видео",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NexusColors.Cyan.copy(alpha = 0.5f),
-                            fontFamily = CyberpunkFontFamily
-                        )
+                        Text("Найдено: 🎵${audioItems.size} аудио • 🎬${videoItems.size} видео", style = MaterialTheme.typography.bodySmall, color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
                     }
                     
                     Spacer(modifier = Modifier.height(24.dp))
                     
-                    SpectrumVisualizer(
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
-                        isPlaying = isPlaying
-                    )
+                    SpectrumVisualizer(modifier = Modifier.fillMaxWidth().height(120.dp), isPlaying = isPlaying)
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    // Equalizer presets
-                    Text(
-                        text = "ЭКВАЛАЙЗЕР",
-                        color = NexusColors.Cyan.copy(alpha = 0.7f),
-                        fontFamily = CyberpunkFontFamily,
-                        fontSize = 12.sp
-                    )
+                    Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         val presets = listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика")
                         presets.forEach { preset ->
                             FilterChip(
                                 selected = selectedPreset == preset,
-                                onClick = { 
-                                    selectedPreset = preset 
-                                    // Отправка пресета в сервис если необходимо
-                                    val eqIntent = Intent(context, CyberPlayerService::class.java).apply {
-                                        action = CyberPlayerService.ACTION_SET_EQUALIZER
-                                        putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
-                                    }
-                                    context.startService(eqIntent)
-                                },
-                                label = {
-                                    Text(
-                                        text = preset,
-                                        fontSize = 10.sp,
-                                        fontFamily = CyberpunkFontFamily
-                                    )
-                                },
+                                onClick = { applyEqualizerPreset(preset) },
+                                label = { Text(preset, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f),
                                     selectedLabelColor = NexusColors.NeonPink
@@ -524,18 +444,16 @@ fun ScreenMain() {
             }
         }
         
-        // Bottom player controls
         GlassMorphicPanel(
             modifier = Modifier.align(Alignment.BottomCenter),
             isPlaying = isPlaying,
             currentPosition = currentPosition,
-            duration = currentTrack?.duration ?: 0L,
+            duration = if (duration > 0) duration else (currentTrack?.duration ?: 0L),
             onPlayPauseClick = { togglePlayPause() },
             onNextClick = { playNext() },
             onPreviousClick = { playPrevious() }
         )
         
-        // Error overlay
         AnimatedVisibility(
             visible = playbackResult !is PlaybackResult.Success,
             modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)
@@ -544,56 +462,43 @@ fun ScreenMain() {
                 is PlaybackResult.CorruptedButPlaying -> {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = NexusColors.GoldenYellow.copy(alpha = 0.9f)
-                        )
+                        colors = CardDefaults.cardColors(containerColor = NexusColors.GoldenYellow.copy(alpha = 0.9f))
                     ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Black)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = result.message,
-                                color = Color.Black,
-                                fontFamily = CyberpunkFontFamily,
-                                fontSize = 14.sp
-                            )
+                            Text(result.message, color = Color.Black, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
                         }
                     }
                 }
                 is PlaybackResult.FatalError -> {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = NexusColors.BloodRed.copy(alpha = 0.9f)
-                        )
+                        colors = CardDefaults.cardColors(containerColor = NexusColors.BloodRed.copy(alpha = 0.9f))
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = result.userMessage,
-                                color = Color.White,
-                                fontFamily = CyberpunkFontFamily,
-                                fontSize = 14.sp
-                            )
+                            Text(result.userMessage, color = Color.White, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
                             if (result.canAttemptRecovery) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
-                                    onClick = { 
-                                        playbackResult = PlaybackResult.Success
-                                        refreshMedia() 
-                                    },
+                                    onClick = { playbackResult = PlaybackResult.Success; refreshMedia() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White)
                                 ) {
-                                    Text(
-                                        text = "ПОПЫТАТЬСЯ ВОССТАНОВИТЬ",
-                                        color = Color.Black,
-                                        fontFamily = CyberpunkFontFamily,
-                                        fontSize = 12.sp
-                                    )
+                                    Text("ПОПЫТАТЬСЯ ВОССТАНОВИТЬ", color = Color.Black, fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
                                 }
                             }
+                        }
+                    }
+                }
+                is PlaybackResult.RecoveryInProgress -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = NexusColors.Cyan.copy(alpha = 0.9f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Восстановление... ${(result.progress * 100).toInt()}%", color = Color.Black, fontFamily = CyberpunkFontFamily)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(progress = { result.progress }, modifier = Modifier.fillMaxWidth(), color = NexusColors.NeonPink)
                         }
                     }
                 }
@@ -604,42 +509,22 @@ fun ScreenMain() {
 }
 
 @Composable
-fun MediaItemRow(
-    item: MediaItem,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
+fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onClick() },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
         colors = CardDefaults.cardColors(
-            containerColor = if (isPlaying) 
-                NexusColors.NeonPink.copy(alpha = 0.2f) 
-            else 
-                NexusColors.GlassBlack
+            containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.2f) else NexusColors.GlassBlack
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = if (item.isVideo)
-                                listOf(NexusColors.Purple, NexusColors.BloodRed)
-                            else
-                                listOf(NexusColors.Purple, NexusColors.Cyan)
-                        )
-                    ),
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(
+                    Brush.linearGradient(
+                        colors = if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed)
+                        else listOf(NexusColors.Purple, NexusColors.Cyan)
+                    )
+                ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -648,62 +533,30 @@ fun MediaItemRow(
                         isPlaying -> Icons.Default.Equalizer
                         else -> Icons.Default.MusicNote
                     },
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp)
                 )
             }
             
             Spacer(modifier = Modifier.width(12.dp))
             
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (isPlaying) NexusColors.NeonPink else NexusColors.White,
-                    fontFamily = CyberpunkFontFamily,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Text(item.name, style = MaterialTheme.typography.titleMedium, color = if (isPlaying) NexusColors.NeonPink else NexusColors.White, fontFamily = CyberpunkFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row {
-                    Text(
-                        text = item.format.name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NexusColors.Cyan.copy(alpha = 0.7f),
-                        fontFamily = CyberpunkFontFamily
-                    )
+                    Text(item.format.name, style = MaterialTheme.typography.bodySmall, color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily)
                     if (item.artist != "Unknown Artist") {
-                        Text(
-                            text = " • ${item.artist}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NexusColors.White.copy(alpha = 0.6f),
-                            fontFamily = CyberpunkFontFamily,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(" • ${item.artist}", style = MaterialTheme.typography.bodySmall, color = NexusColors.White.copy(alpha = 0.6f), fontFamily = CyberpunkFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
             
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = item.formattedDuration,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NexusColors.Cyan,
-                    fontFamily = CyberpunkFontFamily
-                )
-                Text(
-                    text = if (item.isVideo) "VIDEO" else "AUDIO",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NexusColors.Purple.copy(alpha = 0.6f),
-                    fontFamily = CyberpunkFontFamily
-                )
+                Text(item.formattedDuration, style = MaterialTheme.typography.bodySmall, color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily)
+                Text(if (item.isVideo) "VIDEO" else "AUDIO", style = MaterialTheme.typography.labelSmall, color = NexusColors.Purple.copy(alpha = 0.6f), fontFamily = CyberpunkFontFamily)
             }
         }
     }
 }
 
-// Функция сканирования медиа - ПОЛНОСТЬЮ ПРОДАКШЕН-ВЕРСИЯ С IO-ДИСПЕТЧЕРОМ
 private suspend fun scanMedia(
     repository: com.nexus.player.data.repository.MediaRepository,
     onAudioItems: (List<MediaItem>) -> Unit,
@@ -718,7 +571,6 @@ private suspend fun scanMedia(
     val videoList = mutableListOf<MediaItem>()
     
     try {
-        // Чтение файлов строго в фоновом потоке IO, чтобы не забивать Main Thread
         withContext(Dispatchers.IO) {
             repository.scanAllMedia().collect { item ->
                 if (item.isVideo) {
@@ -729,10 +581,8 @@ private suspend fun scanMedia(
             }
         }
     } catch (e: Exception) {
-        // В продакшене можно залогировать ошибку сканирования
         e.printStackTrace()
     } finally {
-        // Возвращаемся в главный поток для безопасного обновления UI-стейтов
         onAudioItems(audioList.sortedBy { it.name.lowercase() })
         onVideoItems(videoList.sortedBy { it.name.lowercase() })
         onLoading(false)
