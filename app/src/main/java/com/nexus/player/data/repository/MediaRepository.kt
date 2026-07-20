@@ -24,6 +24,20 @@ class MediaRepository(private val context: Context) {
         scanCustomDirectories().forEach { emit(it) }
     }.flowOn(Dispatchers.IO)
     
+    fun scanAudioOnly(): Flow<MediaItem> = flow {
+        scanAudioFiles().forEach { emit(it) }
+        scanCustomDirectories()
+            .filter { it.mimeType.startsWith("audio/") || it.format.isAudioFormat }
+            .forEach { emit(it) }
+    }.flowOn(Dispatchers.IO)
+    
+    fun scanVideoOnly(): Flow<MediaItem> = flow {
+        scanVideoFiles().forEach { emit(it) }
+        scanCustomDirectories()
+            .filter { it.mimeType.startsWith("video/") || it.format.isVideoFormat }
+            .forEach { emit(it) }
+    }.flowOn(Dispatchers.IO)
+    
     private fun scanAudioFiles(): List<MediaItem> {
         val audioItems = mutableListOf<MediaItem>()
         val projection = arrayOf(
@@ -37,68 +51,70 @@ class MediaRepository(private val context: Context) {
             MediaStore.Audio.Media.MIME_TYPE
         )
         
-        context.contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            null,
-            null,
-            MediaStore.Audio.Media.DISPLAY_NAME + " ASC"
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
-            val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-            val durCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
-            
-            while (cursor.moveToNext()) {
-                try {
-                    val id = cursor.getLong(idCol)
-                    val name = cursor.getString(nameCol) ?: "Unknown"
-                    val path = cursor.getString(pathCol) ?: continue
-                    var duration = cursor.getLong(durCol)
-                    val artist = cursor.getString(artistCol) ?: "Unknown Artist"
-                    val album = cursor.getString(albumCol) ?: "Unknown Album"
-                    val albumId = cursor.getLong(albumIdCol)
-                    val mimeType = cursor.getString(mimeCol) ?: "audio/*"
-                    
-                    val file = File(path)
-                    if (!file.exists() || !file.canRead()) {
+        try {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                MediaStore.Audio.Media.DISPLAY_NAME + " ASC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val durCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+                
+                while (cursor.moveToNext()) {
+                    try {
+                        val id = cursor.getLong(idCol)
+                        val name = cursor.getString(nameCol) ?: "Unknown"
+                        val path = cursor.getString(pathCol) ?: continue
+                        var duration = cursor.getLong(durCol)
+                        val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                        val album = cursor.getString(albumCol) ?: "Unknown Album"
+                        val albumId = cursor.getLong(albumIdCol)
+                        val mimeType = cursor.getString(mimeCol) ?: "audio/*"
+                        
+                        val file = File(path)
+                        if (!file.exists() || !file.canRead()) continue
+                        
+                        if (duration <= 0) {
+                            duration = handler.estimateDuration(path)
+                        }
+                        
+                        val albumArtUri = if (albumId > 0) {
+                            ContentUris.withAppendedId(
+                                Uri.parse("content://media/external/audio/albumart"),
+                                albumId
+                            )
+                        } else null
+                        
+                        val format = MediaFormat.fromPath(path)
+                        
+                        audioItems.add(
+                            MediaItem(
+                                id = id,
+                                name = name,
+                                path = path,
+                                duration = duration,
+                                artist = artist,
+                                album = album,
+                                albumArtUri = albumArtUri,
+                                mimeType = mimeType,
+                                format = format
+                            )
+                        )
+                    } catch (e: Exception) {
                         continue
                     }
-                    
-                    if (duration <= 0) {
-                        duration = handler.estimateDuration(path)
-                    }
-                    
-                    val albumArtUri = if (albumId > 0) {
-                        ContentUris.withAppendedId(
-                            Uri.parse("content://media/external/audio/albumart"),
-                            albumId
-                        )
-                    } else null
-                    
-                    val format = MediaFormat.fromPath(path)
-                    
-                    audioItems.add(
-                        MediaItem(
-                            id = id,
-                            name = name,
-                            path = path,
-                            duration = duration,
-                            artist = artist,
-                            album = album,
-                            albumArtUri = albumArtUri,
-                            mimeType = mimeType,
-                            format = format
-                        )
-                    )
-                } catch (e: Exception) {
-                    continue
                 }
             }
+        } catch (e: Exception) {
+            // Log error but continue with empty list
         }
         
         return audioItems
@@ -114,52 +130,54 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.MIME_TYPE
         )
         
-        context.contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            null,
-            null,
-            MediaStore.Video.Media.DISPLAY_NAME + " ASC"
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-            val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
-            val durCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
-            val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
-            
-            while (cursor.moveToNext()) {
-                try {
-                    val id = cursor.getLong(idCol)
-                    val name = cursor.getString(nameCol) ?: "Unknown"
-                    val path = cursor.getString(pathCol) ?: continue
-                    var duration = cursor.getLong(durCol)
-                    val mimeType = cursor.getString(mimeCol) ?: "video/*"
-                    
-                    val file = File(path)
-                    if (!file.exists() || !file.canRead()) {
+        try {
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                MediaStore.Video.Media.DISPLAY_NAME + " ASC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+                val durCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+                
+                while (cursor.moveToNext()) {
+                    try {
+                        val id = cursor.getLong(idCol)
+                        val name = cursor.getString(nameCol) ?: "Unknown"
+                        val path = cursor.getString(pathCol) ?: continue
+                        var duration = cursor.getLong(durCol)
+                        val mimeType = cursor.getString(mimeCol) ?: "video/*"
+                        
+                        val file = File(path)
+                        if (!file.exists() || !file.canRead()) continue
+                        
+                        if (duration <= 0) {
+                            duration = handler.estimateDuration(path)
+                        }
+                        
+                        val format = MediaFormat.fromPath(path)
+                        
+                        videoItems.add(
+                            MediaItem(
+                                id = id,
+                                name = name,
+                                path = path,
+                                duration = duration,
+                                mimeType = mimeType,
+                                format = format
+                            )
+                        )
+                    } catch (e: Exception) {
                         continue
                     }
-                    
-                    if (duration <= 0) {
-                        duration = handler.estimateDuration(path)
-                    }
-                    
-                    val format = MediaFormat.fromPath(path)
-                    
-                    videoItems.add(
-                        MediaItem(
-                            id = id,
-                            name = name,
-                            path = path,
-                            duration = duration,
-                            mimeType = mimeType,
-                            format = format
-                        )
-                    )
-                } catch (e: Exception) {
-                    continue
                 }
             }
+        } catch (e: Exception) {
+            // Log error but continue with empty list
         }
         
         return videoItems
@@ -170,33 +188,47 @@ class MediaRepository(private val context: Context) {
         val directories = listOf(
             "/storage/emulated/0/Download",
             "/storage/emulated/0/Music",
-            "/storage/emulated/0/Movies"
+            "/storage/emulated/0/Movies",
+            "/storage/emulated/0/DCIM",
+            "/storage/emulated/0/Pictures"
         )
         
-        val supportedExtensions = listOf("mp3", "flac", "wav", "mp4", "avi", "mkv", "m4a")
+        val audioExtensions = listOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "wma", "opus")
+        val videoExtensions = listOf("mp4", "avi", "mkv", "mov", "webm", "flv", "3gp", "wmv")
+        val allExtensions = audioExtensions + videoExtensions
         
         directories.forEach { dirPath ->
             val dir = File(dirPath)
-            if (dir.exists() && dir.isDirectory) {
-                dir.walkTopDown().forEach { file ->
-                    if (file.isFile && file.extension.lowercase() in supportedExtensions) {
-                        try {
-                            val duration = handler.estimateDuration(file.absolutePath)
-                            val format = MediaFormat.fromPath(file.absolutePath)
-                            
-                            customItems.add(
-                                MediaItem(
-                                    id = file.hashCode().toLong(),
-                                    name = file.nameWithoutExtension,
-                                    path = file.absolutePath,
-                                    duration = duration,
-                                    format = format
+            if (dir.exists() && dir.isDirectory && dir.canRead()) {
+                try {
+                    dir.walkTopDown()
+                        .maxDepth(3)
+                        .filter { it.isFile }
+                        .filter { it.extension.lowercase() in allExtensions }
+                        .forEach { file ->
+                            try {
+                                val duration = handler.estimateDuration(file.absolutePath)
+                                val format = MediaFormat.fromPath(file.absolutePath)
+                                val extension = file.extension.lowercase()
+                                val isVideo = extension in videoExtensions
+                                val mimeType = if (isVideo) "video/$extension" else "audio/$extension"
+                                
+                                customItems.add(
+                                    MediaItem(
+                                        id = file.hashCode().toLong(),
+                                        name = file.nameWithoutExtension,
+                                        path = file.absolutePath,
+                                        duration = duration,
+                                        mimeType = mimeType,
+                                        format = format
+                                    )
                                 )
-                            )
-                        } catch (e: Exception) {
-                            // Skip unreadable files
+                            } catch (e: Exception) {
+                                // Skip unreadable files
+                            }
                         }
-                    }
+                } catch (e: Exception) {
+                    // Skip inaccessible directories
                 }
             }
         }
@@ -212,6 +244,18 @@ class MediaRepository(private val context: Context) {
             }
         }
         emit(allItems)
+    }.flowOn(Dispatchers.IO)
+    
+    fun searchMedia(query: String): Flow<List<MediaItem>> = flow {
+        val results = mutableListOf<MediaItem>()
+        scanAllMedia().collect { item ->
+            if (item.name.contains(query, ignoreCase = true) ||
+                item.artist.contains(query, ignoreCase = true) ||
+                item.album.contains(query, ignoreCase = true)) {
+                results.add(item)
+            }
+        }
+        emit(results)
     }.flowOn(Dispatchers.IO)
     
     suspend fun repairStream(filePath: String): Flow<PlaybackResult> = flow {
@@ -252,5 +296,16 @@ class MediaRepository(private val context: Context) {
                 )
             )
         }
+    }.flowOn(Dispatchers.IO)
+    
+    fun getMediaCount(): Flow<Pair<Int, Int>> = flow {
+        var audioCount = 0
+        var videoCount = 0
+        
+        scanAllMedia().collect { item ->
+            if (item.isVideo) videoCount++ else audioCount++
+        }
+        
+        emit(Pair(audioCount, videoCount))
     }.flowOn(Dispatchers.IO)
 }
