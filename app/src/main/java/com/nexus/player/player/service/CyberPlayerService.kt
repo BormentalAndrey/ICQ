@@ -1,646 +1,355 @@
-package com.nexus.player.core
+package com.nexus.player.player.service
 
-import android.media.MediaExtractor
-import android.media.MediaFormat
+import android.app.*
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ServiceInfo
+import android.graphics.Color
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.nexus.player.R
+import com.nexus.player.data.local.PreferencesManager
 import com.nexus.player.data.model.PlaybackResult
-import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import com.nexus.player.di.AppModule
+import com.nexus.player.player.audio.EqualizerEngine
+import com.nexus.player.player.core.CorruptedFileHandler
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
-class CorruptedFileHandler {
-    
+@UnstableApi
+class CyberPlayerService : Service() {
+
     companion object {
-        private const val TAG = "CorruptedFileHandler"
-        private const val MP3_SYNC_MASK = 0xFFE0
-        private const val MP3_SYNC_WORD = 0xFF
-        
-        private val ID3_HEADER = "ID3".toByteArray()
-        private val WAV_RIFF = "RIFF".toByteArray()
-        private val WAV_WAVE = "WAVE".toByteArray()
-        private val FLAC_MARKER = "fLaC".toByteArray()
-        
-        private const val MAX_FRAME_SKIP = 65536
-        private const val MIN_FRAME_SIZE = 24
+        const val CHANNEL_ID = "nexus_player_channel"
+        const val ERROR_CHANNEL_ID = "nexus_player_errors"
+        const val NOTIFICATION_ID = 1337
+
+        const val ACTION_PLAY = "com.nexus.player.ACTION_PLAY"
+        const val ACTION_PAUSE = "com.nexus.player.ACTION_PAUSE"
+        const val ACTION_NEXT = "com.nexus.player.ACTION_NEXT"
+        const val ACTION_PREVIOUS = "com.nexus.player.ACTION_PREVIOUS"
+        const val ACTION_STOP = "com.nexus.player.ACTION_STOP"
+        const val ACTION_SEEK_TO = "com.nexus.player.ACTION_SEEK_TO"
+        const val ACTION_SET_EQUALIZER = "com.nexus.player.ACTION_SET_EQUALIZER"
+
+        const val ACTION_PLAYBACK_STATE_CHANGED = "com.nexus.player.PLAYBACK_STATE_CHANGED"
+        const val ACTION_POSITION_UPDATED = "com.nexus.player.POSITION_UPDATED"
+        const val ACTION_TRACK_CHANGED = "com.nexus.player.TRACK_CHANGED"
+        const val ACTION_ERROR_OCCURRED = "com.nexus.player.ERROR_OCCURRED"
+        const val ACTION_RECOVERY_PROGRESS = "com.nexus.player.RECOVERY_PROGRESS"
+
+        const val EXTRA_FILE_PATH = "FILE_PATH"
+        const val EXTRA_START_POSITION = "START_POSITION"
+        const val EXTRA_IS_PLAYING = "IS_PLAYING"
+        const val EXTRA_CURRENT_POSITION = "CURRENT_POSITION"
+        const val EXTRA_DURATION = "DURATION"
+        const val EXTRA_TRACK_NAME = "TRACK_NAME"
+        const val EXTRA_TRACK_ARTIST = "TRACK_ARTIST"
+        const val EXTRA_ERROR_MESSAGE = "ERROR_MESSAGE"
+        const val EXTRA_DAMAGE_PERCENT = "DAMAGE_PERCENT"
+        const val EXTRA_RECOVERY_PROGRESS = "RECOVERY_PROGRESS"
+        const val EXTRA_EQUALIZER_PRESET = "EQUALIZER_PRESET"
+        const val EXTRA_EQUALIZER_BANDS = "EQUALIZER_BANDS"
     }
-    
-    data class FrameInfo(
-        val offset: Long,
-        val size: Int,
-        val isValid: Boolean,
-        val sampleRate: Int = 44100,
-        val bitrate: Int = 128000
-    )
-    
-    fun estimateDuration(filePath: String): Long {
-        return try {
-            val file = File(filePath)
-            if (!file.exists() || !file.canRead()) return 0L
-            
-            when {
-                filePath.endsWith(".mp3", true) -> estimateMp3Duration(file)
-                filePath.endsWith(".wav", true) -> estimateWavDuration(file)
-                filePath.endsWith(".flac", true) -> estimateFlacDuration(file)
-                filePath.endsWith(".mp4", true) || filePath.endsWith(".m4a", true) -> estimateMp4Duration(file)
-                else -> estimateGenericDuration(file)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error estimating duration for $filePath", e)
-            0L
-        }
-    }
-    
-    private fun estimateMp3Duration(file: File): Long {
-        var totalFrames = 0
-        var sampleRate = 44100
-        
-        try {
-            RandomAccessFile(file, "r").use { raf ->
-                var offset = skipId3Tag(raf)
-                
-                val firstFrame = findNextValidMp3Frame(raf, offset)
-                if (firstFrame != null) {
-                    sampleRate = firstFrame.sampleRate
-                    totalFrames = 1
-                    offset = firstFrame.offset + firstFrame.size
+
+    private var player: ExoPlayer? = null
+    private var mediaSession: MediaSessionCompat? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val preferencesManager: PreferencesManager by lazy { AppModule.providePreferencesManager() }
+    private val corruptedFileHandler: CorruptedFileHandler by lazy { AppModule.provideCorruptedFileHandler() }
+    private val equalizerEngine: EqualizerEngine by lazy { AppModule.provideEqualizerEngine() }
+
+    private val _playbackState = MutableStateFlow<PlaybackResult>(PlaybackResult.Success)
+    val playbackState: StateFlow<PlaybackResult> = _playbackState.asStateFlow()
+
+    private val _currentPosition = MutableStateFlow(0L)
+    val currentPosition: StateFlow<Long> = _currentPosition.asStateFlow()
+
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    private val _currentTrack = MutableStateFlow<MediaItem?>(null)
+    val currentTrack: StateFlow<MediaItem?> = _currentTrack.asStateFlow()
+
+    private var currentFilePath: String? = null
+
+    private val notificationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent == null) return
+            when (intent.action) {
+                ACTION_PLAY -> player?.play()
+                ACTION_PAUSE -> player?.pause()
+                ACTION_NEXT -> playNext()
+                ACTION_PREVIOUS -> playPrevious()
+                ACTION_STOP -> stopSelf()
+                ACTION_SEEK_TO -> {
+                    val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, 0L)
+                    player?.seekTo(pos)
                 }
-                
-                while (offset < raf.length() - MIN_FRAME_SIZE) {
-                    val frame = findNextValidMp3Frame(raf, offset)
-                    if (frame != null) {
-                        totalFrames++
-                        offset = frame.offset + frame.size
-                    } else {
-                        // Оптимизация: если в диапазоне MAX_FRAME_SKIP фрейм не найден,
-                        // безопасно прыгаем вперед, избегая квадратичного зависания (ANR)
-                        offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
+                ACTION_SET_EQUALIZER -> {
+                    intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let {
+                        equalizerEngine.applyPreset(it)
+                    }
+                    intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let {
+                        equalizerEngine.applyBands(it.toList())
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error estimating MP3 duration", e)
-        }
-        
-        return if (totalFrames > 0 && sampleRate > 0) {
-            (totalFrames * 1152L * 1000L) / sampleRate
-        } else 0L
-    }
-    
-    private fun findNextValidMp3Frame(raf: RandomAccessFile, startOffset: Long): FrameInfo? {
-        var offset = startOffset
-        val maxSearch = minOf(raf.length(), offset + MAX_FRAME_SKIP)
-        val bufferSize = 4096
-        val buffer = ByteArray(bufferSize)
-        
-        while (offset < maxSearch - 4) {
-            raf.seek(offset)
-            val toRead = minOf(bufferSize.toLong(), maxSearch - offset).toInt()
-            val bytesRead = raf.read(buffer, 0, toRead)
-            if (bytesRead <= 0) break
-            
-            var i = 0
-            while (i < bytesRead - 3 && (offset + i) < maxSearch - 4) {
-                val b1 = buffer[i].toInt() and 0xFF
-                if (b1 == MP3_SYNC_WORD) {
-                    val b2 = buffer[i + 1].toInt() and 0xFF
-                    if ((b2 and 0xE0) == 0xE0) {
-                        val b3 = buffer[i + 2].toInt() and 0xFF
-                        val b4 = buffer[i + 3].toInt() and 0xFF
-                        
-                        if (isValidMp3Header(b1, b2, b3, b4)) {
-                            val bitrateIndex = (b2 shr 4) and 0x0F
-                            val sampleRateIndex = (b2 shr 2) and 0x03
-                            val padding = (b2 shr 1) and 0x01
-                            
-                            val bitrates = intArrayOf(0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000, 0)
-                            val sampleRates = intArrayOf(44100, 48000, 32000, 0)
-                            
-                            val bitrate = bitrates.getOrElse(bitrateIndex) { 128000 }
-                            val sampleRate = sampleRates.getOrElse(sampleRateIndex) { 44100 }
-                            
-                            val frameSize = if (sampleRate > 0) {
-                                (144 * bitrate) / sampleRate + padding
-                            } else 0
-                            
-                            if (frameSize in MIN_FRAME_SIZE..MAX_FRAME_SKIP) {
-                                return FrameInfo(
-                                    offset = offset + i,
-                                    size = frameSize,
-                                    isValid = true,
-                                    sampleRate = sampleRate,
-                                    bitrate = bitrate
-                                )
-                            }
-                        }
-                    }
-                }
-                i++
-            }
-            // Сдвигаем offset с учетом перекрытия буфера для заголовков на границе
-            offset += maxOf(1, bytesRead - 3)
-        }
-        
-        return null
-    }
-    
-    private fun isValidMp3Header(b1: Int, b2: Int, b3: Int, b4: Int): Boolean {
-        if (b1 != 0xFF) return false
-        if ((b2 and 0xE0) != 0xE0) return false
-        
-        val version = (b2 shr 3) and 0x03
-        if (version == 0x01) return false
-        
-        val layer = (b2 shr 1) and 0x03
-        if (layer == 0x00) return false
-        
-        val bitrate = (b2 shr 4) and 0x0F
-        if (bitrate == 0x00 || bitrate == 0x0F) return false
-        
-        val sampleRate = (b2 shr 2) and 0x03
-        if (sampleRate == 0x03) return false
-        
-        return true
-    }
-    
-    private fun skipId3Tag(raf: RandomAccessFile): Long {
-        try {
-            raf.seek(0)
-            val header = ByteArray(3)
-            if (raf.read(header) < 3) return 0L
-            
-            if (header.contentEquals(ID3_HEADER)) {
-                val version = ByteArray(2)
-                raf.read(version)
-                val flags = raf.read()
-                
-                val sizeBytes = ByteArray(4)
-                if (raf.read(sizeBytes) < 4) return 0L
-                
-                val size = ((sizeBytes[0].toInt() and 0x7F) shl 21) or
-                        ((sizeBytes[1].toInt() and 0x7F) shl 14) or
-                        ((sizeBytes[2].toInt() and 0x7F) shl 7) or
-                        (sizeBytes[3].toInt() and 0x7F)
-                
-                var tagSize = 10 + size
-                if (version[0] == 4.toByte() && (flags and 0x40) != 0) {
-                    val extHeaderSizeBytes = ByteArray(4)
-                    if (raf.read(extHeaderSizeBytes) == 4) {
-                        val extHeaderSize = ((extHeaderSizeBytes[0].toInt() and 0x7F) shl 21) or
-                                ((extHeaderSizeBytes[1].toInt() and 0x7F) shl 14) or
-                                ((extHeaderSizeBytes[2].toInt() and 0x7F) shl 7) or
-                                (extHeaderSizeBytes[3].toInt() and 0x7F)
-                        tagSize += extHeaderSize
-                    }
-                }
-                
-                return minOf(tagSize.toLong(), raf.length())
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error skipping ID3 tag", e)
-        }
-        
-        return 0L
-    }
-    
-    private fun estimateWavDuration(file: File): Long {
-        try {
-            RandomAccessFile(file, "r").use { raf ->
-                val header = ByteArray(4)
-                if (raf.read(header) < 4 || !header.contentEquals(WAV_RIFF)) return 0L
-                
-                raf.skipBytes(4)
-                if (raf.read(header) < 4 || !header.contentEquals(WAV_WAVE)) return 0L
-                
-                var byteRate = 176400
-                var dataSize = 0L
-                
-                while (raf.filePointer < raf.length() - 8) {
-                    if (raf.read(header) < 4) break
-                    val chunkSizeBytes = ByteArray(4)
-                    if (raf.read(chunkSizeBytes) < 4) break
-                    
-                    val chunkSizeLong = ByteBuffer.wrap(chunkSizeBytes)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                        .getInt()
-                        .toLong() and 0xFFFFFFFFL
-                    
-                    when {
-                        header.contentEquals("fmt ".toByteArray()) -> {
-                            val bytesToRead = minOf(chunkSizeLong, 40L).toInt()
-                            val fmtData = ByteArray(bytesToRead)
-                            val read = raf.read(fmtData)
-                            if (read >= 12) {
-                                byteRate = ByteBuffer.wrap(fmtData, 8, 4)
-                                    .order(ByteOrder.LITTLE_ENDIAN)
-                                    .getInt()
-                            }
-                            if (chunkSizeLong > read) {
-                                raf.seek(raf.filePointer + (chunkSizeLong - read))
-                            }
-                        }
-                        header.contentEquals("data".toByteArray()) -> {
-                            dataSize = chunkSizeLong
-                            break
-                        }
-                        else -> {
-                            raf.seek(raf.filePointer + chunkSizeLong)
-                        }
-                    }
-                }
-                
-                if (dataSize > 0 && byteRate > 0) {
-                    return (dataSize * 1000L) / byteRate
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error estimating WAV duration", e)
-        }
-        
-        return 0L
-    }
-    
-    private fun estimateFlacDuration(file: File): Long {
-        try {
-            RandomAccessFile(file, "r").use { raf ->
-                val marker = ByteArray(4)
-                if (raf.read(marker) < 4 || !marker.contentEquals(FLAC_MARKER)) return 0L
-                
-                var lastBlock = false
-                var sampleRate = 44100
-                var totalSamples = 0L
-                
-                while (!lastBlock && raf.filePointer < raf.length()) {
-                    val blockHeader = raf.read()
-                    if (blockHeader == -1) break
-                    
-                    lastBlock = (blockHeader and 0x80) != 0
-                    val blockType = blockHeader and 0x7F
-                    
-                    val sizeBytes = ByteArray(3)
-                    if (raf.read(sizeBytes) < 3) break
-                    
-                    val blockSize = ((sizeBytes[0].toInt() and 0xFF) shl 16) or
-                            ((sizeBytes[1].toInt() and 0xFF) shl 8) or
-                            (sizeBytes[2].toInt() and 0xFF)
-                    
-                    if (blockSize < 0 || blockSize > 16777216) break // Защита от OOM при битом размере
-                    
-                    when (blockType) {
-                        0 -> {
-                            val streamInfo = ByteArray(blockSize)
-                            val read = raf.read(streamInfo)
-                            if (read >= 18) {
-                                sampleRate = ((streamInfo[10].toInt() and 0xFF) shl 12) or
-                                        ((streamInfo[11].toInt() and 0xFF) shl 4) or
-                                        ((streamInfo[12].toInt() and 0xF0) shr 4)
-                                
-                                totalSamples = ((streamInfo[12].toLong() and 0x0F) shl 32) or
-                                        ((streamInfo[13].toLong() and 0xFF) shl 24) or
-                                        ((streamInfo[14].toLong() and 0xFF) shl 16) or
-                                        ((streamInfo[15].toLong() and 0xFF) shl 8) or
-                                        (streamInfo[16].toLong() and 0xFF)
-                            }
-                            if (blockSize > read) {
-                                raf.seek(raf.filePointer + (blockSize - read))
-                            }
-                        }
-                        else -> {
-                            raf.seek(raf.filePointer + blockSize)
-                        }
-                    }
-                }
-                
-                if (totalSamples > 0 && sampleRate > 0) {
-                    return (totalSamples * 1000L) / sampleRate
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error estimating FLAC duration", e)
-        }
-        
-        return 0L
-    }
-    
-    private fun estimateMp4Duration(file: File): Long {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(file.absolutePath)
-            var duration = 0L
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                if (format.containsKey(MediaFormat.KEY_DURATION)) {
-                    duration = maxOf(duration, format.getLong(MediaFormat.KEY_DURATION))
-                }
-            }
-            duration / 1000
-        } catch (e: Exception) {
-            Log.e(TAG, "Error estimating MP4 duration", e)
-            0L
-        } finally {
-            try { extractor.release() } catch (_: Exception) {}
         }
     }
-    
-    private fun estimateGenericDuration(file: File): Long {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(file.absolutePath)
-            var duration = 0L
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                if (format.containsKey(MediaFormat.KEY_DURATION)) {
-                    duration = maxOf(duration, format.getLong(MediaFormat.KEY_DURATION))
-                }
-            }
-            duration / 1000
-        } catch (e: Exception) {
-            0L
-        } finally {
-            try { extractor.release() } catch (_: Exception) {}
+
+    override fun onCreate() {
+        super.onCreate()
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nexus:WakeLock")
+        createNotificationChannels()
+        registerNotificationReceiver()
+        initializeMediaSession()
+        initializePlayer()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {}
+
+    private fun registerNotificationReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(ACTION_PLAY); addAction(ACTION_PAUSE); addAction(ACTION_NEXT)
+            addAction(ACTION_PREVIOUS); addAction(ACTION_STOP); addAction(ACTION_SEEK_TO)
+            addAction(ACTION_SET_EQUALIZER)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(notificationReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(notificationReceiver, filter)
         }
     }
-    
-    fun forceDecode(filePath: String): MediaExtractor? {
-        var extractor: MediaExtractor? = MediaExtractor()
-        try {
-            try {
-                extractor?.setDataSource(filePath)
-            } catch (e: IOException) {
-                Log.w(TAG, "IOException when setting data source, attempting forced decode", e)
-                val repairedFile = repairFile(filePath)
-                if (repairedFile != null && repairedFile.exists()) {
-                    extractor?.setDataSource(repairedFile.absolutePath)
-                } else {
-                    extractor?.release()
-                    return null
-                }
-            }
-            
-            val count = extractor?.trackCount ?: 0
-            for (i in 0 until count) {
-                val format = extractor?.getTrackFormat(i)
-                val mime = format?.getString(MediaFormat.KEY_MIME)
-                if (mime?.startsWith("audio/") == true || mime?.startsWith("video/") == true) {
-                    extractor?.selectTrack(i)
-                    val validExtractor = extractor
-                    extractor = null // Обнуляем, чтобы блок finally не вызвал release()
-                    return validExtractor
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Force decode failed completely", e)
-        } finally {
-            try { extractor?.release() } catch (_: Exception) {}
-        }
-        return null
-    }
-    
-    fun repairFile(filePath: String): File? {
-        return try {
-            val sourceFile = File(filePath)
-            if (!sourceFile.exists()) return null
-            
-            val repairedFile = File(sourceFile.parent, "repaired_" + sourceFile.name)
-            
-            val success = when {
-                filePath.endsWith(".mp3", true) -> repairMp3File(sourceFile, repairedFile)
-                filePath.endsWith(".wav", true) -> repairWavFile(sourceFile, repairedFile)
-                filePath.endsWith(".flac", true) -> repairFlacFile(sourceFile, repairedFile)
-                else -> repairGenericFile(sourceFile, repairedFile)
-            }
-            
-            if (success && repairedFile.exists() && repairedFile.length() > 0) repairedFile else null
-        } catch (e: Exception) {
-            Log.e(TAG, "File repair failed", e)
-            null
+
+    private fun initializeMediaSession() {
+        mediaSession = MediaSessionCompat(this, "NexusPlayer").apply {
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() = player?.play()
+                override fun onPause() = player?.pause()
+                override fun onSkipToNext() = playNext()
+                override fun onSkipToPrevious() = playPrevious()
+                override fun onStop() = stopSelf()
+                override fun onSeekTo(pos: Long) = player?.seekTo(pos)
+            })
+            isActive = true
         }
     }
-    
-    private fun repairMp3File(source: File, destination: File): Boolean {
-        try {
-            RandomAccessFile(source, "r").use { raf ->
-                FileOutputStream(destination).use { output ->
-                    var offset = skipId3Tag(raf)
-                    
-                    if (offset > 0) {
-                        raf.seek(0)
-                        val tagData = ByteArray(offset.toInt())
-                        val read = raf.read(tagData)
-                        if (read > 0) {
-                            output.write(tagData, 0, read)
-                        }
-                    }
-                    
-                    while (offset < raf.length() - MIN_FRAME_SIZE) {
-                        val frame = findNextValidMp3Frame(raf, offset)
-                        if (frame != null) {
-                            raf.seek(frame.offset)
-                            val frameData = ByteArray(frame.size)
-                            val bytesRead = raf.read(frameData)
-                            if (bytesRead > 0) {
-                                output.write(frameData, 0, bytesRead)
-                            }
-                            offset = frame.offset + frame.size
-                        } else {
-                            offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
-                        }
-                    }
-                }
-            }
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "MP3 repair failed", e)
-            return false
-        }
-    }
-    
-    private fun repairWavFile(source: File, destination: File): Boolean {
-        try {
-            var totalDataBytes = 0L
-            RandomAccessFile(source, "r").use { raf ->
-                FileOutputStream(destination).use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    
-                    raf.seek(0)
-                    bytesRead = raf.read(buffer, 0, 44)
-                    if (bytesRead > 0) {
-                        output.write(buffer, 0, bytesRead)
-                    }
-                    
-                    while (raf.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        totalDataBytes += bytesRead
-                    }
-                }
-            }
-            
-            // Восстановление валидности WAV: пересчитываем и перезаписываем размеры в заголовках RIFF и DATA
-            if (destination.exists() && destination.length() >= 44) {
-                RandomAccessFile(destination, "rw").use { rafDest ->
-                    val riffSize = (totalDataBytes + 36).toInt()
-                    val dataSize = totalDataBytes.toInt()
-                    
-                    val sizeBuffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
-                    
-                    sizeBuffer.putInt(riffSize)
-                    rafDest.seek(4)
-                    rafDest.write(sizeBuffer.array())
-                    
-                    sizeBuffer.clear()
-                    sizeBuffer.putInt(dataSize)
-                    rafDest.seek(40)
-                    rafDest.write(sizeBuffer.array())
-                }
-            }
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "WAV repair failed", e)
-            return false
-        }
-    }
-    
-    private fun repairFlacFile(source: File, destination: File): Boolean {
-        try {
-            RandomAccessFile(source, "r").use { raf ->
-                FileOutputStream(destination).use { output ->
-                    val marker = ByteArray(4)
-                    if (raf.read(marker) < 4 || !marker.contentEquals(FLAC_MARKER)) return false
-                    output.write(FLAC_MARKER)
-                    
-                    var lastBlock = false
-                    while (!lastBlock && raf.filePointer < raf.length()) {
-                        val blockHeader = raf.read()
-                        if (blockHeader == -1) break
-                        
-                        lastBlock = (blockHeader and 0x80) != 0
-                        val sizeBytes = ByteArray(3)
-                        if (raf.read(sizeBytes) < 3) break
-                        
-                        val blockSize = ((sizeBytes[0].toInt() and 0xFF) shl 16) or
-                                ((sizeBytes[1].toInt() and 0xFF) shl 8) or
-                                (sizeBytes[2].toInt() and 0xFF)
-                        
-                        if (blockSize < 0 || blockSize > 16777216) break
-                        
-                        output.write(blockHeader)
-                        output.write(sizeBytes)
-                        
-                        val blockData = ByteArray(blockSize)
-                        val bytesRead = raf.read(blockData)
-                        if (bytesRead > 0) {
-                            output.write(blockData, 0, bytesRead)
-                        }
-                    }
-                    
-                    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: копируем оставшиеся аудиофреймы FLAC после метаданных!
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (raf.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                    }
-                }
-            }
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "FLAC repair failed", e)
-            return false
-        }
-    }
-    
-    private fun repairGenericFile(source: File, destination: File): Boolean {
-        try {
-            source.copyTo(destination, overwrite = true)
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "Generic repair failed", e)
-            return false
-        }
-    }
-    
-    fun analyzeDamage(filePath: String): PlaybackResult {
-        return try {
-            val file = File(filePath)
-            if (!file.exists()) {
-                return PlaybackResult.FatalError(
-                    throwable = IOException("File not found"),
-                    userMessage = "Файл не найден в файловой системе"
-                )
-            }
-            
-            val totalSize = file.length()
-            if (totalSize == 0L) {
-                return PlaybackResult.FatalError(
-                    throwable = IOException("Empty file"),
-                    userMessage = "Файл пуст. Носитель данных поврежден."
-                )
-            }
-            
-            var corruptedBytes = 0L
-            
-            when {
-                filePath.endsWith(".mp3", true) -> {
-                    RandomAccessFile(file, "r").use { raf ->
-                        var offset = skipId3Tag(raf)
-                        var lastValidOffset = offset
-                        
-                        while (offset < raf.length() - MIN_FRAME_SIZE) {
-                            val frame = findNextValidMp3Frame(raf, offset)
-                            if (frame != null) {
-                                if (offset > lastValidOffset) {
-                                    corruptedBytes += (offset - lastValidOffset)
-                                }
-                                lastValidOffset = frame.offset + frame.size
-                                offset = lastValidOffset
-                            } else {
-                                offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
-                            }
-                        }
-                        if (raf.length() > lastValidOffset) {
-                            corruptedBytes += (raf.length() - lastValidOffset)
-                        }
-                    }
-                }
-                else -> {
-                    val extractor = MediaExtractor()
-                    try {
-                        extractor.setDataSource(filePath)
-                    } catch (e: Exception) {
-                        corruptedBytes = totalSize / 2
-                    } finally {
-                        try { extractor.release() } catch (_: Exception) {}
-                    }
-                }
-            }
-            
-            val damagePercent = if (totalSize > 0) {
-                (corruptedBytes.toFloat() / totalSize.toFloat()) * 100f
-            } else 0f
-            
-            if (damagePercent > 90f) {
-                PlaybackResult.FatalError(
-                    throwable = IOException("File severely damaged"),
-                    userMessage = "Файл сильно поврежден (${damagePercent.toInt()}%). Рекомендуется восстановление.",
-                    canAttemptRecovery = true
-                )
-            } else if (damagePercent > 0f) {
-                PlaybackResult.CorruptedButPlaying(
-                    damagePercent = damagePercent,
-                    skippedBytes = corruptedBytes,
-                    message = "Обнаружено ${damagePercent.toInt()}% поврежденных данных. Воспроизведение с пропуском ошибок."
-                )
-            } else {
-                PlaybackResult.Success
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Damage analysis failed", e)
-            PlaybackResult.FatalError(
-                throwable = e,
-                userMessage = "Не удалось проанализировать файл"
+
+    private fun initializePlayer() {
+        player = ExoPlayer.Builder(this)
+            .setAudioAttributes(
+                androidx.media3.common.AudioAttributes.Builder()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(C.USAGE_MEDIA)
+                    .build(),
+                true
             )
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this))
+            .build()
+            .apply {
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        when (state) {
+                            Player.STATE_READY -> {
+                                _isPlaying.value = this@apply.isPlaying
+                                updateNotification()
+                                broadcastPlaybackState()
+                            }
+                            Player.STATE_ENDED -> playNext()
+                        }
+                    }
+                    override fun onPlayerError(error: PlaybackException) { handlePlaybackError(error) }
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        _isPlaying.value = isPlaying
+                        updateNotification()
+                        broadcastPlaybackState()
+                        if (isPlaying) { acquireAudioFocus(); wakeLock?.acquire(3600000) }
+                        else wakeLock?.release()
+                    }
+                })
+                playWhenReady = false
+            }
+        startPositionTracking()
+        serviceScope.launch { preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) } }
+    }
+
+    private fun startPositionTracking() {
+        serviceScope.launch {
+            while (isActive) {
+                player?.let { p -> if (p.isPlaying) { _currentPosition.value = p.currentPosition; broadcastPositionUpdate() } }
+                delay(250)
+            }
         }
     }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PLAY -> {
+                val path = intent.getStringExtra(EXTRA_FILE_PATH)
+                val pos = intent.getLongExtra(EXTRA_START_POSITION, 0L)
+                if (path != null) { currentFilePath = path; serviceScope.launch { playFile(path, pos) } }
+                else player?.play()
+            }
+            ACTION_PAUSE -> player?.pause()
+            ACTION_NEXT -> playNext()
+            ACTION_PREVIOUS -> playPrevious()
+            ACTION_STOP -> stopSelf()
+        }
+        return START_STICKY
+    }
+
+    private suspend fun playFile(filePath: String, startPosition: Long = 0L) {
+        _playbackState.value = PlaybackResult.Success
+        val damage = corruptedFileHandler.analyzeDamage(filePath)
+        _playbackState.value = damage
+        when (damage) {
+            is PlaybackResult.FatalError -> {
+                broadcastError(damage.userMessage)
+                if (damage.canAttemptRecovery) { repairAndPlay(filePath, startPosition); return }
+                else { showErrorNotification(damage.userMessage); return }
+            }
+            is PlaybackResult.CorruptedButPlaying -> { showDamageNotification(damage); broadcastDamageWarning(damage) }
+            else -> {}
+        }
+        val mediaItem = MediaItem.fromUri("file://$filePath")
+        _currentTrack.value = mediaItem
+        player?.apply { setMediaItem(mediaItem); prepare(); if (startPosition > 0) seekTo(startPosition); play() }
+        updateNotification(); broadcastTrackChanged()
+    }
+
+    private suspend fun repairAndPlay(filePath: String, startPosition: Long) {
+        _playbackState.value = PlaybackResult.RecoveryInProgress(0f); broadcastRecoveryProgress(0f)
+        AppModule.provideMediaRepository().repairStream(filePath).collect {
+            when (it) {
+                is PlaybackResult.RecoveryComplete -> if (it.success && it.recoveredPath != null) playFile(it.recoveredPath, startPosition)
+                else { val e = PlaybackResult.FatalError(Exception("Recovery failed"), userMessage = "Не удалось восстановить"); _playbackState.value = e; broadcastError(e.userMessage) }
+                is PlaybackResult.RecoveryInProgress -> { _playbackState.value = it; broadcastRecoveryProgress(it.progress) }
+                else -> {}
+            }
+        }
+    }
+
+    private fun handlePlaybackError(error: PlaybackException) {
+        Log.e("CyberPlayerService", "Playback error", error)
+        val result = when {
+            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS || error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
+                PlaybackResult.FatalError(throwable = error, userMessage = "Файл не найден или поврежден")
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED -> {
+                serviceScope.launch { delay(100); player?.apply { seekTo(currentPosition + 1000); playWhenReady = true } }
+                PlaybackResult.CorruptedButPlaying(damagePercent = 50f, message = "Ошибка декодирования")
+            }
+            else -> PlaybackResult.FatalError(throwable = error, userMessage = "Неизвестная ошибка")
+        }
+        _playbackState.value = result
+        if (result is PlaybackResult.FatalError) broadcastError(result.userMessage)
+        updateNotification()
+    }
+
+    private fun playNext() { player?.seekTo(0); player?.play(); broadcastTrackChanged() }
+    private fun playPrevious() { player?.seekTo(0); player?.play(); broadcastTrackChanged() }
+
+    private fun acquireAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val attrs = AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(AudioAttributes.USAGE_MEDIA).build()
+            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attrs).setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener {
+                    when (it) {
+                        AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
+                        AudioManager.AUDIOFOCUS_GAIN -> { player?.volume = 1.0f; player?.play() }
+                    }
+                }.build()
+            audioFocusRequest?.let { audioManager?.requestAudioFocus(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager?.requestAudioFocus({ when (it) { AudioManager.AUDIOFOCUS_LOSS -> player?.pause(); AudioManager.AUDIOFOCUS_GAIN -> player?.play() } }, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        }
+    }
+
+    private fun updateNotification() {
+        val n = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        else startForeground(NOTIFICATION_ID, n)
+    }
+
+    private fun buildNotification(): Notification {
+        val playing = player?.isPlaying ?: false
+        val track = _currentTrack.value
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(track?.mediaMetadata?.title?.toString() ?: "NEXUS PLAYER")
+            .setContentText(track?.mediaMetadata?.artist?.toString() ?: "Кибернетический поток активен")
+            .setSmallIcon(R.drawable.ic_neon_skull).setColor(Color.parseColor("#FF007F")).setOngoing(playing)
+            .setPriority(NotificationCompat.PRIORITY_LOW).setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(R.drawable.ic_previous, "Prev", createPI(ACTION_PREVIOUS))
+            .addAction(if (playing) R.drawable.ic_pause else R.drawable.ic_play, "Play/Pause", createPI(if (playing) ACTION_PAUSE else ACTION_PLAY))
+            .addAction(R.drawable.ic_next, "Next", createPI(ACTION_NEXT))
+            .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession?.sessionToken).setShowActionsInCompactView(0, 1, 2))
+            .apply { player?.let { setProgress(it.duration.toInt(), it.currentPosition.toInt(), false) } }.build()
+    }
+
+    private fun showErrorNotification(msg: String) {
+        val n = NotificationCompat.Builder(this, ERROR_CHANNEL_ID).setContentTitle("Ошибка").setContentText(msg)
+            .setSmallIcon(R.drawable.ic_error).setColor(Color.RED).setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID + 1, n)
+    }
+
+    private fun showDamageNotification(d: PlaybackResult.CorruptedButPlaying) {
+        val n = NotificationCompat.Builder(this, ERROR_CHANNEL_ID).setContentTitle("Повреждённые данные").setContentText(d.message)
+            .setSmallIcon(R.drawable.ic_warning).setColor(Color.YELLOW).setPriority(NotificationCompat.PRIORITY_DEFAULT).setAutoCancel(true).setTimeoutAfter(5000).build()
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID + 2, n)
+    }
+
+    private fun createPI(action: String) = PendingIntent.getService(this, action.hashCode(), Intent(this, CyberPlayerService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun broadcastPlaybackState() = sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).putExtra(EXTRA_IS_PLAYING, _isPlaying.value).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { p -> it.putExtra(EXTRA_DURATION, p.duration) } })
+    private fun broadcastPositionUpdate() = sendBroadcast(Intent(ACTION_POSITION_UPDATED).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { p -> it.putExtra(EXTRA_DURATION, p.duration) } })
+    private fun broadcastTrackChanged() = sendBroadcast(Intent(ACTION_TRACK_CHANGED).apply { currentFilePath?.let { putExtra(EXTRA_FILE_PATH, it) } })
+    private fun broadcastError(msg: String) = sendBroadcast(Intent(ACTION_ERROR_OCCURRED).putExtra(EXTRA_ERROR_MESSAGE, msg))
+    private fun broadcastDamageWarning(d: PlaybackResult.CorruptedButPlaying) = sendBroadcast(Intent(ACTION_ERROR_OCCURRED).putExtra(EXTRA_ERROR_MESSAGE, d.message).putExtra(EXTRA_DAMAGE_PERCENT, d.damagePercent))
+    private fun broadcastRecoveryProgress(p: Float) = sendBroadcast(Intent(ACTION_RECOVERY_PROGRESS).putExtra(EXTRA_RECOVERY_PROGRESS, p))
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel(ERROR_CHANNEL_ID, "Errors", NotificationManager.IMPORTANCE_HIGH))
+        }
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        try { unregisterReceiver(notificationReceiver) } catch (_: Exception) {}
+        player?.release(); player = null
+        mediaSession?.release(); mediaSession = null
+        audioFocusRequest?.let { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) audioManager?.abandonAudioFocusRequest(it) }
+        wakeLock?.let { if (it.isHeld) it.release() }
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }
