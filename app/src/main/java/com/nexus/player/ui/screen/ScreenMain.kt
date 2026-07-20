@@ -38,6 +38,7 @@ import com.nexus.player.ui.components.*
 import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
 import kotlinx.coroutines.*
+import java.util.concurrent.CopyOnWriteArrayList
 
 enum class MediaTab { AUDIO, VIDEO }
 
@@ -79,7 +80,7 @@ fun ScreenMain() {
                         val trackPath = intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH)
                         if (trackPath != null) {
                             val allItems = audioItems + videoItems
-                            currentTrack = allItems.find { it.path == trackPath }
+                            currentTrack = allItems.find { it.path == trackPath } ?: currentTrack
                         }
                     }
                     CyberPlayerService.ACTION_ERROR_OCCURRED -> {
@@ -123,8 +124,8 @@ fun ScreenMain() {
         onDispose {
             try {
                 context.unregisterReceiver(receiver)
-            } catch (e: Exception) {
-                // Receiver already unregistered
+            } catch (e: IllegalArgumentException) {
+                // Игнорируем исключение, если ресивер уже был отрегистрирован системой
             }
         }
     }
@@ -191,11 +192,7 @@ fun ScreenMain() {
         }
         
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            ContextCompat.startForegroundService(context, intent)
             isPlaying = true
         } catch (e: Exception) {
             playbackResult = PlaybackResult.FatalError(
@@ -218,8 +215,12 @@ fun ScreenMain() {
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = if (isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY
         }
-        context.startService(intent)
-        isPlaying = !isPlaying
+        try {
+            ContextCompat.startForegroundService(context, intent)
+            isPlaying = !isPlaying
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
     
     fun playNext() {
@@ -252,7 +253,11 @@ fun ScreenMain() {
             action = CyberPlayerService.ACTION_SET_EQUALIZER
             putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
         }
-        context.startService(eqIntent)
+        try {
+            context.startService(eqIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
     
     Box(modifier = Modifier.fillMaxSize()) {
@@ -377,10 +382,12 @@ fun ScreenMain() {
                                 contentPadding = PaddingValues(bottom = 140.dp)
                             ) {
                                 items(items, key = { it.id }) { item ->
+                                    val isCurrentPlaying = currentTrack?.id == item.id && isPlaying
+                                    val onClickAction = remember(item) { { startPlayback(item) } }
                                     MediaItemRow(
                                         item = item,
-                                        isPlaying = currentTrack?.id == item.id && isPlaying,
-                                        onClick = { startPlayback(item) }
+                                        isPlaying = isCurrentPlaying,
+                                        onClick = onClickAction
                                     )
                                 }
                             }
@@ -445,7 +452,9 @@ fun ScreenMain() {
         }
         
         GlassMorphicPanel(
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
             isPlaying = isPlaying,
             currentPosition = currentPosition,
             duration = if (duration > 0) duration else (currentTrack?.duration ?: 0L),
@@ -456,7 +465,10 @@ fun ScreenMain() {
         
         AnimatedVisibility(
             visible = playbackResult !is PlaybackResult.Success,
-            modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(16.dp)
+                .statusBarsPadding()
         ) {
             when (val result = playbackResult) {
                 is PlaybackResult.CorruptedButPlaying -> {
@@ -511,7 +523,10 @@ fun ScreenMain() {
 @Composable
 fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.2f) else NexusColors.GlassBlack
         ),
@@ -519,12 +534,15 @@ fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(
-                    Brush.linearGradient(
-                        colors = if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed)
-                        else listOf(NexusColors.Purple, NexusColors.Cyan)
-                    )
-                ),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed)
+                            else listOf(NexusColors.Purple, NexusColors.Cyan)
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -540,7 +558,14 @@ fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(12.dp))
             
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.name, style = MaterialTheme.typography.titleMedium, color = if (isPlaying) NexusColors.NeonPink else NexusColors.White, fontFamily = CyberpunkFontFamily, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isPlaying) NexusColors.NeonPink else NexusColors.White,
+                    fontFamily = CyberpunkFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Row {
                     Text(item.format.name, style = MaterialTheme.typography.bodySmall, color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily)
                     if (item.artist != "Unknown Artist") {
@@ -567,8 +592,8 @@ private suspend fun scanMedia(
     onLoading(true)
     onScanning(true)
     
-    val audioList = mutableListOf<MediaItem>()
-    val videoList = mutableListOf<MediaItem>()
+    val audioList = CopyOnWriteArrayList<MediaItem>()
+    val videoList = CopyOnWriteArrayList<MediaItem>()
     
     try {
         withContext(Dispatchers.IO) {
@@ -583,8 +608,8 @@ private suspend fun scanMedia(
     } catch (e: Exception) {
         e.printStackTrace()
     } finally {
-        onAudioItems(audioList.sortedBy { it.name.lowercase() })
-        onVideoItems(videoList.sortedBy { it.name.lowercase() })
+        onAudioItems(audioList.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }))
+        onVideoItems(videoList.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }))
         onLoading(false)
         onScanning(false)
     }
