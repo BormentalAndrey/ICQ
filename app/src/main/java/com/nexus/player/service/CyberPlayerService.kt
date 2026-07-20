@@ -1,37 +1,26 @@
-package com.nexus.player.service
+package com.nexus.player.player.service
 
 import android.app.*
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
-import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
-import androidx.annotation.OptIn
-import androidx.annotation.RequiresApi
 import androidx.media3.common.AudioAttributes as ExoAudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.AudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.nexus.player.NexusApplication
 import com.nexus.player.R
@@ -101,14 +90,12 @@ class CyberPlayerService : Service() {
         
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         
-        // Create wake lock
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "NexusPlayer:WakeLock"
         )
         
-        // Register notification receiver
         val filter = IntentFilter().apply {
             addAction(ACTION_PLAY)
             addAction(ACTION_PAUSE)
@@ -116,12 +103,14 @@ class CyberPlayerService : Service() {
             addAction(ACTION_PREVIOUS)
             addAction(ACTION_STOP)
         }
-        registerReceiver(notificationReceiver, filter, RECEIVER_NOT_EXPORTED)
         
-        // Initialize MediaSession
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(notificationReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(notificationReceiver, filter)
+        }
+        
         initializeMediaSession()
-        
-        // Initialize ExoPlayer
         initializePlayer()
     }
     
@@ -173,18 +162,13 @@ class CyberPlayerService : Service() {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         when (playbackState) {
                             Player.STATE_READY -> {
-                                _isPlaying.value = player?.isPlaying ?: false
+                                _isPlaying.value = this@apply.isPlaying
                                 updateNotification()
                             }
                             Player.STATE_ENDED -> {
                                 playNext()
                             }
-                            Player.STATE_BUFFERING -> {
-                                // Update notification to show buffering
-                            }
-                            Player.STATE_IDLE -> {
-                                // Player is idle
-                            }
+                            else -> {}
                         }
                     }
                     
@@ -198,29 +182,18 @@ class CyberPlayerService : Service() {
                         
                         if (isPlaying) {
                             acquireAudioFocus()
-                            wakeLock?.acquire(3600000) // 1 hour timeout
+                            wakeLock?.acquire(3600000)
                         } else {
                             wakeLock?.release()
                         }
-                    }
-                    
-                    override fun onPositionDiscontinuity(
-                        oldPosition: Player.PositionInfo,
-                        newPosition: Player.PositionInfo,
-                        reason: Int
-                    ) {
-                        _currentPosition.value = newPosition.positionMs
-                        savePlaybackPosition(newPosition.positionMs)
                     }
                 })
                 
                 playWhenReady = false
             }
         
-        // Start position tracking
         startPositionTracking()
         
-        // Load saved equalizer settings
         serviceScope.launch {
             preferencesManager.equalizerBands.collect { bands ->
                 equalizerEngine.applyBands(bands)
@@ -231,12 +204,12 @@ class CyberPlayerService : Service() {
     private fun startPositionTracking() {
         serviceScope.launch {
             while (isActive) {
-                player?.let { player ->
-                    if (player.isPlaying) {
-                        _currentPosition.value = player.currentPosition
+                player?.let { p ->
+                    if (p.isPlaying) {
+                        _currentPosition.value = p.currentPosition
                     }
                 }
-                delay(250) // Update 4 times per second
+                delay(250)
             }
         }
     }
@@ -260,7 +233,6 @@ class CyberPlayerService : Service() {
             ACTION_PREVIOUS -> playPrevious()
             ACTION_STOP -> stopSelf()
             else -> {
-                // Initial start
                 val filePath = intent?.getStringExtra(EXTRA_FILE_PATH)
                 if (filePath != null) {
                     serviceScope.launch {
@@ -276,14 +248,12 @@ class CyberPlayerService : Service() {
     private suspend fun playFile(filePath: String, startPosition: Long = 0L) {
         _playbackState.value = PlaybackResult.Success
         
-        // Analyze file for corruption
         val damageResult = corruptedFileHandler.analyzeDamage(filePath)
         _playbackState.value = damageResult
         
         when (damageResult) {
             is PlaybackResult.FatalError -> {
                 if (damageResult.canAttemptRecovery) {
-                    // Try recovery
                     repairAndPlay(filePath, startPosition)
                     return
                 } else {
@@ -294,9 +264,7 @@ class CyberPlayerService : Service() {
             is PlaybackResult.CorruptedButPlaying -> {
                 showDamageNotification(damageResult)
             }
-            else -> {
-                // File is OK
-            }
+            else -> {}
         }
         
         val mediaItem = MediaItem.fromUri("file://$filePath")
@@ -357,11 +325,10 @@ class CyberPlayerService : Service() {
                     message = "Ошибка декодирования. Пропускаем поврежденные данные."
                 )
                 
-                // Try to skip corrupted data and continue
                 serviceScope.launch {
                     delay(100)
                     player?.apply {
-                        seekTo(currentPosition + 1000) // Skip 1 second
+                        seekTo(currentPosition + 1000)
                         playWhenReady = true
                     }
                 }
@@ -378,8 +345,6 @@ class CyberPlayerService : Service() {
     }
     
     private fun playNext() {
-        // Implement playlist logic
-        // For now, just loop the current track
         player?.seekTo(0)
         player?.play()
     }
@@ -391,9 +356,9 @@ class CyberPlayerService : Service() {
     
     private fun acquireAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val audioAttributes = android.media.AudioAttributes.Builder()
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .build()
             
             audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -401,15 +366,9 @@ class CyberPlayerService : Service() {
                 .setAcceptsDelayedFocusGain(true)
                 .setOnAudioFocusChangeListener { focusChange ->
                     when (focusChange) {
-                        AudioManager.AUDIOFOCUS_LOSS -> {
-                            player?.pause()
-                        }
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                            player?.pause()
-                        }
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                            player?.volume = 0.2f
-                        }
+                        AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
                         AudioManager.AUDIOFOCUS_GAIN -> {
                             player?.volume = 1.0f
                             player?.play()
@@ -532,10 +491,12 @@ class CyberPlayerService : Service() {
         )
     }
     
-    private suspend fun savePlaybackPosition(position: Long) {
-        preferencesManager.saveLastPosition(position)
-        _currentTrack.value?.let { mediaItem ->
-            preferencesManager.saveLastTrack(mediaItem.mediaId)
+    private fun savePlaybackPosition(position: Long) {
+        serviceScope.launch {
+            preferencesManager.saveLastPosition(position)
+            _currentTrack.value?.let { mediaItem ->
+                preferencesManager.saveLastTrack(mediaItem.mediaId)
+            }
         }
     }
     
