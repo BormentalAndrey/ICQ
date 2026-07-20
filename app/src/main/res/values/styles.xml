@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="NotificationTitle" parent="TextAppearance.Compat.Notification.Title">
+        <item name="android:textColor">@color/cyan</item>
+    </style>
+    
+    <style name="NotificationText" parent="TextAppearance.Compat.Notification.Info">
+        <item name="android:textColor">@color/white</item>
+    </style>
+</resources>
