@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black_background">#FF0D0D0D</color>
+    <color name="dark_grey">#FF1A1A1A</color>
+    <color name="medium_grey">#FF2A2A2A</color>
+    <color name="neon_pink">#FFFF007F</color>
+    <color name="cyan">#FF00F0FF</color>
+    <color name="purple">#FF7A00FF</color>
+    <color name="neon_green">#FF00FF41</color>
+    <color name="electric_blue">#FF0066FF</color>
+    <color name="blood_red">#FFFF073A</color>
+    <color name="golden_yellow">#FFFFD700</color>
+    <color name="white">#FFE0E0E0</color>
+    <color name="glass_white">#1AFFFFFF</color>
+    <color name="glass_black">#B30D0D0D</color>
+    <color name="notification_color">#FFFF007F</color>
+</resources>
