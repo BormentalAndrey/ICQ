@@ -80,6 +80,10 @@ class CyberPlayerService : MediaSessionService() {
         const val EXTRA_ERROR_MESSAGE = "ERROR_MESSAGE"
         const val EXTRA_DAMAGE_PERCENT = "DAMAGE_PERCENT"
         const val EXTRA_RECOVERY_PROGRESS = "RECOVERY_PROGRESS"
+        
+        // ИСПРАВЛЕНО: Добавлены недостающие константы эквалайзера
+        const val EXTRA_EQUALIZER_PRESET = "EQUALIZER_PRESET"
+        const val EXTRA_EQUALIZER_BANDS = "EQUALIZER_BANDS"
     }
     
     private var player: ExoPlayer? = null
@@ -418,7 +422,9 @@ class CyberPlayerService : MediaSessionService() {
                 serviceScope.launch {
                     delay(100)
                     player?.apply { 
-                        val nextPos = (currentPosition + 1000L).coerceAtMost(duration.coerceAtLeast(0L))
+                        // ИСПРАВЛЕНО: Безопасная обработка C.TIME_UNSET при прыжке вперед на битых кадрах
+                        val maxDuration = if (duration == C.TIME_UNSET) Long.MAX_VALUE else duration
+                        val nextPos = (currentPosition + 1000L).coerceAtMost(maxDuration)
                         seekTo(nextPos)
                         playWhenReady = true 
                     }
@@ -468,7 +474,8 @@ class CyberPlayerService : MediaSessionService() {
         } ?: false
 
         if (isPlayingOrBuffering) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // ИСПРАВЛЕНО: FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK поддерживается с Android 10 (Q), а в API 34+ он обязателен
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
