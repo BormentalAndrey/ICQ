@@ -1,8 +1,10 @@
 package com.nexus.player.ui.screen
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,7 +31,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.nexus.player.data.model.MediaFormat
 import com.nexus.player.data.model.MediaItem
 import com.nexus.player.data.model.PlaybackResult
 import com.nexus.player.di.AppModule
@@ -48,7 +49,6 @@ fun ScreenMain() {
     val mediaRepository = remember { AppModule.provideMediaRepository() }
     val scope = rememberCoroutineScope()
     
-    var allMediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var audioItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var videoItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -60,15 +60,82 @@ fun ScreenMain() {
     var selectedPreset by remember { mutableStateOf("Flat") }
     var isLoading by remember { mutableStateOf(true) }
     var isScanning by remember { mutableStateOf(false) }
+
+    // Продакшен-синхронизация состояния UI и фонового сервиса CyberPlayerService
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED -> {
+                        isPlaying = intent.getBooleanExtra(CyberPlayerService.EXTRA_IS_PLAYING, false)
+                    }
+                    CyberPlayerService.ACTION_PROGRESS_UPDATE -> {
+                        currentPosition = intent.getLongExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, 0L)
+                    }
+                    CyberPlayerService.ACTION_TRACK_CHANGED -> {
+                        val trackPath = intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH)
+                        val allItems = audioItems + videoItems
+                        currentTrack = allItems.find { it.path == trackPath }
+                    }
+                    CyberPlayerService.ACTION_ERROR -> {
+                        val errorMessage = intent.getStringExtra(CyberPlayerService.EXTRA_ERROR_MESSAGE) ?: "Ошибка воспроизведения"
+                        playbackResult = PlaybackResult.FatalError(
+                            userMessage = errorMessage,
+                            canAttemptRecovery = true
+                        )
+                    }
+                }
+            }
+        }
+        
+        val filter = IntentFilter().apply {
+            addAction(CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED)
+            addAction(CyberPlayerService.ACTION_PROGRESS_UPDATE)
+            addAction(CyberPlayerService.ACTION_TRACK_CHANGED)
+            addAction(CyberPlayerService.ACTION_ERROR)
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        
+        onDispose {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (e: Exception) {
+                // Игнорируем исключение, если ресивер уже был отрегистрирован системой
+            }
+        }
+    }
     
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.values.all { it }) {
-            scanMedia(scope, mediaRepository,
+            // Permissions granted, scan media
+            scope.launch {
+                scanMedia(
+                    repository = mediaRepository,
+                    onAudioItems = { audioItems = it },
+                    onVideoItems = { videoItems = it },
+                    onLoading = { isLoading = it },
+                    onScanning = { isScanning = it }
+                )
+            }
+        } else {
+            isLoading = false
+            isScanning = false
+        }
+    }
+    
+    fun startMediaScan() {
+        scope.launch {
+            scanMedia(
+                repository = mediaRepository,
                 onAudioItems = { audioItems = it },
                 onVideoItems = { videoItems = it },
-                onAllItems = { allMediaItems = it },
                 onLoading = { isLoading = it },
                 onScanning = { isScanning = it }
             )
@@ -84,8 +151,7 @@ fun ScreenMain() {
             )
         } else {
             arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
+                Manifest.permission.READ_EXTERNAL_STORAGE
             )
         }
         
@@ -96,33 +162,44 @@ fun ScreenMain() {
         if (needsPermission) {
             permissionLauncher.launch(permissions)
         } else {
-            scanMedia(scope, mediaRepository,
-                onAudioItems = { audioItems = it },
-                onVideoItems = { videoItems = it },
-                onAllItems = { allMediaItems = it },
-                onLoading = { isLoading = it },
-                onScanning = { isScanning = it }
-            )
+            startMediaScan()
         }
     }
     
     fun startPlayback(item: MediaItem) {
         currentTrack = item
+        playbackResult = PlaybackResult.Success
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
+            putExtra(CyberPlayerService.EXTRA_MEDIA_TITLE, item.name)
+            putExtra(CyberPlayerService.EXTRA_MEDIA_ARTIST, item.artist)
         }
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            isPlaying = true
+        } catch (e: Exception) {
+            playbackResult = PlaybackResult.FatalError(
+                userMessage = "Не удалось запустить службу плеера: ${e.localizedMessage}",
+                canAttemptRecovery = true
+            )
         }
-        
-        isPlaying = true
     }
     
     fun togglePlayPause() {
+        if (currentTrack == null) {
+            val items = if (selectedTab == MediaTab.AUDIO) audioItems else videoItems
+            if (items.isNotEmpty()) {
+                startPlayback(items.first())
+            }
+            return
+        }
+        
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = if (isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY
         }
@@ -135,7 +212,7 @@ fun ScreenMain() {
         if (items.isEmpty()) return
         
         val currentIndex = items.indexOfFirst { it.id == currentTrack?.id }
-        val nextIndex = (currentIndex + 1) % items.size
+        val nextIndex = if (currentIndex < 0 || currentIndex >= items.size - 1) 0 else currentIndex + 1
         startPlayback(items[nextIndex])
     }
     
@@ -149,13 +226,9 @@ fun ScreenMain() {
     }
     
     fun refreshMedia() {
-        scanMedia(scope, mediaRepository,
-            onAudioItems = { audioItems = it },
-            onVideoItems = { videoItems = it },
-            onAllItems = { allMediaItems = it },
-            onLoading = { isLoading = it },
-            onScanning = { isScanning = it }
-        )
+        if (!isScanning) {
+            startMediaScan()
+        }
     }
     
     Box(modifier = Modifier.fillMaxSize()) {
@@ -267,7 +340,7 @@ fun ScreenMain() {
                     enter = fadeIn() + slideInVertically(),
                     exit = fadeOut() + slideOutVertically()
                 ) {
-                    if (isLoading) {
+                    if (isLoading || isScanning) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
@@ -311,6 +384,14 @@ fun ScreenMain() {
                                         fontFamily = CyberpunkFontFamily,
                                         fontSize = 16.sp
                                     )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    TextButton(onClick = { refreshMedia() }) {
+                                        Text(
+                                            text = "ОБНОВИТЬ",
+                                            color = NexusColors.NeonPink,
+                                            fontFamily = CyberpunkFontFamily
+                                        )
+                                    }
                                 }
                             }
                         } else {
@@ -318,7 +399,7 @@ fun ScreenMain() {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(bottom = 140.dp)
                             ) {
-                                items(items) { item ->
+                                items(items, key = { it.id }) { item ->
                                     MediaItemRow(
                                         item = item,
                                         isPlaying = currentTrack?.id == item.id && isPlaying,
@@ -347,22 +428,23 @@ fun ScreenMain() {
                     
                     Spacer(modifier = Modifier.height(32.dp))
                     
-                    if (currentTrack != null) {
+                    val track = currentTrack
+                    if (track != null) {
                         NeonText(
-                            text = currentTrack!!.name,
+                            text = track.name,
                             fontSize = 22.sp,
                             color = NexusColors.Cyan
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = currentTrack!!.artist,
+                            text = track.artist,
                             style = MaterialTheme.typography.bodyLarge,
                             color = NexusColors.White.copy(alpha = 0.7f),
                             fontFamily = CyberpunkFontFamily
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${currentTrack!!.format.name} • ${formatDuration(currentTrack!!.duration)}",
+                            text = "${track.format.name} • ${track.formattedDuration}",
                             style = MaterialTheme.typography.bodySmall,
                             color = NexusColors.Purple.copy(alpha = 0.7f),
                             fontFamily = CyberpunkFontFamily
@@ -378,6 +460,13 @@ fun ScreenMain() {
                             text = "Выберите трек из плейлиста",
                             style = MaterialTheme.typography.bodyLarge,
                             color = NexusColors.White.copy(alpha = 0.5f),
+                            fontFamily = CyberpunkFontFamily
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Найдено: 🎵${audioItems.size} аудио • 🎬${videoItems.size} видео",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NexusColors.Cyan.copy(alpha = 0.5f),
                             fontFamily = CyberpunkFontFamily
                         )
                     }
@@ -408,7 +497,15 @@ fun ScreenMain() {
                         presets.forEach { preset ->
                             FilterChip(
                                 selected = selectedPreset == preset,
-                                onClick = { selectedPreset = preset },
+                                onClick = { 
+                                    selectedPreset = preset 
+                                    // Отправка пресета в сервис если необходимо
+                                    val eqIntent = Intent(context, CyberPlayerService::class.java).apply {
+                                        action = CyberPlayerService.ACTION_SET_EQUALIZER
+                                        putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
+                                    }
+                                    context.startService(eqIntent)
+                                },
                                 label = {
                                     Text(
                                         text = preset,
@@ -432,7 +529,7 @@ fun ScreenMain() {
             modifier = Modifier.align(Alignment.BottomCenter),
             isPlaying = isPlaying,
             currentPosition = currentPosition,
-            duration = currentTrack?.duration ?: 0,
+            duration = currentTrack?.duration ?: 0L,
             onPlayPauseClick = { togglePlayPause() },
             onNextClick = { playNext() },
             onPreviousClick = { playPrevious() }
@@ -483,7 +580,10 @@ fun ScreenMain() {
                             if (result.canAttemptRecovery) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
-                                    onClick = { refreshMedia() },
+                                    onClick = { 
+                                        playbackResult = PlaybackResult.Success
+                                        refreshMedia() 
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White)
                                 ) {
                                     Text(
@@ -528,14 +628,13 @@ fun MediaItemRow(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon based on media type
             Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         Brush.linearGradient(
-                            colors = if (item.mimeType.startsWith("video/"))
+                            colors = if (item.isVideo)
                                 listOf(NexusColors.Purple, NexusColors.BloodRed)
                             else
                                 listOf(NexusColors.Purple, NexusColors.Cyan)
@@ -545,7 +644,7 @@ fun MediaItemRow(
             ) {
                 Icon(
                     imageVector = when {
-                        item.mimeType.startsWith("video/") -> Icons.Default.VideoFile
+                        item.isVideo -> Icons.Default.VideoFile
                         isPlaying -> Icons.Default.Equalizer
                         else -> Icons.Default.MusicNote
                     },
@@ -588,13 +687,13 @@ fun MediaItemRow(
             
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = formatDuration(item.duration),
+                    text = item.formattedDuration,
                     style = MaterialTheme.typography.bodySmall,
                     color = NexusColors.Cyan,
                     fontFamily = CyberpunkFontFamily
                 )
                 Text(
-                    text = if (item.mimeType.startsWith("video/")) "VIDEO" else "AUDIO",
+                    text = if (item.isVideo) "VIDEO" else "AUDIO",
                     style = MaterialTheme.typography.labelSmall,
                     color = NexusColors.Purple.copy(alpha = 0.6f),
                     fontFamily = CyberpunkFontFamily
@@ -604,56 +703,39 @@ fun MediaItemRow(
     }
 }
 
-private fun scanMedia(
-    scope: CoroutineScope,
+// Функция сканирования медиа - ПОЛНОСТЬЮ ПРОДАКШЕН-ВЕРСИЯ С IO-ДИСПЕТЧЕРОМ
+private suspend fun scanMedia(
     repository: com.nexus.player.data.repository.MediaRepository,
     onAudioItems: (List<MediaItem>) -> Unit,
     onVideoItems: (List<MediaItem>) -> Unit,
-    onAllItems: (List<MediaItem>) -> Unit,
     onLoading: (Boolean) -> Unit,
     onScanning: (Boolean) -> Unit
-) {
+) = withContext(Dispatchers.Main) {
     onLoading(true)
     onScanning(true)
     
-    val allItems = mutableListOf<MediaItem>()
     val audioList = mutableListOf<MediaItem>()
     val videoList = mutableListOf<MediaItem>()
     
-    scope.launch(Dispatchers.IO) {
-        try {
+    try {
+        // Чтение файлов строго в фоновом потоке IO, чтобы не забивать Main Thread
+        withContext(Dispatchers.IO) {
             repository.scanAllMedia().collect { item ->
-                allItems.add(item)
-                if (item.mimeType.startsWith("video/")) {
+                if (item.isVideo) {
                     videoList.add(item)
                 } else {
                     audioList.add(item)
                 }
             }
-        } catch (e: Exception) {
-            // Handle scan error
-        } finally {
-            withContext(Dispatchers.Main) {
-                onAudioItems(audioList.sortedBy { it.name.lowercase() })
-                onVideoItems(videoList.sortedBy { it.name.lowercase() })
-                onAllItems(allItems)
-                onLoading(false)
-                onScanning(false)
-            }
         }
-    }
-}
-
-private fun formatDuration(durationMs: Long): String {
-    if (durationMs <= 0) return "--:--"
-    val totalSeconds = durationMs / 1000
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    val seconds = totalSeconds % 60
-    
-    return if (hours > 0) {
-        "%d:%02d:%02d".format(hours, minutes, seconds)
-    } else {
-        "%02d:%02d".format(minutes, seconds)
+    } catch (e: Exception) {
+        // В продакшене можно залогировать ошибку сканирования
+        e.printStackTrace()
+    } finally {
+        // Возвращаемся в главный поток для безопасного обновления UI-стейтов
+        onAudioItems(audioList.sortedBy { it.name.lowercase() })
+        onVideoItems(videoList.sortedBy { it.name.lowercase() })
+        onLoading(false)
+        onScanning(false)
     }
 }
