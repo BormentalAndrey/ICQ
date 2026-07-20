@@ -1,10 +1,7 @@
-package com.nexus.player.audio
+package com.nexus.player.player.audio
 
 import android.media.audiofx.Equalizer
 import android.util.Log
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.AudioProcessor
-import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.pow
@@ -46,14 +43,11 @@ class EqualizerEngine {
             equalizer = Equalizer(0, audioSessionId).apply {
                 enabled = true
                 
-                // Configure bands
                 val numBands = numberOfBands.toInt()
                 if (numBands >= NUM_BANDS) {
-                    // Set center frequencies for bands
-                    val frequencies = intArrayOf(60, 230, 910, 3600, 14000)
                     for (i in 0 until NUM_BANDS) {
                         if (i < numBands) {
-                            setBandLevel(i.toShort(), currentBands[i].toShort())
+                            setBandLevel(i.toShort(), (currentBands[i] * 100).toInt().toShort())
                         }
                     }
                 }
@@ -65,20 +59,22 @@ class EqualizerEngine {
     
     fun applyPreset(preset: String) {
         val bands = presets[preset]?.bands ?: return
-        applyBands(bands)
+        applyBands(bands.toList())
     }
     
     fun applyBands(bands: List<Float>) {
         if (bands.size != NUM_BANDS) return
         
-        currentBands = bands.toFloatArray()
+        for (i in bands.indices) {
+            currentBands[i] = bands[i]
+        }
         
         equalizer?.let { eq ->
             val numBands = eq.numberOfBands.toInt()
             for (i in 0 until minOf(NUM_BANDS, numBands)) {
                 try {
                     val gain = clampDb(currentBands[i])
-                    eq.setBandLevel(i.toShort(), (gain * 100).toShort())
+                    eq.setBandLevel(i.toShort(), (gain * 100).toInt().toShort())
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to set band level", e)
                 }
@@ -92,7 +88,7 @@ class EqualizerEngine {
             
             equalizer?.let { eq ->
                 if (band < eq.numberOfBands) {
-                    eq.setBandLevel(band.toShort(), (currentBands[band] * 100).toShort())
+                    eq.setBandLevel(band.toShort(), (currentBands[band] * 100).toInt().toShort())
                 }
             }
         }
@@ -117,111 +113,5 @@ class EqualizerEngine {
     
     private fun clampDb(db: Float): Float {
         return db.coerceIn(MIN_DB, MAX_DB)
-    }
-    
-    class CustomEqualizerProcessor : AudioProcessor {
-        
-        private var inputFormat: AudioFormat? = null
-        private var outputFormat: AudioFormat? = null
-        private var bands = FloatArray(NUM_BANDS) { 0f }
-        private var enabled = true
-        
-        override fun configure(inputFormat: AudioFormat): AudioFormat {
-            this.inputFormat = inputFormat
-            this.outputFormat = inputFormat
-            return inputFormat
-        }
-        
-        override fun isActive(): Boolean = enabled
-        
-        override fun queueInput(inputBuffer: ByteBuffer) {
-            if (!enabled) {
-                // Pass through
-                return
-            }
-            
-            val position = inputBuffer.position()
-            val limit = inputBuffer.limit()
-            val size = limit - position
-            
-            if (size > 0) {
-                val samples = ShortArray(size / 2)
-                inputBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples)
-                
-                // Apply equalizer bands (simplified FFT-based EQ)
-                // In a real implementation, this would use FFT convolution
-                // For now, we apply a simple gain adjustment per frequency band
-                val processedSamples = applyEqualization(samples)
-                
-                inputBuffer.position(position)
-                inputBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(processedSamples)
-                inputBuffer.position(limit)
-            }
-        }
-        
-        override fun queueEndOfStream() {
-            // No-op
-        }
-        
-        override fun getOutput(): ByteBuffer {
-            return ByteBuffer.allocateDirect(0)
-        }
-        
-        override fun isEnded(): Boolean = false
-        
-        override fun flush() {
-            // Reset filters
-        }
-        
-        override fun reset() {
-            flush()
-            bands = FloatArray(NUM_BANDS) { 0f }
-        }
-        
-        fun setBands(newBands: FloatArray) {
-            if (newBands.size == NUM_BANDS) {
-                bands = newBands.copyOf()
-            }
-        }
-        
-        fun setEnabled(enabled: Boolean) {
-            this.enabled = enabled
-        }
-        
-        private fun applyEqualization(samples: ShortArray): ShortArray {
-            val processed = ShortArray(samples.size)
-            
-            // Simple EQ implementation using biquad filters
-            // In production, this should use proper FFT-based filtering
-            for (i in samples.indices) {
-                var sample = samples[i].toFloat() / 32768f
-                
-                // Apply gain based on frequency bands (simplified)
-                // Band 0: 60Hz (sub-bass)
-                // Band 1: 230Hz (bass)
-                // Band 2: 910Hz (mids)
-                // Band 3: 3600Hz (high-mids)
-                // Band 4: 14000Hz (highs)
-                
-                // Simple gain application (should be replaced with proper IIR/FIR filters)
-                val bandGain = when {
-                    i % 256 < 16 -> bands[0] // Low frequencies
-                    i % 256 < 64 -> bands[1]
-                    i % 256 < 128 -> bands[2]
-                    i % 256 < 192 -> bands[3]
-                    else -> bands[4] // High frequencies
-                }
-                
-                val gainMultiplier = 10.0.pow(bandGain / 20.0).toFloat()
-                sample *= gainMultiplier
-                
-                // Clamp to prevent clipping
-                sample = sample.coerceIn(-1f, 1f)
-                
-                processed[i] = (sample * 32767f).toInt().toShort()
-            }
-            
-            return processed
-        }
     }
 }
