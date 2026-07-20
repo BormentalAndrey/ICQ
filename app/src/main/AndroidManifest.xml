@@ -1,35 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.nexus.player">
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Хранилище (Android 9 и ниже) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"
         tools:ignore="ScopedStorage" />
-    
-    <!-- Медиа (Android 13+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    
-    <!-- Доступ ко всем файлам (Android 11+) - опционально для расширенного поиска -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-    
-    <!-- Сервисы -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    
-    <!-- Уведомления (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    
-    <!-- Wake Lock для фонового воспроизведения -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
-    <!-- Интернет (для стриминга в будущем) -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -40,15 +25,13 @@
         android:label="NEXUS PLAYER"
         android:theme="@style/Theme.NexusPlayer"
         android:requestLegacyExternalStorage="true"
-        android:usesCleartextTraffic="true"
         tools:targetApi="34">
         
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation"
-            android:launchMode="singleTop"
-            android:screenOrientation="portrait">
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -58,29 +41,15 @@
         <service
             android:name=".player.service.CyberPlayerService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback"
-            android:stopWithTask="false">
+            android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="com.nexus.player.ACTION_PLAY" />
                 <action android:name="com.nexus.player.ACTION_PAUSE" />
                 <action android:name="com.nexus.player.ACTION_NEXT" />
                 <action android:name="com.nexus.player.ACTION_PREVIOUS" />
                 <action android:name="com.nexus.player.ACTION_STOP" />
-                <action android:name="com.nexus.player.ACTION_SEEK_TO" />
-                <action android:name="com.nexus.player.ACTION_SET_EQUALIZER" />
             </intent-filter>
         </service>
-        
-        <!-- FileProvider для доступа к файлам (если нужно) -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
         
     </application>
 </manifest>
