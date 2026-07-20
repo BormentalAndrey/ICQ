@@ -3,6 +3,7 @@ package com.nexus.player.data.repository
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import android.provider.MediaStore
 import com.nexus.player.data.model.MediaFormat
 import com.nexus.player.data.model.MediaItem
@@ -19,23 +20,44 @@ class MediaRepository(private val context: Context) {
     private val handler = CorruptedFileHandler()
     
     fun scanAllMedia(): Flow<MediaItem> = flow {
-        scanAudioFiles().forEach { emit(it) }
-        scanVideoFiles().forEach { emit(it) }
-        scanCustomDirectories().forEach { emit(it) }
+        val seen = mutableSetOf<String>()
+        
+        // Сначала MediaStore (быстрее)
+        scanAudioFiles().forEach { item ->
+            if (seen.add(item.path)) emit(item)
+        }
+        scanVideoFiles().forEach { item ->
+            if (seen.add(item.path)) emit(item)
+        }
+        
+        // Затем файловая система (для файлов не в MediaStore)
+        scanCustomDirectories().forEach { item ->
+            if (seen.add(item.path)) emit(item)
+        }
     }.flowOn(Dispatchers.IO)
     
     fun scanAudioOnly(): Flow<MediaItem> = flow {
-        scanAudioFiles().forEach { emit(it) }
+        val seen = mutableSetOf<String>()
+        scanAudioFiles().forEach { item ->
+            if (seen.add(item.path)) emit(item)
+        }
         scanCustomDirectories()
             .filter { it.mimeType.startsWith("audio/") || it.format.isAudioFormat }
-            .forEach { emit(it) }
+            .forEach { item ->
+                if (seen.add(item.path)) emit(item)
+            }
     }.flowOn(Dispatchers.IO)
     
     fun scanVideoOnly(): Flow<MediaItem> = flow {
-        scanVideoFiles().forEach { emit(it) }
+        val seen = mutableSetOf<String>()
+        scanVideoFiles().forEach { item ->
+            if (seen.add(item.path)) emit(item)
+        }
         scanCustomDirectories()
             .filter { it.mimeType.startsWith("video/") || it.format.isVideoFormat }
-            .forEach { emit(it) }
+            .forEach { item ->
+                if (seen.add(item.path)) emit(item)
+            }
     }.flowOn(Dispatchers.IO)
     
     private fun scanAudioFiles(): List<MediaItem> {
@@ -48,7 +70,8 @@ class MediaRepository(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.MIME_TYPE
+            MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.SIZE
         )
         
         try {
@@ -67,6 +90,7 @@ class MediaRepository(private val context: Context) {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 
                 while (cursor.moveToNext()) {
                     try {
@@ -78,9 +102,13 @@ class MediaRepository(private val context: Context) {
                         val album = cursor.getString(albumCol) ?: "Unknown Album"
                         val albumId = cursor.getLong(albumIdCol)
                         val mimeType = cursor.getString(mimeCol) ?: "audio/*"
+                        val size = cursor.getLong(sizeCol)
+                        
+                        // Пропускаем файлы меньше 10KB (скорее всего битые/пустые)
+                        if (size < 10240) continue
                         
                         val file = File(path)
-                        if (!file.exists() || !file.canRead()) continue
+                        if (!file.exists() || !file.canRead() || file.length() == 0L) continue
                         
                         if (duration <= 0) {
                             duration = handler.estimateDuration(path)
@@ -114,7 +142,7 @@ class MediaRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            // Log error but continue with empty list
+            e.printStackTrace()
         }
         
         return audioItems
@@ -127,7 +155,8 @@ class MediaRepository(private val context: Context) {
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DATA,
             MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.MIME_TYPE
+            MediaStore.Video.Media.MIME_TYPE,
+            MediaStore.Video.Media.SIZE
         )
         
         try {
@@ -143,6 +172,7 @@ class MediaRepository(private val context: Context) {
                 val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
                 val durCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
                 
                 while (cursor.moveToNext()) {
                     try {
@@ -151,9 +181,13 @@ class MediaRepository(private val context: Context) {
                         val path = cursor.getString(pathCol) ?: continue
                         var duration = cursor.getLong(durCol)
                         val mimeType = cursor.getString(mimeCol) ?: "video/*"
+                        val size = cursor.getLong(sizeCol)
+                        
+                        // Пропускаем файлы меньше 50KB (слишком маленькие для видео)
+                        if (size < 51200) continue
                         
                         val file = File(path)
-                        if (!file.exists() || !file.canRead()) continue
+                        if (!file.exists() || !file.canRead() || file.length() == 0L) continue
                         
                         if (duration <= 0) {
                             duration = handler.estimateDuration(path)
@@ -177,7 +211,7 @@ class MediaRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            // Log error but continue with empty list
+            e.printStackTrace()
         }
         
         return videoItems
@@ -185,30 +219,58 @@ class MediaRepository(private val context: Context) {
     
     private fun scanCustomDirectories(): List<MediaItem> {
         val customItems = mutableListOf<MediaItem>()
-        val directories = listOf(
-            "/storage/emulated/0/Download",
-            "/storage/emulated/0/Music",
-            "/storage/emulated/0/Movies",
-            "/storage/emulated/0/DCIM",
-            "/storage/emulated/0/Pictures"
-        )
+        val seen = mutableSetOf<String>()
         
         val audioExtensions = listOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "wma", "opus")
         val videoExtensions = listOf("mp4", "avi", "mkv", "mov", "webm", "flv", "3gp", "wmv")
         val allExtensions = audioExtensions + videoExtensions
         
-        directories.forEach { dirPath ->
-            val dir = File(dirPath)
+        // Базовые папки для сканирования
+        val directories = mutableListOf<File>()
+        
+        // Стандартные папки
+        listOf(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PODCASTS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_ALARMS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_NOTIFICATIONS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RINGTONES)
+        ).forEach { dir ->
             if (dir.exists() && dir.isDirectory && dir.canRead()) {
-                try {
-                    dir.walkTopDown()
-                        .maxDepth(3)
-                        .filter { it.isFile }
-                        .filter { it.extension.lowercase() in allExtensions }
-                        .forEach { file ->
+                directories.add(dir)
+            }
+        }
+        
+        // Добавляем корень хранилища и основные папки
+        val storageDir = File("/storage/emulated/0")
+        if (storageDir.exists() && storageDir.canRead()) {
+            storageDir.listFiles()?.filter { 
+                it.isDirectory && it.canRead() && !it.name.startsWith(".") 
+            }?.forEach { dir ->
+                if (!directories.contains(dir)) {
+                    directories.add(dir)
+                }
+            }
+        }
+        
+        // Сканируем все собранные директории
+        directories.forEach { dir ->
+            try {
+                dir.walkTopDown()
+                    .maxDepth(5)
+                    .filter { it.isFile && it.canRead() }
+                    .filter { it.extension.lowercase() in allExtensions }
+                    .filter { it.length() > 10240 } // > 10KB
+                    .take(1000)
+                    .forEach { file ->
+                        val absPath = file.absolutePath
+                        if (seen.add(absPath)) {
                             try {
-                                val duration = handler.estimateDuration(file.absolutePath)
-                                val format = MediaFormat.fromPath(file.absolutePath)
+                                val duration = handler.estimateDuration(absPath)
+                                val format = MediaFormat.fromPath(absPath)
                                 val extension = file.extension.lowercase()
                                 val isVideo = extension in videoExtensions
                                 val mimeType = if (isVideo) "video/$extension" else "audio/$extension"
@@ -217,7 +279,7 @@ class MediaRepository(private val context: Context) {
                                     MediaItem(
                                         id = file.hashCode().toLong(),
                                         name = file.nameWithoutExtension,
-                                        path = file.absolutePath,
+                                        path = absPath,
                                         duration = duration,
                                         mimeType = mimeType,
                                         format = format
@@ -227,9 +289,9 @@ class MediaRepository(private val context: Context) {
                                 // Skip unreadable files
                             }
                         }
-                } catch (e: Exception) {
-                    // Skip inaccessible directories
-                }
+                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
         
