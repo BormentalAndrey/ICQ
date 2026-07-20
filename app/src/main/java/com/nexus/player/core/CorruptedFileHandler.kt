@@ -1,4 +1,4 @@
-package com.nexus.player.player.core
+package com.nexus.player.core
 
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -74,7 +74,9 @@ class CorruptedFileHandler {
                         totalFrames++
                         offset = frame.offset + frame.size
                     } else {
-                        offset++
+                        // Оптимизация: если в диапазоне MAX_FRAME_SKIP фрейм не найден,
+                        // безопасно прыгаем вперед, избегая квадратичного зависания (ANR)
+                        offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
                     }
                 }
             }
@@ -90,48 +92,55 @@ class CorruptedFileHandler {
     private fun findNextValidMp3Frame(raf: RandomAccessFile, startOffset: Long): FrameInfo? {
         var offset = startOffset
         val maxSearch = minOf(raf.length(), offset + MAX_FRAME_SKIP)
+        val bufferSize = 4096
+        val buffer = ByteArray(bufferSize)
         
         while (offset < maxSearch - 4) {
             raf.seek(offset)
-            val b1 = raf.read()
-            if (b1 == -1) break
+            val toRead = minOf(bufferSize.toLong(), maxSearch - offset).toInt()
+            val bytesRead = raf.read(buffer, 0, toRead)
+            if (bytesRead <= 0) break
             
-            if (b1 == MP3_SYNC_WORD) {
-                val b2 = raf.read()
-                if (b2 != -1 && (b2 and 0xE0) == 0xE0) {
-                    val b3 = raf.read()
-                    val b4 = raf.read()
-                    
-                    if (b3 != -1 && b4 != -1 && isValidMp3Header(b1, b2, b3, b4)) {
-                        val bitrateIndex = (b2 shr 4) and 0x0F
-                        val sampleRateIndex = (b2 shr 2) and 0x03
-                        val padding = (b2 shr 1) and 0x01
+            var i = 0
+            while (i < bytesRead - 3 && (offset + i) < maxSearch - 4) {
+                val b1 = buffer[i].toInt() and 0xFF
+                if (b1 == MP3_SYNC_WORD) {
+                    val b2 = buffer[i + 1].toInt() and 0xFF
+                    if ((b2 and 0xE0) == 0xE0) {
+                        val b3 = buffer[i + 2].toInt() and 0xFF
+                        val b4 = buffer[i + 3].toInt() and 0xFF
                         
-                        val bitrates = intArrayOf(0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000, 0)
-                        val sampleRates = intArrayOf(44100, 48000, 32000, 0)
-                        
-                        val bitrate = bitrates.getOrElse(bitrateIndex) { 128000 }
-                        val sampleRate = sampleRates.getOrElse(sampleRateIndex) { 44100 }
-                        
-                        val frameSize = if (sampleRate > 0) {
-                            (144 * bitrate) / sampleRate + padding
-                        } else 0
-                        
-                        if (frameSize in MIN_FRAME_SIZE..MAX_FRAME_SKIP) {
-                            return FrameInfo(
-                                offset = offset,
-                                size = frameSize,
-                                isValid = true,
-                                sampleRate = sampleRate,
-                                bitrate = bitrate
-                            )
+                        if (isValidMp3Header(b1, b2, b3, b4)) {
+                            val bitrateIndex = (b2 shr 4) and 0x0F
+                            val sampleRateIndex = (b2 shr 2) and 0x03
+                            val padding = (b2 shr 1) and 0x01
+                            
+                            val bitrates = intArrayOf(0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000, 0)
+                            val sampleRates = intArrayOf(44100, 48000, 32000, 0)
+                            
+                            val bitrate = bitrates.getOrElse(bitrateIndex) { 128000 }
+                            val sampleRate = sampleRates.getOrElse(sampleRateIndex) { 44100 }
+                            
+                            val frameSize = if (sampleRate > 0) {
+                                (144 * bitrate) / sampleRate + padding
+                            } else 0
+                            
+                            if (frameSize in MIN_FRAME_SIZE..MAX_FRAME_SKIP) {
+                                return FrameInfo(
+                                    offset = offset + i,
+                                    size = frameSize,
+                                    isValid = true,
+                                    sampleRate = sampleRate,
+                                    bitrate = bitrate
+                                )
+                            }
                         }
                     }
-                } else {
-                    raf.seek(offset + 1)
                 }
+                i++
             }
-            offset++
+            // Сдвигаем offset с учетом перекрытия буфера для заголовков на границе
+            offset += maxOf(1, bytesRead - 3)
         }
         
         return null
@@ -160,7 +169,7 @@ class CorruptedFileHandler {
         try {
             raf.seek(0)
             val header = ByteArray(3)
-            raf.read(header)
+            if (raf.read(header) < 3) return 0L
             
             if (header.contentEquals(ID3_HEADER)) {
                 val version = ByteArray(2)
@@ -168,7 +177,7 @@ class CorruptedFileHandler {
                 val flags = raf.read()
                 
                 val sizeBytes = ByteArray(4)
-                raf.read(sizeBytes)
+                if (raf.read(sizeBytes) < 4) return 0L
                 
                 val size = ((sizeBytes[0].toInt() and 0x7F) shl 21) or
                         ((sizeBytes[1].toInt() and 0x7F) shl 14) or
@@ -178,12 +187,13 @@ class CorruptedFileHandler {
                 var tagSize = 10 + size
                 if (version[0] == 4.toByte() && (flags and 0x40) != 0) {
                     val extHeaderSizeBytes = ByteArray(4)
-                    raf.read(extHeaderSizeBytes)
-                    val extHeaderSize = ((extHeaderSizeBytes[0].toInt() and 0x7F) shl 21) or
-                            ((extHeaderSizeBytes[1].toInt() and 0x7F) shl 14) or
-                            ((extHeaderSizeBytes[2].toInt() and 0x7F) shl 7) or
-                            (extHeaderSizeBytes[3].toInt() and 0x7F)
-                    tagSize += extHeaderSize
+                    if (raf.read(extHeaderSizeBytes) == 4) {
+                        val extHeaderSize = ((extHeaderSizeBytes[0].toInt() and 0x7F) shl 21) or
+                                ((extHeaderSizeBytes[1].toInt() and 0x7F) shl 14) or
+                                ((extHeaderSizeBytes[2].toInt() and 0x7F) shl 7) or
+                                (extHeaderSizeBytes[3].toInt() and 0x7F)
+                        tagSize += extHeaderSize
+                    }
                 }
                 
                 return minOf(tagSize.toLong(), raf.length())
@@ -192,44 +202,51 @@ class CorruptedFileHandler {
             Log.e(TAG, "Error skipping ID3 tag", e)
         }
         
-        return 0
+        return 0L
     }
     
     private fun estimateWavDuration(file: File): Long {
         try {
             RandomAccessFile(file, "r").use { raf ->
                 val header = ByteArray(4)
-                raf.read(header)
-                
-                if (!header.contentEquals(WAV_RIFF)) return 0L
+                if (raf.read(header) < 4 || !header.contentEquals(WAV_RIFF)) return 0L
                 
                 raf.skipBytes(4)
-                raf.read(header)
-                
-                if (!header.contentEquals(WAV_WAVE)) return 0L
+                if (raf.read(header) < 4 || !header.contentEquals(WAV_WAVE)) return 0L
                 
                 var byteRate = 176400
                 var dataSize = 0L
                 
                 while (raf.filePointer < raf.length() - 8) {
-                    raf.read(header)
-                    val chunkSize = ByteBuffer.wrap(ByteArray(4)).apply {
-                        raf.read(array())
-                        order(ByteOrder.LITTLE_ENDIAN)
-                    }.getInt()
+                    if (raf.read(header) < 4) break
+                    val chunkSizeBytes = ByteArray(4)
+                    if (raf.read(chunkSizeBytes) < 4) break
+                    
+                    val chunkSizeLong = ByteBuffer.wrap(chunkSizeBytes)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .getInt()
+                        .toLong() and 0xFFFFFFFFL
                     
                     when {
                         header.contentEquals("fmt ".toByteArray()) -> {
-                            val fmtData = ByteArray(chunkSize)
-                            raf.read(fmtData)
-                            byteRate = ByteBuffer.wrap(fmtData, 8, 4).order(ByteOrder.LITTLE_ENDIAN).getInt()
+                            val bytesToRead = minOf(chunkSizeLong, 40L).toInt()
+                            val fmtData = ByteArray(bytesToRead)
+                            val read = raf.read(fmtData)
+                            if (read >= 12) {
+                                byteRate = ByteBuffer.wrap(fmtData, 8, 4)
+                                    .order(ByteOrder.LITTLE_ENDIAN)
+                                    .getInt()
+                            }
+                            if (chunkSizeLong > read) {
+                                raf.seek(raf.filePointer + (chunkSizeLong - read))
+                            }
                         }
                         header.contentEquals("data".toByteArray()) -> {
-                            dataSize = chunkSize.toLong()
+                            dataSize = chunkSizeLong
                             break
                         }
                         else -> {
-                            raf.skipBytes(chunkSize)
+                            raf.seek(raf.filePointer + chunkSizeLong)
                         }
                     }
                 }
@@ -249,9 +266,7 @@ class CorruptedFileHandler {
         try {
             RandomAccessFile(file, "r").use { raf ->
                 val marker = ByteArray(4)
-                raf.read(marker)
-                
-                if (!marker.contentEquals(FLAC_MARKER)) return 0L
+                if (raf.read(marker) < 4 || !marker.contentEquals(FLAC_MARKER)) return 0L
                 
                 var lastBlock = false
                 var sampleRate = 44100
@@ -265,28 +280,35 @@ class CorruptedFileHandler {
                     val blockType = blockHeader and 0x7F
                     
                     val sizeBytes = ByteArray(3)
-                    raf.read(sizeBytes)
+                    if (raf.read(sizeBytes) < 3) break
+                    
                     val blockSize = ((sizeBytes[0].toInt() and 0xFF) shl 16) or
                             ((sizeBytes[1].toInt() and 0xFF) shl 8) or
                             (sizeBytes[2].toInt() and 0xFF)
                     
+                    if (blockSize < 0 || blockSize > 16777216) break // Защита от OOM при битом размере
+                    
                     when (blockType) {
                         0 -> {
                             val streamInfo = ByteArray(blockSize)
-                            raf.read(streamInfo)
-                            
-                            sampleRate = ((streamInfo[10].toInt() and 0xFF) shl 12) or
-                                    ((streamInfo[11].toInt() and 0xFF) shl 4) or
-                                    ((streamInfo[12].toInt() and 0xF0) shr 4)
-                            
-                            totalSamples = ((streamInfo[12].toLong() and 0x0F) shl 32) or
-                                    ((streamInfo[13].toLong() and 0xFF) shl 24) or
-                                    ((streamInfo[14].toLong() and 0xFF) shl 16) or
-                                    ((streamInfo[15].toLong() and 0xFF) shl 8) or
-                                    (streamInfo[16].toLong() and 0xFF)
+                            val read = raf.read(streamInfo)
+                            if (read >= 18) {
+                                sampleRate = ((streamInfo[10].toInt() and 0xFF) shl 12) or
+                                        ((streamInfo[11].toInt() and 0xFF) shl 4) or
+                                        ((streamInfo[12].toInt() and 0xF0) shr 4)
+                                
+                                totalSamples = ((streamInfo[12].toLong() and 0x0F) shl 32) or
+                                        ((streamInfo[13].toLong() and 0xFF) shl 24) or
+                                        ((streamInfo[14].toLong() and 0xFF) shl 16) or
+                                        ((streamInfo[15].toLong() and 0xFF) shl 8) or
+                                        (streamInfo[16].toLong() and 0xFF)
+                            }
+                            if (blockSize > read) {
+                                raf.seek(raf.filePointer + (blockSize - read))
+                            }
                         }
                         else -> {
-                            raf.skipBytes(blockSize)
+                            raf.seek(raf.filePointer + blockSize)
                         }
                     }
                 }
@@ -303,10 +325,9 @@ class CorruptedFileHandler {
     }
     
     private fun estimateMp4Duration(file: File): Long {
+        val extractor = MediaExtractor()
         return try {
-            val extractor = MediaExtractor()
             extractor.setDataSource(file.absolutePath)
-            
             var duration = 0L
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
@@ -314,20 +335,19 @@ class CorruptedFileHandler {
                     duration = maxOf(duration, format.getLong(MediaFormat.KEY_DURATION))
                 }
             }
-            
-            extractor.release()
             duration / 1000
         } catch (e: Exception) {
             Log.e(TAG, "Error estimating MP4 duration", e)
             0L
+        } finally {
+            try { extractor.release() } catch (_: Exception) {}
         }
     }
     
     private fun estimateGenericDuration(file: File): Long {
+        val extractor = MediaExtractor()
         return try {
-            val extractor = MediaExtractor()
             extractor.setDataSource(file.absolutePath)
-            
             var duration = 0L
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
@@ -335,46 +355,47 @@ class CorruptedFileHandler {
                     duration = maxOf(duration, format.getLong(MediaFormat.KEY_DURATION))
                 }
             }
-            
-            extractor.release()
             duration / 1000
         } catch (e: Exception) {
             0L
+        } finally {
+            try { extractor.release() } catch (_: Exception) {}
         }
     }
     
     fun forceDecode(filePath: String): MediaExtractor? {
-        return try {
-            val extractor = MediaExtractor()
-            
+        var extractor: MediaExtractor? = MediaExtractor()
+        try {
             try {
-                extractor.setDataSource(filePath)
+                extractor?.setDataSource(filePath)
             } catch (e: IOException) {
                 Log.w(TAG, "IOException when setting data source, attempting forced decode", e)
                 val repairedFile = repairFile(filePath)
-                if (repairedFile != null) {
-                    extractor.setDataSource(repairedFile.absolutePath)
+                if (repairedFile != null && repairedFile.exists()) {
+                    extractor?.setDataSource(repairedFile.absolutePath)
                 } else {
-                    extractor.release()
+                    extractor?.release()
                     return null
                 }
             }
             
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
+            val count = extractor?.trackCount ?: 0
+            for (i in 0 until count) {
+                val format = extractor?.getTrackFormat(i)
+                val mime = format?.getString(MediaFormat.KEY_MIME)
                 if (mime?.startsWith("audio/") == true || mime?.startsWith("video/") == true) {
-                    extractor.selectTrack(i)
-                    return extractor
+                    extractor?.selectTrack(i)
+                    val validExtractor = extractor
+                    extractor = null // Обнуляем, чтобы блок finally не вызвал release()
+                    return validExtractor
                 }
             }
-            
-            extractor.release()
-            null
         } catch (e: Exception) {
             Log.e(TAG, "Force decode failed completely", e)
-            null
+        } finally {
+            try { extractor?.release() } catch (_: Exception) {}
         }
+        return null
     }
     
     fun repairFile(filePath: String): File? {
@@ -384,14 +405,14 @@ class CorruptedFileHandler {
             
             val repairedFile = File(sourceFile.parent, "repaired_" + sourceFile.name)
             
-            when {
+            val success = when {
                 filePath.endsWith(".mp3", true) -> repairMp3File(sourceFile, repairedFile)
                 filePath.endsWith(".wav", true) -> repairWavFile(sourceFile, repairedFile)
                 filePath.endsWith(".flac", true) -> repairFlacFile(sourceFile, repairedFile)
                 else -> repairGenericFile(sourceFile, repairedFile)
             }
             
-            if (repairedFile.exists() && repairedFile.length() > 0) repairedFile else null
+            if (success && repairedFile.exists() && repairedFile.length() > 0) repairedFile else null
         } catch (e: Exception) {
             Log.e(TAG, "File repair failed", e)
             null
@@ -407,8 +428,10 @@ class CorruptedFileHandler {
                     if (offset > 0) {
                         raf.seek(0)
                         val tagData = ByteArray(offset.toInt())
-                        raf.read(tagData)
-                        output.write(tagData)
+                        val read = raf.read(tagData)
+                        if (read > 0) {
+                            output.write(tagData, 0, read)
+                        }
                     }
                     
                     while (offset < raf.length() - MIN_FRAME_SIZE) {
@@ -422,7 +445,7 @@ class CorruptedFileHandler {
                             }
                             offset = frame.offset + frame.size
                         } else {
-                            offset++
+                            offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
                         }
                     }
                 }
@@ -436,6 +459,7 @@ class CorruptedFileHandler {
     
     private fun repairWavFile(source: File, destination: File): Boolean {
         try {
+            var totalDataBytes = 0L
             RandomAccessFile(source, "r").use { raf ->
                 FileOutputStream(destination).use { output ->
                     val buffer = ByteArray(8192)
@@ -449,7 +473,27 @@ class CorruptedFileHandler {
                     
                     while (raf.read(buffer).also { bytesRead = it } != -1) {
                         output.write(buffer, 0, bytesRead)
+                        totalDataBytes += bytesRead
                     }
+                }
+            }
+            
+            // Восстановление валидности WAV: пересчитываем и перезаписываем размеры в заголовках RIFF и DATA
+            if (destination.exists() && destination.length() >= 44) {
+                RandomAccessFile(destination, "rw").use { rafDest ->
+                    val riffSize = (totalDataBytes + 36).toInt()
+                    val dataSize = totalDataBytes.toInt()
+                    
+                    val sizeBuffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
+                    
+                    sizeBuffer.putInt(riffSize)
+                    rafDest.seek(4)
+                    rafDest.write(sizeBuffer.array())
+                    
+                    sizeBuffer.clear()
+                    sizeBuffer.putInt(dataSize)
+                    rafDest.seek(40)
+                    rafDest.write(sizeBuffer.array())
                 }
             }
             return true
@@ -463,24 +507,24 @@ class CorruptedFileHandler {
         try {
             RandomAccessFile(source, "r").use { raf ->
                 FileOutputStream(destination).use { output ->
+                    val marker = ByteArray(4)
+                    if (raf.read(marker) < 4 || !marker.contentEquals(FLAC_MARKER)) return false
                     output.write(FLAC_MARKER)
                     
                     var lastBlock = false
-                    raf.seek(4)
-                    
                     while (!lastBlock && raf.filePointer < raf.length()) {
                         val blockHeader = raf.read()
                         if (blockHeader == -1) break
                         
                         lastBlock = (blockHeader and 0x80) != 0
-                        val blockType = blockHeader and 0x7F
-                        
                         val sizeBytes = ByteArray(3)
                         if (raf.read(sizeBytes) < 3) break
                         
                         val blockSize = ((sizeBytes[0].toInt() and 0xFF) shl 16) or
                                 ((sizeBytes[1].toInt() and 0xFF) shl 8) or
                                 (sizeBytes[2].toInt() and 0xFF)
+                        
+                        if (blockSize < 0 || blockSize > 16777216) break
                         
                         output.write(blockHeader)
                         output.write(sizeBytes)
@@ -490,6 +534,13 @@ class CorruptedFileHandler {
                         if (bytesRead > 0) {
                             output.write(blockData, 0, bytesRead)
                         }
+                    }
+                    
+                    // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: копируем оставшиеся аудиофреймы FLAC после метаданных!
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (raf.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
                     }
                 }
             }
@@ -545,8 +596,11 @@ class CorruptedFileHandler {
                                 lastValidOffset = frame.offset + frame.size
                                 offset = lastValidOffset
                             } else {
-                                offset++
+                                offset += maxOf(1L, MAX_FRAME_SKIP.toLong() - MIN_FRAME_SIZE.toLong())
                             }
+                        }
+                        if (raf.length() > lastValidOffset) {
+                            corruptedBytes += (raf.length() - lastValidOffset)
                         }
                     }
                 }
@@ -554,9 +608,10 @@ class CorruptedFileHandler {
                     val extractor = MediaExtractor()
                     try {
                         extractor.setDataSource(filePath)
-                        extractor.release()
                     } catch (e: Exception) {
                         corruptedBytes = totalSize / 2
+                    } finally {
+                        try { extractor.release() } catch (_: Exception) {}
                     }
                 }
             }
