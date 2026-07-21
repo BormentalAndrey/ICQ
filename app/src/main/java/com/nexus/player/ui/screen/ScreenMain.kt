@@ -266,7 +266,16 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 if (show) {
                     PlaylistView(state, viewModel, ::startPlayback)
                 } else {
-                    PlayerView(state, viewModel, ::startPlayback, ::togglePlayPause, ::playNext, ::playPrevious, ::applyPreset, ::seekTo, ::enterPiP)
+                    PlayerView(
+                        state, viewModel,
+                        onPlay = ::startPlayback,
+                        onTogglePlayPause = ::togglePlayPause,
+                        onNext = ::playNext,
+                        onPrevious = ::playPrevious,
+                        onPreset = ::applyPreset,
+                        onSeek = { pos -> seekTo(pos) },
+                        onPiP = ::enterPiP
+                    )
                 }
             }
         }
@@ -326,39 +335,46 @@ private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay:
 
 @Composable
 private fun PlayerView(
-    state: PlayerUiState, viewModel: MainViewModel, onPlay: (MediaItem) -> Unit,
-    onTogglePlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
-    onPreset: (String) -> Unit, onSeek: (Long) -> Unit, onPiP: () -> Unit
+    state: PlayerUiState, viewModel: MainViewModel,
+    onPlay: (MediaItem) -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onPreset: (String) -> Unit,
+    onSeek: (Long) -> Unit,
+    onPiP: () -> Unit
 ) {
     var seekAccumulator by remember { mutableFloatStateOf(0f) }
     var brightnessAccumulator by remember { mutableFloatStateOf(0.5f) }
     var volumeAccumulator by remember { mutableFloatStateOf(0.5f) }
 
-    Column(
-        Modifier.fillMaxSize().then(if (state.isFullScreen) Modifier.background(Color.Black).pointerInput(Unit) {
-            detectDragGestures { change, dragAmount ->
-                change.consume()
-                val w = size.width.toFloat(); val h = size.height.toFloat()
-                when {
-                    abs(dragAmount.x) > abs(dragAmount.y) -> {
-                        seekAccumulator += dragAmount.x / w * (state.duration / 1000f)
-                        val s = seekAccumulator.roundToInt()
-                        if (abs(s) > 0) {
-                            onSeek((state.currentPosition + s * 1000L).coerceIn(0, state.duration))
-                            viewModel.showGestureIndicator(if (s > 0) "+${s}s" else "${s}s"); seekAccumulator = 0f
-                        }
-                    }
-                    change.position.x < w / 2 -> {
-                        brightnessAccumulator = (brightnessAccumulator - dragAmount.y / h).coerceIn(0.01f, 1f)
-                        viewModel.showGestureIndicator("☀ ${(brightnessAccumulator * 100).toInt()}%")
-                    }
-                    else -> {
-                        volumeAccumulator = (volumeAccumulator - dragAmount.y / h).coerceIn(0f, 1f)
-                        viewModel.showGestureIndicator("🔊 ${(volumeAccumulator * 100).toInt()}%")
+    val gestureModifier = if (state.isFullScreen) Modifier.pointerInput(Unit) {
+        detectDragGestures { change, dragAmount ->
+            change.consume()
+            val w = size.width.toFloat(); val h = size.height.toFloat()
+            when {
+                abs(dragAmount.x) > abs(dragAmount.y) -> {
+                    seekAccumulator += dragAmount.x / w * (state.duration / 1000f)
+                    val s = seekAccumulator.roundToInt()
+                    if (abs(s) > 0) {
+                        onSeek((state.currentPosition + s * 1000L).coerceIn(0, state.duration))
+                        viewModel.showGestureIndicator(if (s > 0) "+${s}s" else "${s}s"); seekAccumulator = 0f
                     }
                 }
+                change.position.x < w / 2 -> {
+                    brightnessAccumulator = (brightnessAccumulator - dragAmount.y / h).coerceIn(0.01f, 1f)
+                    viewModel.showGestureIndicator("☀ ${(brightnessAccumulator * 100).toInt()}%")
+                }
+                else -> {
+                    volumeAccumulator = (volumeAccumulator - dragAmount.y / h).coerceIn(0f, 1f)
+                    viewModel.showGestureIndicator("🔊 ${(volumeAccumulator * 100).toInt()}%")
+                }
             }
-        } else Modifier),
+        }
+    } else Modifier
+
+    Column(
+        Modifier.fillMaxSize().then(if (state.isFullScreen) Modifier.background(Color.Black).then(gestureModifier) else gestureModifier),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (state.currentTrack?.isVideo == true) {
