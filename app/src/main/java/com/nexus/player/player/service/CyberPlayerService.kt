@@ -147,20 +147,33 @@ class CyberPlayerService : Service() {
 
     private fun initializePlayer() {
         player = ExoPlayer.Builder(this)
-            .setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC).setUsage(androidx.media3.common.C.USAGE_MEDIA).build(), true)
+            .setAudioAttributes(
+                androidx.media3.common.AudioAttributes.Builder()
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .build(), true
+            )
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this))
             .build().apply {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
                         Log.d("NEXUS_PLAYER", "State: $state playing=${this@apply.isPlaying}")
-                        if (state == Player.STATE_READY) { _isPlaying.value = this@apply.isPlaying; updateNotification(); broadcastPlaybackState() }
+                        if (state == Player.STATE_READY) {
+                            _isPlaying.value = this@apply.isPlaying
+                            updateNotification()
+                            broadcastPlaybackState()
+                        }
                         if (state == Player.STATE_ENDED) playNext()
                     }
-                    override fun onPlayerError(error: PlaybackException) { Log.e("NEXUS_PLAYER", "Error: ${error.errorCodeName}", error) }
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("NEXUS_PLAYER", "Error: ${error.errorCodeName}", error)
+                    }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         Log.d("NEXUS_PLAYER", "isPlaying: $isPlaying volume=${this@apply.volume}")
-                        _isPlaying.value = isPlaying; updateNotification(); broadcastPlaybackState()
+                        _isPlaying.value = isPlaying
+                        updateNotification()
+                        broadcastPlaybackState()
                         if (isPlaying) wakeLock?.acquire(3600000) else safeReleaseWakeLock()
                     }
                 })
@@ -170,12 +183,24 @@ class CyberPlayerService : Service() {
     }
 
     private fun safeReleaseWakeLock() {
-        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (e: Exception) { Log.e("NEXUS", "WakeLock", e) }
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (e: Exception) {
+            Log.e("NEXUS", "WakeLock", e)
+        }
     }
 
     private fun startPositionTracking() {
         serviceScope.launch {
-            while (isActive) { player?.let { if (it.isPlaying) { _currentPosition.value = it.currentPosition; broadcastPositionUpdate() } }; delay(250) }
+            while (isActive) {
+                player?.let {
+                    if (it.isPlaying) {
+                        _currentPosition.value = it.currentPosition
+                        broadcastPositionUpdate()
+                    }
+                }
+                delay(250)
+            }
         }
     }
 
@@ -207,28 +232,51 @@ class CyberPlayerService : Service() {
             playWhenReady = true
         }
         wakeLock?.acquire(3600000)
-        updateNotification(); broadcastTrackChanged()
+        updateNotification()
+        broadcastTrackChanged()
     }
 
-    private fun playNext() { player?.seekTo(0); player?.playWhenReady = true; broadcastTrackChanged() }
-    private fun playPrevious() { player?.seekTo(0); player?.playWhenReady = true; broadcastTrackChanged() }
+    private fun playNext() {
+        player?.seekTo(0)
+        player?.playWhenReady = true
+        broadcastTrackChanged()
+    }
+
+    private fun playPrevious() {
+        player?.seekTo(0)
+        player?.playWhenReady = true
+        broadcastTrackChanged()
+    }
 
     private fun acquireAudioFocus() {
         audioManager?.let { am ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(AudioAttributes.USAGE_MEDIA).build())
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .build()
+                    )
                     .setOnAudioFocusChangeListener {
                         when (it) {
                             AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
-                            AudioManager.AUDIOFOCUS_GAIN -> { player?.volume = 1.0f; player?.playWhenReady = true }
+                            AudioManager.AUDIOFOCUS_GAIN -> {
+                                player?.volume = 1.0f
+                                player?.playWhenReady = true
+                            }
                         }
                     }.build()
                 audioFocusRequest?.let { am.requestAudioFocus(it) }
             } else {
-                @Suppress("DEPRECATION") am.requestAudioFocus({ if (it == AudioManager.AUDIOFOCUS_LOSS) player?.pause() }, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    { if (it == AudioManager.AUDIOFOCUS_LOSS) player?.pause() },
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN
+                )
             }
         }
     }
@@ -249,11 +297,30 @@ class CyberPlayerService : Service() {
         .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession?.sessionToken).setShowActionsInCompactView(0, 1, 2))
         .build()
 
-    private fun createPI(action: String) = PendingIntent.getService(this, action.hashCode(), Intent(this, CyberPlayerService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    private fun createPI(action: String) = PendingIntent.getService(
+        this, action.hashCode(),
+        Intent(this, CyberPlayerService::class.java).setAction(action),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
-    private fun broadcastPlaybackState() = sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).putExtra(EXTRA_IS_PLAYING, _isPlaying.value).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { it.putExtra(EXTRA_DURATION, it.duration) } })
-    private fun broadcastPositionUpdate() = sendBroadcast(Intent(ACTION_POSITION_UPDATED).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { it.putExtra(EXTRA_DURATION, it.duration) } })
-    private fun broadcastTrackChanged() = sendBroadcast(Intent(ACTION_TRACK_CHANGED).apply { currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) } })
+    private fun broadcastPlaybackState() = sendBroadcast(
+        Intent(ACTION_PLAYBACK_STATE_CHANGED)
+            .putExtra(EXTRA_IS_PLAYING, _isPlaying.value)
+            .putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
+            .also { player?.let { it.putExtra(EXTRA_DURATION, it.duration) } }
+    )
+
+    private fun broadcastPositionUpdate() = sendBroadcast(
+        Intent(ACTION_POSITION_UPDATED)
+            .putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
+            .also { player?.let { it.putExtra(EXTRA_DURATION, it.duration) } }
+    )
+
+    private fun broadcastTrackChanged() = sendBroadcast(
+        Intent(ACTION_TRACK_CHANGED).apply {
+            currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) }
+        }
+    )
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
