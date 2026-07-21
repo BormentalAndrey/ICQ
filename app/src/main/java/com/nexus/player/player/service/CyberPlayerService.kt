@@ -108,15 +108,33 @@ class CyberPlayerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d("NEXUS_SERVICE", "onCreate")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nexus:WakeLock")
         createNotificationChannels()
         registerNotificationReceiver()
         initializeMediaSession()
         initializePlayer()
+        startForegroundService()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {}
+
+    private fun startForegroundService() {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("NEXUS PLAYER")
+            .setContentText("Готов к воспроизведению")
+            .setSmallIcon(R.drawable.ic_neon_skull)
+            .setColor(Color.parseColor("#FF007F"))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
 
     private fun registerNotificationReceiver() {
         val filter = IntentFilter().apply {
@@ -182,12 +200,12 @@ class CyberPlayerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundService()
         when (intent?.action) {
             ACTION_PLAY -> {
                 val uriString = intent.getStringExtra(EXTRA_FILE_URI)
                 val path = intent.getStringExtra(EXTRA_FILE_PATH)
                 val uriToPlay = uriString ?: path
-                
                 if (uriToPlay != null) {
                     serviceScope.launch { playFile(uriToPlay, intent.getLongExtra(EXTRA_START_POSITION, 0L)) }
                 } else {
@@ -204,30 +222,29 @@ class CyberPlayerService : Service() {
 
     private suspend fun playFile(uriString: String, startPosition: Long = 0L) {
         _playbackState.value = PlaybackResult.Success
-        
-        val mediaUri = if (uriString.startsWith("content://")) {
-            Uri.parse(uriString)
-        } else if (uriString.startsWith("/")) {
-            Uri.parse("file://$uriString")
-        } else {
-            Uri.parse(uriString)
-        }
-        
+
+        val mediaUri = if (uriString.startsWith("content://")) Uri.parse(uriString)
+        else if (uriString.startsWith("/")) Uri.parse("file://$uriString")
+        else Uri.parse(uriString)
+
         currentMediaUri = mediaUri
         Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
 
-        val damage = corruptedFileHandler.analyzeDamage(uriString)
-        _playbackState.value = damage
-        when (damage) {
-            is PlaybackResult.FatalError -> {
-                broadcastError(damage.userMessage)
-                if (damage.canAttemptRecovery) { repairAndPlay(uriString, startPosition); return }
-                else { showErrorNotification(damage.userMessage); return }
+        val isContentUri = uriString.startsWith("content://")
+        if (!isContentUri) {
+            val damage = corruptedFileHandler.analyzeDamage(uriString)
+            _playbackState.value = damage
+            when (damage) {
+                is PlaybackResult.FatalError -> {
+                    broadcastError(damage.userMessage)
+                    if (damage.canAttemptRecovery) { repairAndPlay(uriString, startPosition); return }
+                    else { showErrorNotification(damage.userMessage); return }
+                }
+                is PlaybackResult.CorruptedButPlaying -> { showDamageNotification(damage); broadcastDamageWarning(damage) }
+                else -> {}
             }
-            is PlaybackResult.CorruptedButPlaying -> { showDamageNotification(damage); broadcastDamageWarning(damage) }
-            else -> {}
         }
-        
+
         player?.apply {
             setMediaItem(MediaItem.fromUri(mediaUri))
             prepare()
