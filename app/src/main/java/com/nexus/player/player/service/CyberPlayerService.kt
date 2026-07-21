@@ -47,6 +47,11 @@ class CyberPlayerService : Service() {
         const val ACTION_SEEK_TO = "com.nexus.player.ACTION_SEEK_TO"
         const val ACTION_SET_EQUALIZER = "com.nexus.player.ACTION_SET_EQUALIZER"
 
+        // Новые экшены для полноценной поддержки плейлистов и контроля завершения
+        const val ACTION_PLAY_LIST = "com.nexus.player.ACTION_PLAY_LIST"
+        const val ACTION_SET_REPEAT_MODE = "com.nexus.player.ACTION_SET_REPEAT_MODE"
+        const val ACTION_TRACK_ENDED = "com.nexus.player.TRACK_ENDED"
+
         const val ACTION_PLAYBACK_STATE_CHANGED = "com.nexus.player.PLAYBACK_STATE_CHANGED"
         const val ACTION_POSITION_UPDATED = "com.nexus.player.POSITION_UPDATED"
         const val ACTION_TRACK_CHANGED = "com.nexus.player.TRACK_CHANGED"
@@ -58,6 +63,12 @@ class CyberPlayerService : Service() {
         const val EXTRA_DURATION = "DURATION"
         const val EXTRA_EQUALIZER_PRESET = "EQUALIZER_PRESET"
         const val EXTRA_EQUALIZER_BANDS = "EQUALIZER_BANDS"
+
+        // Дополнительные ключи
+        const val EXTRA_FILE_URI_LIST = "FILE_URI_LIST"
+        const val EXTRA_START_INDEX = "START_INDEX"
+        const val EXTRA_REPEAT_MODE = "REPEAT_MODE"
+        const val EXTRA_IS_NEXT = "IS_NEXT"
     }
 
     private var player: ExoPlayer? = null
@@ -78,7 +89,25 @@ class CyberPlayerService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
             when (intent.action) {
-                ACTION_PLAY -> player?.playWhenReady = true
+                ACTION_PLAY -> {
+                    val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                    val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
+                    val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
+                    if (!uriList.isNullOrEmpty()) {
+                        serviceScope.launch { playPlaylist(uriList, startIndex) }
+                    } else if (uri != null) {
+                        serviceScope.launch { playFile(uri) }
+                    } else {
+                        player?.playWhenReady = true
+                    }
+                }
+                ACTION_PLAY_LIST -> {
+                    val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                    val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
+                    if (!uriList.isNullOrEmpty()) {
+                        serviceScope.launch { playPlaylist(uriList, startIndex) }
+                    }
+                }
                 ACTION_PAUSE -> player?.pause()
                 ACTION_NEXT -> playNext()
                 ACTION_PREVIOUS -> playPrevious()
@@ -87,6 +116,10 @@ class CyberPlayerService : Service() {
                 ACTION_SET_EQUALIZER -> {
                     intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
                     intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
+                }
+                ACTION_SET_REPEAT_MODE -> {
+                    val mode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
+                    player?.repeatMode = mode
                 }
             }
         }
@@ -129,12 +162,14 @@ class CyberPlayerService : Service() {
     private fun registerNotificationReceiver() {
         val f = IntentFilter().apply {
             addAction(ACTION_PLAY)
+            addAction(ACTION_PLAY_LIST)
             addAction(ACTION_PAUSE)
             addAction(ACTION_NEXT)
             addAction(ACTION_PREVIOUS)
             addAction(ACTION_STOP)
             addAction(ACTION_SEEK_TO)
             addAction(ACTION_SET_EQUALIZER)
+            addAction(ACTION_SET_REPEAT_MODE)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(notificationReceiver, f, RECEIVER_NOT_EXPORTED)
@@ -166,6 +201,7 @@ class CyberPlayerService : Service() {
                     .build(), true
             )
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK)
+            .setHandleAudioBecomingNoisy(true) // Автопауза при отключении наушников/Bluetooth
             .setMediaSourceFactory(DefaultMediaSourceFactory(this))
             .build().apply {
                 addListener(object : Player.Listener {
@@ -177,8 +213,16 @@ class CyberPlayerService : Service() {
                             broadcastPlaybackState()
                         }
                         if (state == Player.STATE_ENDED) {
-                            playNext()
+                            // Окончание воспроизведения текущей очереди или единственного файла
+                            handlePlaybackEnded()
                         }
+                    }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        Log.d("NEXUS_PLAYER", "onMediaItemTransition: reason=$reason")
+                        updateCurrentMediaInfo(mediaItem)
+                        updateNotification()
+                        broadcastTrackChanged()
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -206,6 +250,34 @@ class CyberPlayerService : Service() {
         startPositionTracking()
         serviceScope.launch {
             preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) }
+        }
+    }
+
+    private fun handlePlaybackEnded() {
+        player?.let { p ->
+            if (p.hasNextMediaItem()) {
+                p.seekToNextMediaItem()
+                p.playWhenReady = true
+            } else if (p.repeatMode == Player.REPEAT_MODE_ALL) {
+                p.seekToDefaultPosition(0)
+                p.playWhenReady = true
+            } else {
+                _isPlaying.value = false
+                safeReleaseWakeLock()
+                updateNotification()
+                broadcastPlaybackState()
+                // Оповещаем UI/ViewModel о том, что трек или плейлист завершился,
+                // чтобы приложение могло передать следующий файл, если очередь управляется извне
+                broadcastTrackEnded(isNext = true)
+            }
+        }
+    }
+
+    private fun updateCurrentMediaInfo(mediaItem: MediaItem? = player?.currentMediaItem) {
+        mediaItem?.localConfiguration?.uri?.let { uri ->
+            currentMediaUri = uri
+        } ?: mediaItem?.requestMetadata?.mediaUri?.let { uri ->
+            currentMediaUri = uri
         }
     }
 
@@ -237,17 +309,37 @@ class CyberPlayerService : Service() {
         startForegroundService()
         when (intent?.action) {
             ACTION_PLAY -> {
+                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
                 val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
-                if (uri != null) {
+                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
+                if (!uriList.isNullOrEmpty()) {
+                    serviceScope.launch { playPlaylist(uriList, startIndex) }
+                } else if (uri != null) {
                     serviceScope.launch { playFile(uri) }
                 } else {
                     player?.playWhenReady = true
+                }
+            }
+            ACTION_PLAY_LIST -> {
+                val uriList = intent?.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                val startIndex = intent?.getIntExtra(EXTRA_START_INDEX, 0) ?: 0
+                if (!uriList.isNullOrEmpty()) {
+                    serviceScope.launch { playPlaylist(uriList, startIndex) }
                 }
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_NEXT -> playNext()
             ACTION_PREVIOUS -> playPrevious()
             ACTION_STOP -> stopSelf()
+            ACTION_SEEK_TO -> intent?.getLongExtra(EXTRA_CURRENT_POSITION, 0L)?.let { player?.seekTo(it) }
+            ACTION_SET_EQUALIZER -> {
+                intent?.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
+                intent?.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
+            }
+            ACTION_SET_REPEAT_MODE -> {
+                val mode = intent?.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF) ?: Player.REPEAT_MODE_OFF
+                player?.repeatMode = mode
+            }
         }
         return START_STICKY
     }
@@ -268,16 +360,64 @@ class CyberPlayerService : Service() {
         broadcastTrackChanged()
     }
 
-    private fun playNext() {
-        player?.seekTo(0)
-        player?.playWhenReady = true
+    // Добавленный метод для загрузки целого плейлиста в очередь ExoPlayer (бесшовный автопереход)
+    private suspend fun playPlaylist(uriStrings: List<String>, startIndex: Int = 0) = withContext(Dispatchers.Main) {
+        if (uriStrings.isEmpty()) return@withContext
+        val validIndex = startIndex.coerceIn(0, uriStrings.size - 1)
+        val mediaItems = uriStrings.map { MediaItem.fromUri(Uri.parse(it)) }
+        currentMediaUri = Uri.parse(uriStrings[validIndex])
+        Log.d("NEXUS_PLAYER", "Playing playlist: ${uriStrings.size} items, starting at $validIndex")
+        acquireAudioFocus()
+        player?.apply {
+            stop()
+            setMediaItems(mediaItems, validIndex, 0L)
+            prepare()
+            playWhenReady = true
+        }
+        wakeLock?.acquire(3600000)
+        updateNotification()
         broadcastTrackChanged()
     }
 
+    private fun playNext() {
+        player?.let { p ->
+            if (p.hasNextMediaItem()) {
+                p.seekToNextMediaItem()
+                p.playWhenReady = true
+                updateCurrentMediaInfo(p.currentMediaItem)
+                updateNotification()
+                broadcastTrackChanged()
+            } else {
+                // Если мы в конце списка, проверяем режим повтора или запрашиваем следующий трек у UI
+                if (p.repeatMode == Player.REPEAT_MODE_ALL) {
+                    p.seekToDefaultPosition(0)
+                    p.playWhenReady = true
+                    updateCurrentMediaInfo(p.currentMediaItem)
+                    updateNotification()
+                    broadcastTrackChanged()
+                } else {
+                    broadcastTrackEnded(isNext = true)
+                }
+            }
+        }
+    }
+
     private fun playPrevious() {
-        player?.seekTo(0)
-        player?.playWhenReady = true
-        broadcastTrackChanged()
+        player?.let { p ->
+            if (p.hasPreviousMediaItem()) {
+                p.seekToPreviousMediaItem()
+                p.playWhenReady = true
+                updateCurrentMediaInfo(p.currentMediaItem)
+                updateNotification()
+                broadcastTrackChanged()
+            } else {
+                // Если предыдущего нет, перематываем текущий в начало или сообщаем UI
+                p.seekTo(0)
+                p.playWhenReady = true
+                broadcastPositionUpdate()
+                broadcastTrackEnded(isNext = false)
+            }
+        }
     }
 
     private fun acquireAudioFocus() {
@@ -331,8 +471,10 @@ class CyberPlayerService : Service() {
 
     private fun buildNotification(): Notification {
         val isPlaying = player?.isPlaying == true
-        val title = player?.currentMediaItem?.mediaMetadata?.title?.toString() ?: "NEXUS PLAYER"
-        val text = player?.currentMediaItem?.mediaMetadata?.artist?.toString() ?: "Воспроизведение"
+        val title = player?.currentMediaItem?.mediaMetadata?.title?.takeIf { it.isNotBlank() }?.toString()
+            ?: currentMediaUri?.lastPathSegment ?: "NEXUS PLAYER"
+        val text = player?.currentMediaItem?.mediaMetadata?.artist?.takeIf { it.isNotBlank() }?.toString()
+            ?: "Воспроизведение"
         val playPauseIcon = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play
         val playPauseTitle = if (isPlaying) "Pause" else "Play"
         val playPauseAction = if (isPlaying) ACTION_PAUSE else ACTION_PLAY
@@ -380,6 +522,13 @@ class CyberPlayerService : Service() {
 
     private fun broadcastTrackChanged() {
         val intent = Intent(ACTION_TRACK_CHANGED)
+        currentMediaUri?.toString()?.let { intent.putExtra(EXTRA_FILE_PATH, it) }
+        sendBroadcast(intent)
+    }
+
+    private fun broadcastTrackEnded(isNext: Boolean) {
+        val intent = Intent(ACTION_TRACK_ENDED)
+        intent.putExtra(EXTRA_IS_NEXT, isNext)
         currentMediaUri?.toString()?.let { intent.putExtra(EXTRA_FILE_PATH, it) }
         sendBroadcast(intent)
     }
