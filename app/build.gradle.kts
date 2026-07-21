@@ -84,6 +84,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
 
+    // Media Compat (для MediaSessionCompat)
+    implementation("androidx.media:media:1.7.0")
+
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
