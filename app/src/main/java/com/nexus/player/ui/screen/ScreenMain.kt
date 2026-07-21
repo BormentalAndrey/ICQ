@@ -217,7 +217,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
         startPlayback(items[if (idx <= 0) items.size - 1 else idx - 1])
     }
-    fun seekTo(position: Long) {
+    fun performSeek(position: Long) {
         ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_SEEK_TO; putExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, position)
         })
@@ -273,7 +273,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                         onNext = ::playNext,
                         onPrevious = ::playPrevious,
                         onPreset = ::applyPreset,
-                        onSeek = { pos -> seekTo(pos) },
+                        onSeek = { pos -> performSeek(pos) },
                         onPiP = ::enterPiP
                     )
                 }
@@ -287,7 +287,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 if (state.duration > 0) state.duration else (state.currentTrack?.duration ?: 0L),
                 { togglePlayPause() }, { playNext() }, { playPrevious() },
                 { viewModel.toggleFullScreen() },
-                onSeek = { viewModel.seekTo(it) },
+                onSeek = { performSeek(it) },
                 onPiP = { enterPiP() },
                 onQueue = { viewModel.toggleQueue() }
             )
