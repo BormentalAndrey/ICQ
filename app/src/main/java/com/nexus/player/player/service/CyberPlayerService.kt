@@ -18,6 +18,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -93,8 +94,15 @@ class CyberPlayerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d("NEXUS_SERVICE", "onCreate")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nexus:WakeLock")
+        // Отключаем подсчет ссылок для WakeLock: это предотвращает поддедлоки при множественных вызовах acquire()
+        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "Nexus:WakeLock"
+        ).apply {
+            setReferenceCounted(false)
+        }
         createNotificationChannels()
         registerNotificationReceiver()
         initializePlayer()
@@ -104,23 +112,35 @@ class CyberPlayerService : Service() {
 
     private fun startForegroundService() {
         val n = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NEXUS PLAYER").setContentText("Готов к воспроизведению")
-            .setSmallIcon(R.drawable.ic_neon_skull).setColor(Color.parseColor("#FF007F"))
-            .setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            .setContentTitle("NEXUS PLAYER")
+            .setContentText("Готов к воспроизведению")
+            .setSmallIcon(R.drawable.ic_neon_skull)
+            .setColor(Color.parseColor("#FF007F"))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        else startForeground(NOTIFICATION_ID, n)
+        } else {
+            startForeground(NOTIFICATION_ID, n)
+        }
     }
 
     private fun registerNotificationReceiver() {
         val f = IntentFilter().apply {
-            addAction(ACTION_PLAY); addAction(ACTION_PAUSE); addAction(ACTION_NEXT)
-            addAction(ACTION_PREVIOUS); addAction(ACTION_STOP); addAction(ACTION_SEEK_TO)
+            addAction(ACTION_PLAY)
+            addAction(ACTION_PAUSE)
+            addAction(ACTION_NEXT)
+            addAction(ACTION_PREVIOUS)
+            addAction(ACTION_STOP)
+            addAction(ACTION_SEEK_TO)
             addAction(ACTION_SET_EQUALIZER)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(notificationReceiver, f, RECEIVER_NOT_EXPORTED)
-        else registerReceiver(notificationReceiver, f)
+        } else {
+            registerReceiver(notificationReceiver, f)
+        }
     }
 
     private fun initializeMediaSession() {
@@ -150,33 +170,64 @@ class CyberPlayerService : Service() {
             .build().apply {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
+                        Log.d("NEXUS_PLAYER", "PlaybackState: $state")
                         if (state == Player.STATE_READY) {
                             _isPlaying.value = this@apply.isPlaying
                             updateNotification()
                             broadcastPlaybackState()
                         }
-                        if (state == Player.STATE_ENDED) playNext()
+                        if (state == Player.STATE_ENDED) {
+                            playNext()
+                        }
                     }
+
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        Log.d("NEXUS_PLAYER", "isPlayingChanged: $isPlaying")
                         _isPlaying.value = isPlaying
                         updateNotification()
                         broadcastPlaybackState()
-                        if (isPlaying) wakeLock?.acquire(3600000) else safeReleaseWakeLock()
+                        if (isPlaying) {
+                            wakeLock?.acquire(3600000)
+                        } else {
+                            safeReleaseWakeLock()
+                        }
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("NEXUS_PLAYER", "Player error: ${error.errorCodeName}", error)
+                        _isPlaying.value = false
+                        safeReleaseWakeLock()
+                        updateNotification()
+                        broadcastPlaybackState()
                     }
                 })
             }
         NexusApplication.instance.exoPlayer = player
         startPositionTracking()
-        serviceScope.launch { preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) } }
+        serviceScope.launch {
+            preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) }
+        }
     }
 
     private fun safeReleaseWakeLock() {
-        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (e: Exception) {} }
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            Log.e("NEXUS_PLAYER", "WakeLock release error", e)
+        }
+    }
 
     private fun startPositionTracking() {
         serviceScope.launch {
             while (isActive) {
-                player?.let { if (it.isPlaying) { _currentPosition.value = it.currentPosition; broadcastPositionUpdate() } }
+                player?.let {
+                    if (it.isPlaying) {
+                        _currentPosition.value = it.currentPosition
+                        broadcastPositionUpdate()
+                    }
+                }
                 delay(250)
             }
         }
@@ -187,7 +238,11 @@ class CyberPlayerService : Service() {
         when (intent?.action) {
             ACTION_PLAY -> {
                 val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
-                if (uri != null) serviceScope.launch { playFile(uri) } else player?.playWhenReady = true
+                if (uri != null) {
+                    serviceScope.launch { playFile(uri) }
+                } else {
+                    player?.playWhenReady = true
+                }
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_NEXT -> playNext()
@@ -200,6 +255,7 @@ class CyberPlayerService : Service() {
     private suspend fun playFile(uriString: String) = withContext(Dispatchers.Main) {
         val mediaUri = Uri.parse(uriString)
         currentMediaUri = mediaUri
+        Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
         acquireAudioFocus()
         player?.apply {
             stop()
@@ -212,44 +268,100 @@ class CyberPlayerService : Service() {
         broadcastTrackChanged()
     }
 
-    private fun playNext() { player?.seekTo(0); player?.playWhenReady = true; broadcastTrackChanged() }
-    private fun playPrevious() { player?.seekTo(0); player?.playWhenReady = true; broadcastTrackChanged() }
+    private fun playNext() {
+        player?.seekTo(0)
+        player?.playWhenReady = true
+        broadcastTrackChanged()
+    }
+
+    private fun playPrevious() {
+        player?.seekTo(0)
+        player?.playWhenReady = true
+        broadcastTrackChanged()
+    }
 
     private fun acquireAudioFocus() {
         audioManager?.let { am ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(AudioAttributes.USAGE_MEDIA).build())
-                    .setOnAudioFocusChangeListener {
-                        when (it) {
-                            AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
-                            AudioManager.AUDIOFOCUS_GAIN -> { player?.volume = 1.0f; player?.playWhenReady = true }
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .build()
+                    )
+                    .setOnAudioFocusChangeListener { focusChange ->
+                        when (focusChange) {
+                            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
+                            AudioManager.AUDIOFOCUS_GAIN -> {
+                                player?.volume = 1.0f
+                                player?.playWhenReady = true
+                            }
                         }
                     }.build()
                 audioFocusRequest?.let { am.requestAudioFocus(it) }
             } else {
-                @Suppress("DEPRECATION") am.requestAudioFocus({ if (it == AudioManager.AUDIOFOCUS_LOSS) player?.pause() }, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    { focusChange ->
+                        when (focusChange) {
+                            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
+                            AudioManager.AUDIOFOCUS_GAIN -> {
+                                player?.volume = 1.0f
+                                player?.playWhenReady = true
+                            }
+                        }
+                    },
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN
+                )
             }
         }
     }
 
     private fun updateNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        else startForeground(NOTIFICATION_ID, buildNotification())
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
     }
 
-    private fun buildNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("NEXUS PLAYER").setContentText("Воспроизведение")
-        .setSmallIcon(R.drawable.ic_neon_skull).setColor(Color.parseColor("#FF007F")).setOngoing(true)
-        .setPriority(NotificationCompat.PRIORITY_LOW)
-        .addAction(R.drawable.ic_previous, "Prev", createPI(ACTION_PREVIOUS))
-        .addAction(R.drawable.ic_pause, "Pause", createPI(ACTION_PAUSE))
-        .addAction(R.drawable.ic_next, "Next", createPI(ACTION_NEXT))
-        .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession?.sessionToken).setShowActionsInCompactView(0, 1, 2))
-        .build()
+    private fun buildNotification(): Notification {
+        val isPlaying = player?.isPlaying == true
+        val title = player?.currentMediaItem?.mediaMetadata?.title?.toString() ?: "NEXUS PLAYER"
+        val text = player?.currentMediaItem?.mediaMetadata?.artist?.toString() ?: "Воспроизведение"
+        val playPauseIcon = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play
+        val playPauseTitle = if (isPlaying) "Pause" else "Play"
+        val playPauseAction = if (isPlaying) ACTION_PAUSE else ACTION_PLAY
 
-    private fun createPI(action: String) = PendingIntent.getService(this, action.hashCode(), Intent(this, CyberPlayerService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_neon_skull)
+            .setColor(Color.parseColor("#FF007F"))
+            .setOngoing(isPlaying)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(R.drawable.ic_previous, "Prev", createPI(ACTION_PREVIOUS))
+            .addAction(playPauseIcon, playPauseTitle, createPI(playPauseAction))
+            .addAction(R.drawable.ic_next, "Next", createPI(ACTION_NEXT))
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(mediaSession?.sessionToken)
+                    .setShowActionsInCompactView(0, 1, 2)
+            )
+            .build()
+    }
+
+    private fun createPI(action: String) = PendingIntent.getService(
+        this,
+        action.hashCode(),
+        Intent(this, CyberPlayerService::class.java).setAction(action),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     private fun broadcastPlaybackState() {
         val intent = Intent(ACTION_PLAYBACK_STATE_CHANGED)
@@ -281,12 +393,19 @@ class CyberPlayerService : Service() {
     }
 
     override fun onDestroy() {
-        NexusApplication.instance.exoPlayer = null
         serviceScope.cancel()
         try { unregisterReceiver(notificationReceiver) } catch (_: Exception) {}
-        player?.release(); player = null
-        mediaSession?.release(); mediaSession = null
-        audioFocusRequest?.let { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) audioManager?.abandonAudioFocusRequest(it) }
+        player?.stop()
+        player?.release()
+        player = null
+        NexusApplication.instance.exoPlayer = null
+        mediaSession?.release()
+        mediaSession = null
+        audioFocusRequest?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioManager?.abandonAudioFocusRequest(it)
+            }
+        }
         safeReleaseWakeLock()
         super.onDestroy()
     }
