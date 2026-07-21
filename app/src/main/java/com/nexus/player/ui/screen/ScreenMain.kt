@@ -13,7 +13,6 @@ import android.os.Build
 import android.util.Rational
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -66,6 +65,7 @@ import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlin.OptIn
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -405,7 +405,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         if (!state.isFullScreen) ParticleBackground()
 
         Column(Modifier.fillMaxSize().padding(if (state.isFullScreen) 0.dp else 16.dp).systemBarsPadding()) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = !state.isFullScreen && (showControls || !state.isPlaying || state.showPlaylist),
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
@@ -475,7 +475,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         }
 
         if (!state.isFullScreen) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showControls || !state.isPlaying || state.showPlaylist,
                 enter = fadeIn() + slideInVertically { it },
                 exit = fadeOut() + slideOutVertically { it },
@@ -727,7 +727,7 @@ private fun PlayerView(
                     modifier = Modifier.fillMaxSize()
                 )
                 if (state.isFullScreen) {
-                    AnimatedVisibility(
+                    androidx.compose.animation.AnimatedVisibility(
                         visible = showControls || !state.isPlaying,
                         enter = fadeIn(),
                         exit = fadeOut(),
@@ -742,7 +742,7 @@ private fun PlayerView(
         }
 
         if (!state.isFullScreen) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showControls || !state.isPlaying,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
