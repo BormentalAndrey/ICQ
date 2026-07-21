@@ -128,7 +128,7 @@ class CorruptedFileHandler {
                 raf.skipBytes(2); val flags = raf.read()
                 val sb = ByteArray(4); raf.read(sb)
                 var size = ((sb[0].toInt() and 0x7F) shl 21) or ((sb[1].toInt() and 0x7F) shl 14) or ((sb[2].toInt() and 0x7F) shl 7) or (sb[3].toInt() and 0x7F)
-                if (raf.read() == 4.toByte() && (flags and 0x40) != 0) {
+                if (raf.read().toByte() == 4.toByte() && (flags and 0x40) != 0) {
                     val eb = ByteArray(4); raf.read(eb)
                     size += ((eb[0].toInt() and 0x7F) shl 21) or ((eb[1].toInt() and 0x7F) shl 14) or ((eb[2].toInt() and 0x7F) shl 7) or (eb[3].toInt() and 0x7F)
                 }
