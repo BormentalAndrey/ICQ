@@ -55,7 +55,6 @@ data class PlayerUiState(
     val currentTrack: MediaItem? = null,
     val currentPosition: Long = 0L,
     val duration: Long = 0L,
-    val playbackResult: PlaybackResult = PlaybackResult.Success,
     val showPlaylist: Boolean = false,
     val selectedTab: MediaTab = MediaTab.AUDIO,
     val selectedPreset: String = "Flat",
@@ -109,22 +108,12 @@ class MainViewModel(
     fun onTrackChanged(trackUri: String?) {
         if (trackUri == null) return
         val state = _uiState.value
-        val found = (state.audioItems + state.videoItems).find {
-            it.uri.toString() == trackUri || it.path == trackUri
-        }
+        val found = (state.audioItems + state.videoItems).find { it.uri.toString() == trackUri || it.path == trackUri }
         if (found != null) _uiState.update { it.copy(currentTrack = found, pendingTrackUri = null) }
         else _uiState.update { it.copy(pendingTrackUri = trackUri) }
     }
 
-    fun onError(message: String, damagePercent: Float) {
-        _uiState.update {
-            it.copy(playbackResult = if (damagePercent > 0f)
-                PlaybackResult.CorruptedButPlaying(damagePercent = damagePercent, message = message)
-            else PlaybackResult.FatalError(Exception(message), userMessage = message, canAttemptRecovery = true))
-        }
-    }
-
-    fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track, playbackResult = PlaybackResult.Success) } }
+    fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track) } }
     fun togglePlaylist() { _uiState.update { it.copy(showPlaylist = !it.showPlaylist) } }
     fun selectTab(tab: MediaTab) { _uiState.update { it.copy(selectedTab = tab) } }
     fun setPreset(preset: String) { _uiState.update { it.copy(selectedPreset = preset) } }
@@ -181,9 +170,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                     CyberPlayerService.ACTION_TRACK_CHANGED -> viewModel.onTrackChanged(
                         intent.getStringExtra(CyberPlayerService.EXTRA_FILE_URI)
                             ?: intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH))
-                    CyberPlayerService.ACTION_ERROR_OCCURRED -> viewModel.onError(
-                        intent.getStringExtra(CyberPlayerService.EXTRA_ERROR_MESSAGE) ?: "Ошибка",
-                        intent.getFloatExtra(CyberPlayerService.EXTRA_DAMAGE_PERCENT, 0f))
                 }
             }
         }
@@ -191,7 +177,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             addAction(CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED)
             addAction(CyberPlayerService.ACTION_POSITION_UPDATED)
             addAction(CyberPlayerService.ACTION_TRACK_CHANGED)
-            addAction(CyberPlayerService.ACTION_ERROR_OCCURRED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         else context.registerReceiver(receiver, filter)
