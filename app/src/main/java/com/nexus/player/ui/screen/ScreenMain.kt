@@ -149,7 +149,12 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     val state by viewModel.uiState.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-        if (perms.values.any { it }) viewModel.startMediaScan() else viewModel.setLoading(false)
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms[Manifest.permission.READ_MEDIA_AUDIO] == true || perms[Manifest.permission.READ_MEDIA_VIDEO] == true
+        } else {
+            perms[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        if (granted) viewModel.startMediaScan() else viewModel.setLoading(false)
     }
 
     LaunchedEffect(Unit) {
@@ -198,7 +203,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
-            putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
         })
     }
 
@@ -211,13 +215,13 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun playNext() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        startPlayback(items[(items.indexOfFirst { it.uri.toString() == state.currentTrack?.uri.toString() } + 1) % items.size])
+        startPlayback(items[(items.indexOfFirst { it.uri == state.currentTrack?.uri } + 1) % items.size])
     }
 
     fun playPrevious() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.uri.toString() == state.currentTrack?.uri.toString() }
+        val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
         startPlayback(items[if (idx <= 0) items.size - 1 else idx - 1])
     }
 
@@ -258,7 +262,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                             if (items.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily) }
                             else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
                                 items(items, key = { "${it.id}_${it.isVideo}" }) { item ->
-                                    MediaItemRow(item, state.currentTrack?.uri.toString() == item.uri.toString() && state.isPlaying) { startPlayback(item) }
+                                    MediaItemRow(item, state.currentTrack?.uri == item.uri && state.isPlaying) { startPlayback(item) }
                                 }
                             }
                         }
