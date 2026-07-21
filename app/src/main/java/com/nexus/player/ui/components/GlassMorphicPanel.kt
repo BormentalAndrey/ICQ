@@ -1,7 +1,5 @@
 package com.nexus.player.ui.components
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -32,49 +29,42 @@ fun GlassMorphicPanel(
     onPlayPauseClick: () -> Unit = {},
     onNextClick: () -> Unit = {},
     onPreviousClick: () -> Unit = {},
-    onShuffleClick: () -> Unit = {},
-    onRepeatClick: () -> Unit = {}
+    onFullScreen: () -> Unit = {},
+    onSeek: (Long) -> Unit = {},
+    onPiP: () -> Unit = {},
+    onQueue: () -> Unit = {}
 ) {
+    var sliderValue by remember(currentPosition, duration) {
+        mutableFloatStateOf(if (duration > 0) currentPosition.toFloat() / duration else 0f)
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(120.dp)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(100.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        // Blurred background layer
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(RoundedCornerShape(24.dp))
                 .background(
                     brush = Brush.linearGradient(
-                        colors = listOf(
-                            NexusColors.GlassWhite,
-                            NexusColors.GlassBlack,
-                            NexusColors.GlassWhite
-                        )
+                        colors = listOf(NexusColors.GlassWhite, NexusColors.GlassBlack, NexusColors.GlassWhite)
                     )
                 )
                 .blur(radius = 10.dp)
         )
-        
-        // Glass border
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(RoundedCornerShape(24.dp))
                 .background(
                     brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.1f),
-                            Color.White.copy(alpha = 0.05f),
-                            Color.White.copy(alpha = 0.1f)
-                        )
+                        colors = listOf(Color.White.copy(alpha = 0.1f), Color.White.copy(alpha = 0.05f), Color.White.copy(alpha = 0.1f))
                     )
                 )
         )
-        
-        // Neon border
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -82,96 +72,64 @@ fun GlassMorphicPanel(
                 .background(
                     brush = Brush.sweepGradient(
                         colors = listOf(
-                            NexusColors.Cyan.copy(alpha = 0.3f),
-                            NexusColors.NeonPink.copy(alpha = 0.3f),
-                            NexusColors.Purple.copy(alpha = 0.3f),
-                            NexusColors.Cyan.copy(alpha = 0.3f)
+                            NexusColors.Cyan.copy(alpha = 0.3f), NexusColors.NeonPink.copy(alpha = 0.3f),
+                            NexusColors.Purple.copy(alpha = 0.3f), NexusColors.Cyan.copy(alpha = 0.3f)
                         )
                     )
                 )
                 .padding(2.dp)
                 .clip(RoundedCornerShape(22.dp))
         ) {
-            // Controls content
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Progress bar
                 Slider(
-                    value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
-                    onValueChange = { /* Implement seek */ },
-                    modifier = Modifier.fillMaxWidth(),
+                    value = sliderValue,
+                    onValueChange = { fraction ->
+                        sliderValue = fraction
+                        onSeek((fraction * duration).toLong())
+                    },
+                    modifier = Modifier.fillMaxWidth().height(20.dp),
                     colors = SliderDefaults.colors(
                         thumbColor = NexusColors.NeonPink,
                         activeTrackColor = NexusColors.NeonPink,
                         inactiveTrackColor = NexusColors.MediumGrey
                     )
                 )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                // Control buttons
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ControlButton(
-                        icon = Icons.Default.Shuffle,
-                        onClick = onShuffleClick,
-                        size = 36.dp
-                    )
-                    
-                    ControlButton(
-                        icon = Icons.Default.SkipPrevious,
-                        onClick = onPreviousClick,
-                        size = 48.dp
-                    )
-                    
-                    // Play/Pause button with neon glow
+                    // Queue
+                    SmallButton(icon = Icons.Default.List, onClick = onQueue)
+
+                    // Previous
+                    SmallButton(icon = Icons.Default.SkipPrevious, onClick = onPreviousClick)
+
+                    // Play/Pause
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
-                            .shadow(
-                                elevation = 10.dp,
-                                shape = CircleShape,
-                                ambientColor = NexusColors.NeonPink,
-                                spotColor = NexusColors.NeonPink
-                            )
+                            .size(56.dp)
+                            .shadow(10.dp, CircleShape, ambientColor = NexusColors.NeonPink, spotColor = NexusColors.NeonPink)
                             .clip(CircleShape)
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        NexusColors.NeonPink,
-                                        NexusColors.Purple
-                                    )
-                                )
-                            )
+                            .background(Brush.radialGradient(listOf(NexusColors.NeonPink, NexusColors.Purple)))
                             .clickable { onPlayPauseClick() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                            contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp)
                         )
                     }
-                    
-                    ControlButton(
-                        icon = Icons.Default.SkipNext,
-                        onClick = onNextClick,
-                        size = 48.dp
-                    )
-                    
-                    ControlButton(
-                        icon = Icons.Default.Repeat,
-                        onClick = onRepeatClick,
-                        size = 36.dp
-                    )
+
+                    // Next
+                    SmallButton(icon = Icons.Default.SkipNext, onClick = onNextClick)
+
+                    // Fullscreen / PiP
+                    SmallButton(icon = Icons.Default.Fullscreen, onClick = onFullScreen)
                 }
             }
         }
@@ -179,20 +137,8 @@ fun GlassMorphicPanel(
 }
 
 @Composable
-private fun ControlButton(
-    icon: ImageVector,
-    onClick: () -> Unit,
-    size: androidx.compose.ui.unit.Dp
-) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.size(size)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = NexusColors.Cyan,
-            modifier = Modifier.size(size * 0.6f)
-        )
+private fun SmallButton(icon: ImageVector, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        Icon(icon, null, tint = NexusColors.Cyan, modifier = Modifier.size(22.dp))
     }
 }
