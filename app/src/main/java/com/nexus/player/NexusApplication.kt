@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import androidx.media3.exoplayer.ExoPlayer
 import com.nexus.player.di.AppModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 class NexusApplication : Application() {
     
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    var exoPlayer: ExoPlayer? = null
     
     override fun onCreate() {
         super.onCreate()
