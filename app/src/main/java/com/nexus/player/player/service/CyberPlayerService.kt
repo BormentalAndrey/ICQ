@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -54,6 +55,7 @@ class CyberPlayerService : Service() {
         const val ACTION_ERROR_OCCURRED = "com.nexus.player.ERROR_OCCURRED"
         const val ACTION_RECOVERY_PROGRESS = "com.nexus.player.RECOVERY_PROGRESS"
 
+        const val EXTRA_FILE_URI = "FILE_URI"
         const val EXTRA_FILE_PATH = "FILE_PATH"
         const val EXTRA_START_POSITION = "START_POSITION"
         const val EXTRA_IS_PLAYING = "IS_PLAYING"
@@ -84,7 +86,7 @@ class CyberPlayerService : Service() {
     private val _isPlaying = MutableStateFlow(false)
     private val _currentTrack = MutableStateFlow<MediaItem?>(null)
 
-    private var currentFilePath: String? = null
+    private var currentMediaUri: Uri? = null
 
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -151,10 +153,14 @@ class CyberPlayerService : Service() {
             .build().apply {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
+                        Log.d("NEXUS_PLAYER", "PlaybackState: $state")
                         if (state == Player.STATE_READY) { _isPlaying.value = this@apply.isPlaying; updateNotification(); broadcastPlaybackState() }
                         if (state == Player.STATE_ENDED) playNext()
                     }
-                    override fun onPlayerError(error: PlaybackException) { handlePlaybackError(error) }
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("NEXUS_PLAYER", "Player error: ${error.errorCodeName}", error)
+                        handlePlaybackError(error)
+                    }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         _isPlaying.value = isPlaying; updateNotification(); broadcastPlaybackState()
                         if (isPlaying) { acquireAudioFocus(); wakeLock?.acquire(3600000) } else wakeLock?.release()
@@ -178,9 +184,15 @@ class CyberPlayerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY -> {
+                val uriString = intent.getStringExtra(EXTRA_FILE_URI)
                 val path = intent.getStringExtra(EXTRA_FILE_PATH)
-                if (path != null) { currentFilePath = path; serviceScope.launch { playFile(path, intent.getLongExtra(EXTRA_START_POSITION, 0L)) } }
-                else player?.play()
+                val uriToPlay = uriString ?: path
+                
+                if (uriToPlay != null) {
+                    serviceScope.launch { playFile(uriToPlay, intent.getLongExtra(EXTRA_START_POSITION, 0L)) }
+                } else {
+                    player?.play()
+                }
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_NEXT -> playNext()
@@ -190,27 +202,46 @@ class CyberPlayerService : Service() {
         return START_STICKY
     }
 
-    private suspend fun playFile(filePath: String, startPosition: Long = 0L) {
+    private suspend fun playFile(uriString: String, startPosition: Long = 0L) {
         _playbackState.value = PlaybackResult.Success
-        val damage = corruptedFileHandler.analyzeDamage(filePath)
+        
+        val mediaUri = if (uriString.startsWith("content://")) {
+            Uri.parse(uriString)
+        } else if (uriString.startsWith("/")) {
+            Uri.parse("file://$uriString")
+        } else {
+            Uri.parse(uriString)
+        }
+        
+        currentMediaUri = mediaUri
+        Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
+
+        val damage = corruptedFileHandler.analyzeDamage(uriString)
         _playbackState.value = damage
         when (damage) {
             is PlaybackResult.FatalError -> {
                 broadcastError(damage.userMessage)
-                if (damage.canAttemptRecovery) { repairAndPlay(filePath, startPosition); return }
+                if (damage.canAttemptRecovery) { repairAndPlay(uriString, startPosition); return }
                 else { showErrorNotification(damage.userMessage); return }
             }
             is PlaybackResult.CorruptedButPlaying -> { showDamageNotification(damage); broadcastDamageWarning(damage) }
             else -> {}
         }
-        player?.apply { setMediaItem(MediaItem.fromUri("file://$filePath")); prepare(); if (startPosition > 0) seekTo(startPosition); play() }
-        _currentTrack.value = MediaItem.fromUri("file://$filePath")
-        updateNotification(); broadcastTrackChanged()
+        
+        player?.apply {
+            setMediaItem(MediaItem.fromUri(mediaUri))
+            prepare()
+            if (startPosition > 0) seekTo(startPosition)
+            play()
+        }
+        _currentTrack.value = MediaItem.fromUri(mediaUri)
+        updateNotification()
+        broadcastTrackChanged()
     }
 
-    private suspend fun repairAndPlay(filePath: String, startPosition: Long) {
+    private suspend fun repairAndPlay(uriString: String, startPosition: Long) {
         _playbackState.value = PlaybackResult.RecoveryInProgress(0f); broadcastRecoveryProgress(0f)
-        val result = AppModule.provideMediaRepository().repairStream(filePath)
+        val result = AppModule.provideMediaRepository().repairStream(uriString)
         when (result) {
             is PlaybackResult.RecoveryComplete -> {
                 if (result.success && result.recoveredPath != null) playFile(result.recoveredPath, startPosition)
@@ -221,15 +252,15 @@ class CyberPlayerService : Service() {
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
-        Log.e("CyberPlayerService", "Playback error", error)
+        Log.e("NEXUS_PLAYER", "Playback error: ${error.errorCodeName}", error)
         val result = when {
             error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS || error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
-                PlaybackResult.FatalError(throwable = error, userMessage = "Файл не найден или поврежден")
+                PlaybackResult.FatalError(throwable = error, userMessage = "Файл не найден или поврежден: ${error.localizedMessage}")
             error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED -> {
                 serviceScope.launch { delay(100); player?.apply { seekTo(currentPosition + 1000); playWhenReady = true } }
                 PlaybackResult.CorruptedButPlaying(damagePercent = 50f, message = "Ошибка декодирования")
             }
-            else -> PlaybackResult.FatalError(throwable = error, userMessage = "Неизвестная ошибка")
+            else -> PlaybackResult.FatalError(throwable = error, userMessage = "Неизвестная ошибка: ${error.errorCodeName}")
         }
         _playbackState.value = result
         if (result is PlaybackResult.FatalError) broadcastError(result.userMessage)
@@ -285,7 +316,7 @@ class CyberPlayerService : Service() {
 
     private fun broadcastPlaybackState() = sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).putExtra(EXTRA_IS_PLAYING, _isPlaying.value).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { p -> it.putExtra(EXTRA_DURATION, p.duration) } })
     private fun broadcastPositionUpdate() = sendBroadcast(Intent(ACTION_POSITION_UPDATED).putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value).also { player?.let { p -> it.putExtra(EXTRA_DURATION, p.duration) } })
-    private fun broadcastTrackChanged() = sendBroadcast(Intent(ACTION_TRACK_CHANGED).apply { currentFilePath?.let { putExtra(EXTRA_FILE_PATH, it) } })
+    private fun broadcastTrackChanged() = sendBroadcast(Intent(ACTION_TRACK_CHANGED).apply { currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) } })
     private fun broadcastError(msg: String) = sendBroadcast(Intent(ACTION_ERROR_OCCURRED).putExtra(EXTRA_ERROR_MESSAGE, msg))
     private fun broadcastDamageWarning(d: PlaybackResult.CorruptedButPlaying) = sendBroadcast(Intent(ACTION_ERROR_OCCURRED).putExtra(EXTRA_ERROR_MESSAGE, d.message).putExtra(EXTRA_DAMAGE_PERCENT, d.damagePercent))
     private fun broadcastRecoveryProgress(p: Float) = sendBroadcast(Intent(ACTION_RECOVERY_PROGRESS).putExtra(EXTRA_RECOVERY_PROGRESS, p))
