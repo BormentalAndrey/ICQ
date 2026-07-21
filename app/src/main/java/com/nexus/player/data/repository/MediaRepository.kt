@@ -5,63 +5,36 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import com.nexus.player.data.model.MediaFormat
 import com.nexus.player.data.model.MediaItem
 import com.nexus.player.data.model.PlaybackResult
 import com.nexus.player.player.core.CorruptedFileHandler
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import java.io.File
 
 class MediaRepository(private val context: Context) {
     
     private val handler = CorruptedFileHandler()
     
-    fun scanAllMedia(): Flow<MediaItem> = flow {
+    fun loadAllMedia(): List<MediaItem> {
+        Log.d("NEXUS_REPO", "=== НАЧАЛО СКАНИРОВАНИЯ ===")
+        val items = mutableListOf<MediaItem>()
         val seen = mutableSetOf<String>()
         
-        // Сначала MediaStore (быстрее)
-        scanAudioFiles().forEach { item ->
-            if (seen.add(item.path)) emit(item)
-        }
-        scanVideoFiles().forEach { item ->
-            if (seen.add(item.path)) emit(item)
+        fun addIfNew(item: MediaItem) {
+            if (seen.add(item.path)) items.add(item)
         }
         
-        // Затем файловая система (для файлов не в MediaStore)
-        scanCustomDirectories().forEach { item ->
-            if (seen.add(item.path)) emit(item)
-        }
-    }.flowOn(Dispatchers.IO)
+        loadAudioFromMediaStore().forEach { addIfNew(it) }
+        loadVideoFromMediaStore().forEach { addIfNew(it) }
+        loadFromFileSystem().forEach { addIfNew(it) }
+        
+        Log.d("NEXUS_REPO", "=== ВСЕГО: ${items.size} (аудио: ${items.count { !it.isVideo }}, видео: ${items.count { it.isVideo }}) ===")
+        return items
+    }
     
-    fun scanAudioOnly(): Flow<MediaItem> = flow {
-        val seen = mutableSetOf<String>()
-        scanAudioFiles().forEach { item ->
-            if (seen.add(item.path)) emit(item)
-        }
-        scanCustomDirectories()
-            .filter { it.mimeType.startsWith("audio/") || it.format.isAudioFormat }
-            .forEach { item ->
-                if (seen.add(item.path)) emit(item)
-            }
-    }.flowOn(Dispatchers.IO)
-    
-    fun scanVideoOnly(): Flow<MediaItem> = flow {
-        val seen = mutableSetOf<String>()
-        scanVideoFiles().forEach { item ->
-            if (seen.add(item.path)) emit(item)
-        }
-        scanCustomDirectories()
-            .filter { it.mimeType.startsWith("video/") || it.format.isVideoFormat }
-            .forEach { item ->
-                if (seen.add(item.path)) emit(item)
-            }
-    }.flowOn(Dispatchers.IO)
-    
-    private fun scanAudioFiles(): List<MediaItem> {
-        val audioItems = mutableListOf<MediaItem>()
+    private fun loadAudioFromMediaStore(): List<MediaItem> {
+        val items = mutableListOf<MediaItem>()
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.DISPLAY_NAME,
@@ -70,17 +43,18 @@ class MediaRepository(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.MIME_TYPE,
-            MediaStore.Audio.Media.SIZE
+            MediaStore.Audio.Media.MIME_TYPE
         )
+        
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         
         try {
             context.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
+                selection,
                 null,
-                null,
-                MediaStore.Audio.Media.DISPLAY_NAME + " ASC"
+                MediaStore.Audio.Media.TITLE + " ASC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
@@ -90,7 +64,6 @@ class MediaRepository(private val context: Context) {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
-                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 
                 while (cursor.moveToNext()) {
                     try {
@@ -102,61 +75,49 @@ class MediaRepository(private val context: Context) {
                         val album = cursor.getString(albumCol) ?: "Unknown Album"
                         val albumId = cursor.getLong(albumIdCol)
                         val mimeType = cursor.getString(mimeCol) ?: "audio/*"
-                        val size = cursor.getLong(sizeCol)
                         
-                        // Пропускаем файлы меньше 10KB (скорее всего битые/пустые)
-                        if (size < 10240) continue
+                        if (duration < 1000) continue
                         
                         val file = File(path)
-                        if (!file.exists() || !file.canRead() || file.length() == 0L) continue
+                        if (!file.exists() || file.length() == 0L) continue
                         
-                        if (duration <= 0) {
-                            duration = handler.estimateDuration(path)
-                        }
+                        if (duration <= 0) duration = handler.estimateDuration(path)
                         
                         val albumArtUri = if (albumId > 0) {
-                            ContentUris.withAppendedId(
-                                Uri.parse("content://media/external/audio/albumart"),
-                                albumId
-                            )
+                            ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), albumId)
                         } else null
                         
-                        val format = MediaFormat.fromPath(path)
-                        
-                        audioItems.add(
-                            MediaItem(
-                                id = id,
-                                name = name,
-                                path = path,
-                                duration = duration,
-                                artist = artist,
-                                album = album,
-                                albumArtUri = albumArtUri,
-                                mimeType = mimeType,
-                                format = format
-                            )
-                        )
-                    } catch (e: Exception) {
-                        continue
-                    }
+                        items.add(MediaItem(
+                            id = id,
+                            name = name,
+                            path = path,
+                            duration = duration,
+                            artist = artist,
+                            album = album,
+                            albumArtUri = albumArtUri,
+                            mimeType = mimeType,
+                            format = MediaFormat.fromPath(path),
+                            uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                        ))
+                    } catch (e: Exception) { continue }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("NEXUS_REPO", "Ошибка audio MediaStore", e)
         }
         
-        return audioItems
+        Log.d("NEXUS_REPO", "Аудио из MediaStore: ${items.size}")
+        return items
     }
     
-    private fun scanVideoFiles(): List<MediaItem> {
-        val videoItems = mutableListOf<MediaItem>()
+    private fun loadVideoFromMediaStore(): List<MediaItem> {
+        val items = mutableListOf<MediaItem>()
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DATA,
             MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.MIME_TYPE,
-            MediaStore.Video.Media.SIZE
+            MediaStore.Video.Media.MIME_TYPE
         )
         
         try {
@@ -165,14 +126,13 @@ class MediaRepository(private val context: Context) {
                 projection,
                 null,
                 null,
-                MediaStore.Video.Media.DISPLAY_NAME + " ASC"
+                MediaStore.Video.Media.TITLE + " ASC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
                 val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
                 val durCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
                 val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
-                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
                 
                 while (cursor.moveToNext()) {
                     try {
@@ -181,54 +141,41 @@ class MediaRepository(private val context: Context) {
                         val path = cursor.getString(pathCol) ?: continue
                         var duration = cursor.getLong(durCol)
                         val mimeType = cursor.getString(mimeCol) ?: "video/*"
-                        val size = cursor.getLong(sizeCol)
-                        
-                        // Пропускаем файлы меньше 50KB (слишком маленькие для видео)
-                        if (size < 51200) continue
                         
                         val file = File(path)
-                        if (!file.exists() || !file.canRead() || file.length() == 0L) continue
+                        if (!file.exists() || file.length() == 0L) continue
                         
-                        if (duration <= 0) {
-                            duration = handler.estimateDuration(path)
-                        }
+                        if (duration <= 0) duration = handler.estimateDuration(path)
                         
-                        val format = MediaFormat.fromPath(path)
-                        
-                        videoItems.add(
-                            MediaItem(
-                                id = id,
-                                name = name,
-                                path = path,
-                                duration = duration,
-                                mimeType = mimeType,
-                                format = format
-                            )
-                        )
-                    } catch (e: Exception) {
-                        continue
-                    }
+                        items.add(MediaItem(
+                            id = id,
+                            name = name,
+                            path = path,
+                            duration = duration,
+                            mimeType = mimeType,
+                            format = MediaFormat.fromPath(path),
+                            uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                        ))
+                    } catch (e: Exception) { continue }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("NEXUS_REPO", "Ошибка video MediaStore", e)
         }
         
-        return videoItems
+        Log.d("NEXUS_REPO", "Видео из MediaStore: ${items.size}")
+        return items
     }
     
-    private fun scanCustomDirectories(): List<MediaItem> {
-        val customItems = mutableListOf<MediaItem>()
+    private fun loadFromFileSystem(): List<MediaItem> {
+        val items = mutableListOf<MediaItem>()
         val seen = mutableSetOf<String>()
+        val audioExt = setOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "wma", "opus")
+        val videoExt = setOf("mp4", "avi", "mkv", "mov", "webm", "3gp", "flv")
+        val allExt = audioExt + videoExt
         
-        val audioExtensions = listOf("mp3", "flac", "wav", "m4a", "aac", "ogg", "wma", "opus")
-        val videoExtensions = listOf("mp4", "avi", "mkv", "mov", "webm", "flv", "3gp", "wmv")
-        val allExtensions = audioExtensions + videoExtensions
-        
-        // Базовые папки для сканирования
         val directories = mutableListOf<File>()
         
-        // Стандартные папки
         listOf(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -238,136 +185,56 @@ class MediaRepository(private val context: Context) {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_ALARMS),
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_NOTIFICATIONS),
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RINGTONES)
-        ).forEach { dir ->
-            if (dir.exists() && dir.isDirectory && dir.canRead()) {
-                directories.add(dir)
+        ).forEach { if (it.exists() && it.isDirectory && it.canRead()) directories.add(it) }
+        
+        val root = File("/storage/emulated/0")
+        if (root.exists() && root.canRead()) {
+            root.listFiles()?.filter { it.isDirectory && it.canRead() && !it.name.startsWith(".") }?.forEach {
+                if (!directories.contains(it)) directories.add(it)
             }
         }
         
-        // Добавляем корень хранилища и основные папки
-        val storageDir = File("/storage/emulated/0")
-        if (storageDir.exists() && storageDir.canRead()) {
-            storageDir.listFiles()?.filter { 
-                it.isDirectory && it.canRead() && !it.name.startsWith(".") 
-            }?.forEach { dir ->
-                if (!directories.contains(dir)) {
-                    directories.add(dir)
-                }
-            }
-        }
-        
-        // Сканируем все собранные директории
         directories.forEach { dir ->
             try {
-                dir.walkTopDown()
-                    .maxDepth(5)
-                    .filter { it.isFile && it.canRead() }
-                    .filter { it.extension.lowercase() in allExtensions }
-                    .filter { it.length() > 10240 } // > 10KB
-                    .take(1000)
+                dir.walkTopDown().maxDepth(4)
+                    .filter { it.isFile && it.canRead() && it.extension.lowercase() in allExt && it.length() > 10240 }
+                    .take(500)
                     .forEach { file ->
                         val absPath = file.absolutePath
                         if (seen.add(absPath)) {
-                            try {
-                                val duration = handler.estimateDuration(absPath)
-                                val format = MediaFormat.fromPath(absPath)
-                                val extension = file.extension.lowercase()
-                                val isVideo = extension in videoExtensions
-                                val mimeType = if (isVideo) "video/$extension" else "audio/$extension"
-                                
-                                customItems.add(
-                                    MediaItem(
-                                        id = file.hashCode().toLong(),
-                                        name = file.nameWithoutExtension,
-                                        path = absPath,
-                                        duration = duration,
-                                        mimeType = mimeType,
-                                        format = format
-                                    )
-                                )
-                            } catch (e: Exception) {
-                                // Skip unreadable files
-                            }
+                            val ext = file.extension.lowercase()
+                            val isVideo = ext in videoExt
+                            items.add(MediaItem(
+                                id = file.hashCode().toLong(),
+                                name = file.nameWithoutExtension,
+                                path = absPath,
+                                duration = handler.estimateDuration(absPath),
+                                mimeType = if (isVideo) "video/$ext" else "audio/$ext",
+                                format = MediaFormat.fromPath(absPath),
+                                uri = Uri.fromFile(file)
+                            ))
                         }
                     }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("NEXUS_REPO", "Ошибка сканирования ${dir.absolutePath}", e)
             }
         }
         
-        return customItems
+        Log.d("NEXUS_REPO", "Из файловой системы: ${items.size}")
+        return items
     }
     
-    fun getMediaItemsByFormat(format: MediaFormat): Flow<List<MediaItem>> = flow {
-        val allItems = mutableListOf<MediaItem>()
-        scanAllMedia().collect { item ->
-            if (item.format == format) {
-                allItems.add(item)
-            }
-        }
-        emit(allItems)
-    }.flowOn(Dispatchers.IO)
-    
-    fun searchMedia(query: String): Flow<List<MediaItem>> = flow {
-        val results = mutableListOf<MediaItem>()
-        scanAllMedia().collect { item ->
-            if (item.name.contains(query, ignoreCase = true) ||
-                item.artist.contains(query, ignoreCase = true) ||
-                item.album.contains(query, ignoreCase = true)) {
-                results.add(item)
-            }
-        }
-        emit(results)
-    }.flowOn(Dispatchers.IO)
-    
-    suspend fun repairStream(filePath: String): Flow<PlaybackResult> = flow {
-        emit(PlaybackResult.RecoveryInProgress(0f))
-        
-        try {
+    fun repairStream(filePath: String): PlaybackResult {
+        return try {
             val file = File(filePath)
-            if (!file.exists()) {
-                emit(
-                    PlaybackResult.FatalError(
-                        throwable = IllegalStateException("File not found"),
-                        canAttemptRecovery = false
-                    )
-                )
-                return@flow
-            }
-            
-            val repairedFile = handler.repairFile(filePath)
-            emit(PlaybackResult.RecoveryInProgress(0.5f))
-            
-            if (repairedFile != null && repairedFile.exists()) {
-                emit(PlaybackResult.RecoveryInProgress(1.0f))
-                emit(
-                    PlaybackResult.RecoveryComplete(
-                        success = true,
-                        recoveredPath = repairedFile.absolutePath
-                    )
-                )
-            } else {
-                emit(PlaybackResult.RecoveryComplete(success = false))
+            if (!file.exists()) PlaybackResult.FatalError(throwable = IllegalStateException("File not found"), canAttemptRecovery = false)
+            else {
+                val repaired = handler.repairFile(filePath)
+                if (repaired != null && repaired.exists()) PlaybackResult.RecoveryComplete(success = true, recoveredPath = repaired.absolutePath)
+                else PlaybackResult.RecoveryComplete(success = false)
             }
         } catch (e: Exception) {
-            emit(
-                PlaybackResult.FatalError(
-                    throwable = e,
-                    canAttemptRecovery = false,
-                    userMessage = "Ошибка восстановления: ${e.message}"
-                )
-            )
+            PlaybackResult.FatalError(throwable = e, userMessage = "Ошибка восстановления")
         }
-    }.flowOn(Dispatchers.IO)
-    
-    fun getMediaCount(): Flow<Pair<Int, Int>> = flow {
-        var audioCount = 0
-        var videoCount = 0
-        
-        scanAllMedia().collect { item ->
-            if (item.isVideo) videoCount++ else audioCount++
-        }
-        
-        emit(Pair(audioCount, videoCount))
-    }.flowOn(Dispatchers.IO)
+    }
 }
