@@ -231,11 +231,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun enterPiP() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val activity = context as? android.app.Activity
-            activity?.enterPictureInPictureMode(
-                PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build()
-            )
+            activity?.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
         }
     }
 
@@ -294,14 +290,10 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             }
         }
 
-        // Queue panel
-        AnimatedVisibility(
-            visible = state.showQueue,
-            enter = slideInVertically(tween(300)) { it },
-            exit = slideOutVertically(tween(300)) { it },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp)
-        ) {
-            QueuePanel(state, ::startPlayback)
+        if (state.showQueue) {
+            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp)) {
+                QueuePanel(state, ::startPlayback)
+            }
         }
     }
 }
@@ -343,7 +335,7 @@ private fun PlayerView(
     var volumeAccumulator by remember { mutableFloatStateOf(0.5f) }
 
     Column(
-        Modifier.fillMaxSize().weight(1f).then(if (state.isFullScreen) Modifier.background(Color.Black).pointerInput(Unit) {
+        Modifier.fillMaxSize().then(if (state.isFullScreen) Modifier.background(Color.Black).pointerInput(Unit) {
             detectDragGestures { change, dragAmount ->
                 change.consume()
                 val w = size.width.toFloat(); val h = size.height.toFloat()
@@ -375,9 +367,7 @@ private fun PlayerView(
                     PlayerView(ctx).apply { player = (ctx.applicationContext as NexusApplication).exoPlayer; useController = false }
                 }, modifier = Modifier.fillMaxSize())
                 if (state.isFullScreen) {
-                    AnimatedVisibility(visible = true, enter = fadeIn(tween(200)), exit = fadeOut(tween(200)), modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
-                        FullScreenControls(state, onTogglePlayPause, onNext, onPrevious, { viewModel.toggleFullScreen() }, onPiP)
-                    }
+                    FullScreenControls(state, onTogglePlayPause, onNext, onPrevious, { viewModel.toggleFullScreen() }, onPiP)
                 }
             }
         } else {
@@ -410,14 +400,16 @@ private fun PlayerView(
 
 @Composable
 private fun FullScreenControls(state: PlayerUiState, onTogglePlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onExitFullScreen: () -> Unit, onPiP: () -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(24.dp)).padding(16.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.SkipPrevious, "Prev", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp)) }
-        Box(Modifier.size(60.dp).clip(CircleShape).background(NexusColors.NeonPink).clickable { onTogglePlayPause() }, contentAlignment = Alignment.Center) {
-            Icon(if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))
+    Box(Modifier.fillMaxWidth().padding(16.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(24.dp)).padding(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.SkipPrevious, "Prev", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp)) }
+            Box(Modifier.size(60.dp).clip(CircleShape).background(NexusColors.NeonPink).clickable { onTogglePlayPause() }, contentAlignment = Alignment.Center) {
+                Icon(if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(32.dp))
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.SkipNext, "Next", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp)) }
+            IconButton(onClick = onPiP, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.PictureInPicture, "PiP", tint = NexusColors.NeonGreen, modifier = Modifier.size(24.dp)) }
+            IconButton(onClick = onExitFullScreen, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.FullscreenExit, "Exit", tint = NexusColors.Purple, modifier = Modifier.size(24.dp)) }
         }
-        IconButton(onClick = onNext, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.SkipNext, "Next", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp)) }
-        IconButton(onClick = onPiP, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.PictureInPicture, "PiP", tint = NexusColors.NeonGreen, modifier = Modifier.size(24.dp)) }
-        IconButton(onClick = onExitFullScreen, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.FullscreenExit, "Exit", tint = NexusColors.Purple, modifier = Modifier.size(24.dp)) }
     }
 }
 
