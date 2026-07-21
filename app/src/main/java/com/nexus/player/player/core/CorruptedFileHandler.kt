@@ -1,14 +1,9 @@
 package com.nexus.player.player.core
 
-import android.content.Context
 import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.net.Uri
 import android.util.Log
-import com.nexus.player.NexusApplication
 import com.nexus.player.data.model.PlaybackResult
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -16,50 +11,38 @@ import java.nio.ByteOrder
 
 class CorruptedFileHandler {
 
-    private val context: Context get() = NexusApplication.instance
-
     companion object {
         private const val TAG = "CorruptedFileHandler"
         private const val MP3_SYNC_WORD = 0xFF
-
         private val ID3_HEADER = "ID3".toByteArray()
         private val WAV_RIFF = "RIFF".toByteArray()
         private val WAV_WAVE = "WAVE".toByteArray()
         private val FLAC_MARKER = "fLaC".toByteArray()
-
         private const val MAX_FRAME_SKIP = 65536
         private const val MIN_FRAME_SIZE = 24
     }
 
     data class FrameInfo(
-        val offset: Long,
-        val size: Int,
-        val isValid: Boolean,
-        val sampleRate: Int = 44100,
-        val bitrate: Int = 128000
+        val offset: Long, val size: Int, val isValid: Boolean,
+        val sampleRate: Int = 44100, val bitrate: Int = 128000
     )
 
     fun analyzeDamage(uriString: String): PlaybackResult {
         if (uriString.startsWith("content://")) return PlaybackResult.Success
-
         val file = File(uriString)
-        if (!file.exists()) return PlaybackResult.FatalError(IOException("Not found"), "Файл не найден")
-
+        if (!file.exists()) return PlaybackResult.FatalError(IOException("Not found"), userMessage = "Файл не найден")
         return try {
             val totalSize = file.length()
-            if (totalSize == 0L) return PlaybackResult.FatalError(IOException("Empty"), "Файл пуст")
-
+            if (totalSize == 0L) return PlaybackResult.FatalError(IOException("Empty"), userMessage = "Файл пуст")
             var corruptedBytes = 0L
             if (uriString.endsWith(".mp3", true)) {
                 RandomAccessFile(file, "r").use { raf ->
-                    var offset = skipId3Tag(raf)
-                    var lastValid = offset
+                    var offset = skipId3Tag(raf); var lastValid = offset
                     while (offset < raf.length() - MIN_FRAME_SIZE) {
                         val frame = findNextValidMp3Frame(raf, offset)
                         if (frame != null) {
                             if (offset > lastValid) corruptedBytes += offset - lastValid
-                            lastValid = frame.offset + frame.size
-                            offset = lastValid
+                            lastValid = frame.offset + frame.size; offset = lastValid
                         } else offset++
                     }
                 }
@@ -67,15 +50,14 @@ class CorruptedFileHandler {
                 try { MediaExtractor().apply { setDataSource(uriString); release() } }
                 catch (e: Exception) { corruptedBytes = totalSize / 2 }
             }
-
             val pct = (corruptedBytes.toFloat() / totalSize * 100f)
             when {
-                pct > 90f -> PlaybackResult.FatalError(IOException("Severe"), "Повреждён на ${pct.toInt()}%", true)
+                pct > 90f -> PlaybackResult.FatalError(IOException("Severe"), userMessage = "Повреждён на ${pct.toInt()}%", canAttemptRecovery = true)
                 pct > 0f -> PlaybackResult.CorruptedButPlaying(pct, corruptedBytes, message = "Повреждений: ${pct.toInt()}%")
                 else -> PlaybackResult.Success
             }
         } catch (e: Exception) {
-            PlaybackResult.FatalError(e, "Ошибка анализа")
+            PlaybackResult.FatalError(e, userMessage = "Ошибка анализа")
         }
     }
 
@@ -109,15 +91,16 @@ class CorruptedFileHandler {
         var offset = startOffset
         val maxSearch = minOf(raf.length(), offset + MAX_FRAME_SKIP)
         while (offset < maxSearch - 4) {
-            raf.seek(offset)
-            val b1 = raf.read(); if (b1 == -1) break
+            raf.seek(offset); val b1 = raf.read(); if (b1 == -1) break
             if (b1 == MP3_SYNC_WORD) {
                 val b2 = raf.read()
                 if (b2 != -1 && (b2 and 0xE0) == 0xE0) {
                     val b3 = raf.read(); val b4 = raf.read()
                     if (b3 != -1 && b4 != -1 && isValidMp3Header(b1, b2, b3, b4)) {
-                        val br = intArrayOf(0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0)[(b2 shr 4) and 0x0F].let { if (it == 0) 128 else it } * 1000
-                        val srr = intArrayOf(44100,48000,32000,0)[(b2 shr 2) and 0x03].let { if (it == 0) 44100 else it }
+                        val bitrates = intArrayOf(0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+                        val sampleRates = intArrayOf(44100, 48000, 32000, 0)
+                        val br = bitrates[(b2 shr 4) and 0x0F].let { if (it == 0) 128 else it } * 1000
+                        val srr = sampleRates[(b2 shr 2) and 0x03].let { if (it == 0) 44100 else it }
                         val pad = (b2 shr 1) and 0x01
                         val size = if (srr > 0) (144 * br) / (srr * 1000) + pad else 0
                         if (size in MIN_FRAME_SIZE..MAX_FRAME_SKIP) return FrameInfo(offset, size, true, srr, br)
@@ -140,8 +123,7 @@ class CorruptedFileHandler {
 
     private fun skipId3Tag(raf: RandomAccessFile): Long {
         try {
-            raf.seek(0)
-            val h = ByteArray(3); raf.read(h)
+            raf.seek(0); val h = ByteArray(3); raf.read(h)
             if (h.contentEquals(ID3_HEADER)) {
                 raf.skipBytes(2); val flags = raf.read()
                 val sb = ByteArray(4); raf.read(sb)
@@ -184,8 +166,7 @@ class CorruptedFileHandler {
                 var lb = false; var sr = 44100; var ts = 0L
                 while (!lb && raf.filePointer < raf.length()) {
                     val bh = raf.read(); if (bh == -1) break
-                    lb = (bh and 0x80) != 0
-                    val sb = ByteArray(3); raf.read(sb)
+                    lb = (bh and 0x80) != 0; val sb = ByteArray(3); raf.read(sb)
                     val bs = ((sb[0].toInt() and 0xFF) shl 16) or ((sb[1].toInt() and 0xFF) shl 8) or (sb[2].toInt() and 0xFF)
                     if ((bh and 0x7F) == 0) {
                         val si = ByteArray(bs); raf.read(si)
