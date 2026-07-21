@@ -61,7 +61,7 @@ data class PlayerUiState(
     val selectedPreset: String = "Flat",
     val isLoading: Boolean = true,
     val isScanning: Boolean = false,
-    val pendingTrackPath: String? = null
+    val pendingTrackUri: String? = null
 )
 
 class MainViewModel(
@@ -79,15 +79,15 @@ class MainViewModel(
                 _uiState.update { state ->
                     val audio = all.filter { !it.isVideo }.sortedBy { it.name.lowercase() }
                     val video = all.filter { it.isVideo }.sortedBy { it.name.lowercase() }
-                    val pending = state.pendingTrackPath
+                    val pending = state.pendingTrackUri
                     val track = if (pending != null) {
-                        (audio + video).find { it.path == pending }
+                        (audio + video).find { it.uri.toString() == pending || it.path == pending }
                     } else state.currentTrack
                     state.copy(
                         audioItems = audio,
                         videoItems = video,
                         currentTrack = track,
-                        pendingTrackPath = null,
+                        pendingTrackUri = null,
                         isLoading = false,
                         isScanning = false
                     )
@@ -98,7 +98,6 @@ class MainViewModel(
         }
     }
 
-    // Состояние меняется ТОЛЬКО из BroadcastReceiver (без локального setPlaying)
     fun onPlaybackStateChanged(isPlaying: Boolean, position: Long, duration: Long) {
         _uiState.update { it.copy(isPlaying = isPlaying, currentPosition = position, duration = duration) }
     }
@@ -107,14 +106,14 @@ class MainViewModel(
         _uiState.update { it.copy(currentPosition = position, duration = duration) }
     }
 
-    fun onTrackChanged(trackPath: String?) {
-        if (trackPath == null) return
+    fun onTrackChanged(trackUri: String?) {
+        if (trackUri == null) return
         val state = _uiState.value
-        val found = (state.audioItems + state.videoItems).find { it.path == trackPath }
+        val found = (state.audioItems + state.videoItems).find { it.uri.toString() == trackUri || it.path == trackUri }
         if (found != null) {
-            _uiState.update { it.copy(currentTrack = found, pendingTrackPath = null) }
+            _uiState.update { it.copy(currentTrack = found, pendingTrackUri = null) }
         } else {
-            _uiState.update { it.copy(pendingTrackPath = trackPath) }
+            _uiState.update { it.copy(pendingTrackUri = trackUri) }
         }
     }
 
@@ -236,7 +235,9 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun startPlayback(item: MediaItem) {
         viewModel.setCurrentTrack(item)
         ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
-            action = CyberPlayerService.ACTION_PLAY; putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
+            action = CyberPlayerService.ACTION_PLAY
+            putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
+            putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
         })
     }
 
@@ -253,14 +254,14 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun playNext() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.path == state.currentTrack?.path }
+        val idx = items.indexOfFirst { it.uri.toString() == state.currentTrack?.uri.toString() }
         startPlayback(items[if (idx < 0 || idx >= items.size - 1) 0 else idx + 1])
     }
 
     fun playPrevious() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.path == state.currentTrack?.path }
+        val idx = items.indexOfFirst { it.uri.toString() == state.currentTrack?.uri.toString() }
         startPlayback(items[if (idx <= 0) items.size - 1 else idx - 1])
     }
 
@@ -301,7 +302,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                         if (items.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily) }
                         else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
                             items(items, key = { "${it.id}_${it.isVideo}" }) { item ->
-                                MediaItemRow(item, state.currentTrack?.path == item.path && state.isPlaying) { startPlayback(item) }
+                                MediaItemRow(item, state.currentTrack?.uri.toString() == item.uri.toString() && state.isPlaying) { startPlayback(item) }
                             }
                         }
                     }
