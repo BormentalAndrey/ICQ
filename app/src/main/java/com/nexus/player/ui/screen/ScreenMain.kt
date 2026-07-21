@@ -60,24 +60,34 @@ data class PlayerUiState(
     val selectedTab: MediaTab = MediaTab.AUDIO,
     val selectedPreset: String = "Flat",
     val isLoading: Boolean = true,
-    val isScanning: Boolean = false
+    val isScanning: Boolean = false,
+    val pendingTrackPath: String? = null
 )
 
-class MainViewModel : ViewModel() {
-    private val repository = AppModule.provideMediaRepository()
-    
+class MainViewModel(
+    private val repository: MediaRepository = AppModule.provideMediaRepository()
+) : ViewModel() {
+
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
-    
+
     fun startMediaScan() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, isScanning = true) }
             try {
                 val all = withContext(Dispatchers.IO) { repository.loadAllMedia() }
-                _uiState.update {
-                    it.copy(
-                        audioItems = all.filter { !it.isVideo }.sortedBy { n -> n.name.lowercase() },
-                        videoItems = all.filter { it.isVideo }.sortedBy { n -> n.name.lowercase() },
+                _uiState.update { state ->
+                    val audio = all.filter { !it.isVideo }.sortedBy { it.name.lowercase() }
+                    val video = all.filter { it.isVideo }.sortedBy { it.name.lowercase() }
+                    val pending = state.pendingTrackPath
+                    val track = if (pending != null) {
+                        (audio + video).find { it.path == pending }
+                    } else state.currentTrack
+                    state.copy(
+                        audioItems = audio,
+                        videoItems = video,
+                        currentTrack = track,
+                        pendingTrackPath = null,
                         isLoading = false,
                         isScanning = false
                     )
@@ -87,73 +97,122 @@ class MainViewModel : ViewModel() {
             }
         }
     }
-    
-    fun updatePlaybackState(isPlaying: Boolean, position: Long, duration: Long) {
+
+    // Состояние меняется ТОЛЬКО из BroadcastReceiver (без локального setPlaying)
+    fun onPlaybackStateChanged(isPlaying: Boolean, position: Long, duration: Long) {
         _uiState.update { it.copy(isPlaying = isPlaying, currentPosition = position, duration = duration) }
     }
-    
-    fun updateTrack(trackPath: String?) {
-        if (trackPath != null) {
-            val current = _uiState.value
-            val found = (current.audioItems + current.videoItems).find { it.path == trackPath }
-            if (found != null) _uiState.update { it.copy(currentTrack = found) }
+
+    fun onPositionUpdated(position: Long, duration: Long) {
+        _uiState.update { it.copy(currentPosition = position, duration = duration) }
+    }
+
+    fun onTrackChanged(trackPath: String?) {
+        if (trackPath == null) return
+        val state = _uiState.value
+        val found = (state.audioItems + state.videoItems).find { it.path == trackPath }
+        if (found != null) {
+            _uiState.update { it.copy(currentTrack = found, pendingTrackPath = null) }
+        } else {
+            _uiState.update { it.copy(pendingTrackPath = trackPath) }
         }
     }
-    
-    fun updateError(message: String, damagePercent: Float) {
+
+    fun onError(message: String, damagePercent: Float) {
         _uiState.update {
-            it.copy(playbackResult = if (damagePercent > 0f) PlaybackResult.CorruptedButPlaying(damagePercent, message = message)
-            else PlaybackResult.FatalError(Exception(message), userMessage = message, canAttemptRecovery = true))
+            it.copy(
+                playbackResult = if (damagePercent > 0f) {
+                    PlaybackResult.CorruptedButPlaying(damagePercent = damagePercent, message = message)
+                } else {
+                    PlaybackResult.FatalError(Exception(message), userMessage = message, canAttemptRecovery = true)
+                }
+            )
         }
     }
-    
-    fun setPlaying(playing: Boolean) { _uiState.update { it.copy(isPlaying = playing) } }
-    fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track, playbackResult = PlaybackResult.Success) } }
-    fun togglePlaylist() { _uiState.update { it.copy(showPlaylist = !it.showPlaylist) } }
-    fun selectTab(tab: MediaTab) { _uiState.update { it.copy(selectedTab = tab) } }
-    fun setPreset(preset: String) { _uiState.update { it.copy(selectedPreset = preset) } }
+
+    fun setCurrentTrack(track: MediaItem) {
+        _uiState.update { it.copy(currentTrack = track, playbackResult = PlaybackResult.Success) }
+    }
+
+    fun togglePlaylist() {
+        _uiState.update { it.copy(showPlaylist = !it.showPlaylist) }
+    }
+
+    fun selectTab(tab: MediaTab) {
+        _uiState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun setPreset(preset: String) {
+        _uiState.update { it.copy(selectedPreset = preset) }
+    }
+
+    fun setLoading(loading: Boolean) {
+        _uiState.update { it.copy(isLoading = loading, isScanning = loading) }
+    }
+}
+
+class MainViewModelFactory(
+    private val repository: MediaRepository
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        @Suppress("UNCHECKED_CAST")
+        return MainViewModel(repository) as T
+    }
+}
+
+@Composable
+fun viewModelFactory(): MainViewModelFactory {
+    val repository = remember { AppModule.provideMediaRepository() }
+    return remember { MainViewModelFactory(repository) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScreenMain(viewModel: MainViewModel = viewModel()) {
+fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory())) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
-    
+
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
+        contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
         if (perms.values.all { it }) viewModel.startMediaScan()
-        else viewModel._uiState.update { it.copy(isLoading = false, isScanning = false) }
+        else viewModel.setLoading(false)
     }
-    
+
     LaunchedEffect(Unit) {
         val perms = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.POST_NOTIFICATIONS)
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
+                Manifest.permission.READ_MEDIA_AUDIO,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
             else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
-        if (perms.any { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }) permissionLauncher.launch(perms)
-        else viewModel.startMediaScan()
+        if (perms.any { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }) {
+            permissionLauncher.launch(perms)
+        } else {
+            viewModel.startMediaScan()
+        }
     }
-    
+
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 if (intent == null) return
                 when (intent.action) {
-                    CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED -> viewModel.updatePlaybackState(
+                    CyberPlayerService.ACTION_PLAYBACK_STATE_CHANGED -> viewModel.onPlaybackStateChanged(
                         intent.getBooleanExtra(CyberPlayerService.EXTRA_IS_PLAYING, false),
                         intent.getLongExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, 0L),
                         intent.getLongExtra(CyberPlayerService.EXTRA_DURATION, 0L)
                     )
-                    CyberPlayerService.ACTION_POSITION_UPDATED -> viewModel.updatePlaybackState(
-                        state.isPlaying,
+                    CyberPlayerService.ACTION_POSITION_UPDATED -> viewModel.onPositionUpdated(
                         intent.getLongExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, 0L),
                         intent.getLongExtra(CyberPlayerService.EXTRA_DURATION, 0L)
                     )
-                    CyberPlayerService.ACTION_TRACK_CHANGED -> viewModel.updateTrack(intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH))
-                    CyberPlayerService.ACTION_ERROR_OCCURRED -> viewModel.updateError(
+                    CyberPlayerService.ACTION_TRACK_CHANGED -> viewModel.onTrackChanged(
+                        intent.getStringExtra(CyberPlayerService.EXTRA_FILE_PATH)
+                    )
+                    CyberPlayerService.ACTION_ERROR_OCCURRED -> viewModel.onError(
                         intent.getStringExtra(CyberPlayerService.EXTRA_ERROR_MESSAGE) ?: "Ошибка",
                         intent.getFloatExtra(CyberPlayerService.EXTRA_DAMAGE_PERCENT, 0f)
                     )
@@ -166,61 +225,70 @@ fun ScreenMain(viewModel: MainViewModel = viewModel()) {
             addAction(CyberPlayerService.ACTION_TRACK_CHANGED)
             addAction(CyberPlayerService.ACTION_ERROR_OCCURRED)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else context.registerReceiver(receiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
         onDispose { try { context.unregisterReceiver(receiver) } catch (_: Exception) {} }
     }
-    
+
     fun startPlayback(item: MediaItem) {
         viewModel.setCurrentTrack(item)
         ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY; putExtra(CyberPlayerService.EXTRA_FILE_PATH, item.path)
         })
     }
-    
+
     fun togglePlayPause() {
-        if (state.currentTrack == null) { (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it) }; return }
-        context.startService(Intent(context, CyberPlayerService::class.java).apply { action = if (state.isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY })
-        viewModel.setPlaying(!state.isPlaying)
+        if (state.currentTrack == null) {
+            (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it) }
+            return
+        }
+        context.startService(Intent(context, CyberPlayerService::class.java).apply {
+            action = if (state.isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY
+        })
     }
-    
+
     fun playNext() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.id == state.currentTrack?.id }
+        val idx = items.indexOfFirst { it.path == state.currentTrack?.path }
         startPlayback(items[if (idx < 0 || idx >= items.size - 1) 0 else idx + 1])
     }
-    
+
     fun playPrevious() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.id == state.currentTrack?.id }
+        val idx = items.indexOfFirst { it.path == state.currentTrack?.path }
         startPlayback(items[if (idx <= 0) items.size - 1 else idx - 1])
     }
-    
+
     fun applyPreset(preset: String) {
         viewModel.setPreset(preset)
-        context.startService(Intent(context, CyberPlayerService::class.java).apply { action = CyberPlayerService.ACTION_SET_EQUALIZER; putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset) })
+        context.startService(Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_SET_EQUALIZER; putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
+        })
     }
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         ParticleBackground()
         Column(Modifier.fillMaxSize().padding(16.dp).systemBarsPadding()) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 NeonGradientText("NEXUS", fontSize = 32.sp)
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { viewModel.startMediaScan() }) { Icon(Icons.Default.Refresh, "Refresh", tint = if (state.isScanning) NexusColors.NeonPink else NexusColors.Cyan) }
                     IconButton(onClick = { viewModel.togglePlaylist() }) { Icon(if (state.showPlaylist) Icons.Default.GraphicEq else Icons.Default.QueueMusic, "Playlist", tint = if (state.showPlaylist) NexusColors.NeonPink else NexusColors.Cyan) }
                 }
             }
-            if (!state.showPlaylist) Row(Modifier.fillMaxWidth(), Arrangement.Center) {
+            if (!state.showPlaylist) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 Text("🎵 ${state.audioItems.size}", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
                 Spacer(Modifier.width(16.dp))
                 Text("🎬 ${state.videoItems.size}", color = NexusColors.Purple, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
             }
             Spacer(Modifier.height(16.dp))
             if (state.showPlaylist) {
-                Row(Modifier.fillMaxWidth(), Arrangement.Center) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     FilterChip(state.selectedTab == MediaTab.AUDIO, { viewModel.selectTab(MediaTab.AUDIO) }, { Text("🎵 АУДИО (${state.audioItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
                     Spacer(Modifier.width(8.dp))
                     FilterChip(state.selectedTab == MediaTab.VIDEO, { viewModel.selectTab(MediaTab.VIDEO) }, { Text("🎬 ВИДЕО (${state.videoItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f)))
@@ -231,10 +299,14 @@ fun ScreenMain(viewModel: MainViewModel = viewModel()) {
                     else {
                         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
                         if (items.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily) }
-                        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) { items(items, key = { it.id }) { MediaItemRow(it, state.currentTrack?.id == it.id && state.isPlaying) { startPlayback(it) } } }
+                        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+                            items(items, key = { "${it.id}_${it.isVideo}" }) { item ->
+                                MediaItemRow(item, state.currentTrack?.path == item.path && state.isPlaying) { startPlayback(item) }
+                            }
+                        }
                     }
                 }
-            } else Column(Modifier.fillMaxSize().weight(1f), Alignment.CenterHorizontally, Arrangement.Center) {
+            } else Column(Modifier.fillMaxSize().weight(1f), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                 GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
                 Spacer(Modifier.height(32.dp))
                 state.currentTrack?.let {
@@ -245,7 +317,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel()) {
                 SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { Random.nextFloat() }, state.isPlaying)
                 Spacer(Modifier.height(16.dp))
                 Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика").forEach { FilterChip(state.selectedPreset == it, { applyPreset(it) }, { Text(it, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f))) }
                 }
             }
@@ -257,7 +329,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel()) {
 @Composable
 fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() }, colors = CardDefaults.cardColors(containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.2f) else NexusColors.GlassBlack), shape = RoundedCornerShape(12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Brush.linearGradient(if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed) else listOf(NexusColors.Purple, NexusColors.Cyan))), contentAlignment = Alignment.Center) {
                 Icon(if (item.isVideo) Icons.Default.VideoFile else if (isPlaying) Icons.Default.Equalizer else Icons.Default.MusicNote, null, tint = Color.White, modifier = Modifier.size(24.dp))
             }
