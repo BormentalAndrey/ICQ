@@ -12,16 +12,21 @@ import android.os.Build
 import android.util.Rational
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,11 +34,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +52,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.nexus.player.NexusApplication
 import com.nexus.player.data.model.MediaItem
@@ -58,6 +68,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class MediaTab { AUDIO, VIDEO }
+enum class RepeatMode { OFF, ALL, ONE }
 
 data class PlayerUiState(
     val audioItems: List<MediaItem> = emptyList(),
@@ -74,7 +85,11 @@ data class PlayerUiState(
     val pendingTrackUri: String? = null,
     val isFullScreen: Boolean = false,
     val gestureIndicator: String? = null,
-    val showQueue: Boolean = false
+    val showQueue: Boolean = false,
+    val searchQuery: String = "",
+    val playbackSpeed: Float = 1.0f,
+    val isShuffle: Boolean = false,
+    val repeatMode: RepeatMode = RepeatMode.OFF
 )
 
 class MainViewModel(
@@ -140,6 +155,34 @@ class MainViewModel(
     fun toggleFullScreen() { _uiState.update { it.copy(isFullScreen = !it.isFullScreen) } }
     fun showGestureIndicator(text: String) { _uiState.update { it.copy(gestureIndicator = text) } }
     fun hideGestureIndicator() { _uiState.update { it.copy(gestureIndicator = null) } }
+    fun updateSearchQuery(query: String) { _uiState.update { it.copy(searchQuery = query) } }
+
+    fun toggleShuffle() {
+        _uiState.update { it.copy(isShuffle = !it.isShuffle) }
+    }
+
+    fun toggleRepeat() {
+        _uiState.update { state ->
+            val nextMode = when (state.repeatMode) {
+                RepeatMode.OFF -> RepeatMode.ALL
+                RepeatMode.ALL -> RepeatMode.ONE
+                RepeatMode.ONE -> RepeatMode.OFF
+            }
+            state.copy(repeatMode = nextMode)
+        }
+    }
+
+    fun cyclePlaybackSpeed(context: Context) {
+        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val currentIdx = speeds.indexOf(_uiState.value.playbackSpeed)
+        val nextSpeed = if (currentIdx != -1) speeds[(currentIdx + 1) % speeds.size] else 1.0f
+        _uiState.update { it.copy(playbackSpeed = nextSpeed) }
+        showGestureIndicator("⚡ СКОРОСТЬ ${nextSpeed}x")
+        try {
+            val app = context.applicationContext as? NexusApplication
+            app?.exoPlayer?.setPlaybackSpeed(nextSpeed)
+        } catch (_: Exception) {}
+    }
 }
 
 class MainViewModelFactory(private val repository: MediaRepository) : ViewModelProvider.Factory {
@@ -153,8 +196,7 @@ fun viewModelFactory(): MainViewModelFactory {
     return remember { MainViewModelFactory(repository) }
 }
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory())) {
     val context = LocalContext.current
@@ -241,20 +283,35 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
         val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
-        startPlayback(items[(idx + 1) % items.size])
+        val nextIdx = when {
+            state.isShuffle -> items.indices.random()
+            state.repeatMode == RepeatMode.ONE -> idx
+            idx < items.size - 1 -> idx + 1
+            state.repeatMode == RepeatMode.ALL -> 0
+            else -> 0
+        }
+        startPlayback(items[nextIdx])
     }
 
     fun playPrevious() {
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
         val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
-        startPlayback(items[if (idx <= 0) items.size - 1 else idx - 1])
+        val prevIdx = when {
+            state.isShuffle -> items.indices.random()
+            state.repeatMode == RepeatMode.ONE -> idx
+            idx > 0 -> idx - 1
+            state.repeatMode == RepeatMode.ALL -> items.size - 1
+            else -> items.size - 1
+        }
+        startPlayback(items[prevIdx])
     }
 
     fun performSeek(position: Long) {
+        val safePos = position.coerceIn(0L, if (state.duration > 0) state.duration else Long.MAX_VALUE)
         ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_SEEK_TO
-            putExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, position)
+            putExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, safePos)
         })
     }
 
@@ -268,8 +325,18 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     fun enterPiP() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val activity = context as? Activity
-            activity?.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
+            val activity = context as? Activity ?: return
+            val hasPipFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+            if (hasPipFeature) {
+                try {
+                    val params = PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .build()
+                    activity.enterPictureInPictureMode(params)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
     }
 
@@ -319,7 +386,10 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                         onPrevious = ::playPrevious,
                         onPreset = ::applyPreset,
                         onSeek = { pos -> performSeek(pos) },
-                        onPiP = ::enterPiP
+                        onPiP = ::enterPiP,
+                        onSpeed = { viewModel.cyclePlaybackSpeed(context) },
+                        onShuffle = { viewModel.toggleShuffle() },
+                        onRepeat = { viewModel.toggleRepeat() }
                     )
                 }
             }
@@ -343,7 +413,21 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
         state.gestureIndicator?.let { text ->
             Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text(text, color = NexusColors.Cyan, fontSize = 48.sp, fontFamily = CyberpunkFontFamily, fontWeight = FontWeight.Bold)
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.85f)),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.border(2.dp, NexusColors.Cyan, RoundedCornerShape(24.dp))
+                ) {
+                    Text(
+                        text = text,
+                        color = NexusColors.Cyan,
+                        fontSize = 32.sp,
+                        fontFamily = CyberpunkFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 20.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -355,8 +439,10 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay: (MediaItem) -> Unit) {
+    val focusManager = LocalFocusManager.current
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             FilterChip(
@@ -373,16 +459,48 @@ private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay:
                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f), selectedLabelColor = NexusColors.Purple)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        
+        OutlinedTextField(
+            value = state.searchQuery,
+            onValueChange = { viewModel.updateSearchQuery(it) },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            placeholder = { Text("ПОИСК В БАЗЕ NEXUS...", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NexusColors.Cyan) },
+            trailingIcon = {
+                if (state.searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = NexusColors.NeonPink)
+                    }
+                }
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = NexusColors.White, fontFamily = CyberpunkFontFamily),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NexusColors.NeonPink,
+                unfocusedBorderColor = NexusColors.Cyan.copy(alpha = 0.5f),
+                cursorColor = NexusColors.NeonPink
+            )
+        )
+        Spacer(Modifier.height(12.dp))
+
         if (state.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = NexusColors.NeonPink)
             }
         } else {
-            val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+            val rawItems = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+            val items = if (state.searchQuery.isBlank()) rawItems else rawItems.filter {
+                it.name.contains(state.searchQuery, ignoreCase = true) ||
+                it.artist.contains(state.searchQuery, ignoreCase = true) ||
+                it.album.contains(state.searchQuery, ignoreCase = true)
+            }
             if (items.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
+                    Text("НИЧЕГО НЕ НАЙДЕНО", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
@@ -395,7 +513,7 @@ private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay:
     }
 }
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(UnstableApi::class)
 @Composable
 private fun PlayerView(
     state: PlayerUiState,
@@ -406,7 +524,10 @@ private fun PlayerView(
     onPrevious: () -> Unit,
     onPreset: (String) -> Unit,
     onSeek: (Long) -> Unit,
-    onPiP: () -> Unit
+    onPiP: () -> Unit,
+    onSpeed: () -> Unit,
+    onShuffle: () -> Unit,
+    onRepeat: () -> Unit
 ) {
     var seekAccumulator by remember { mutableFloatStateOf(0f) }
     var brightnessAccumulator by remember { mutableFloatStateOf(0.5f) }
@@ -426,7 +547,7 @@ private fun PlayerView(
                                 val s = seekAccumulator.roundToInt()
                                 if (abs(s) > 0) {
                                     onSeek((state.currentPosition + s * 1000L).coerceIn(0, state.duration))
-                                    viewModel.showGestureIndicator(if (s > 0) "+${s}s" else "${s}s")
+                                    viewModel.showGestureIndicator(if (s > 0) "⏩ +${s}с" else "⏪ ${s}с")
                                     seekAccumulator = 0f
                                 }
                             }
@@ -445,10 +566,26 @@ private fun PlayerView(
         }
     } else Modifier
 
+    val doubleTapModifier = Modifier.pointerInput(Unit) {
+        detectTapGestures(
+            onDoubleTap = { offset ->
+                val w = size.width
+                if (offset.x < w / 2) {
+                    onSeek((state.currentPosition - 10000L).coerceAtLeast(0L))
+                    viewModel.showGestureIndicator("⏪ -10с")
+                } else {
+                    onSeek((state.currentPosition + 10000L).coerceAtMost(if (state.duration > 0) state.duration else Long.MAX_VALUE))
+                    viewModel.showGestureIndicator("⏩ +10с")
+                }
+            }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
-            .then(if (state.isFullScreen) Modifier.background(Color.Black).then(gestureModifier) else gestureModifier),
+            .then(if (state.isFullScreen) Modifier.background(Color.Black).then(gestureModifier) else gestureModifier)
+            .then(doubleTapModifier),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -468,7 +605,7 @@ private fun PlayerView(
                 )
                 if (state.isFullScreen) {
                     Box(Modifier.align(Alignment.TopCenter)) {
-                        FullScreenControls(state, onTogglePlayPause, onNext, onPrevious, { viewModel.toggleFullScreen() }, onPiP)
+                        FullScreenControls(state, onTogglePlayPause, onNext, onPrevious, { viewModel.toggleFullScreen() }, onPiP, onSpeed)
                     }
                 }
             }
@@ -476,7 +613,7 @@ private fun PlayerView(
             GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
         }
         if (!state.isFullScreen) {
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
             state.currentTrack?.let {
                 NeonText(it.name, fontSize = 22.sp, color = NexusColors.Cyan)
                 Spacer(Modifier.height(4.dp))
@@ -492,10 +629,38 @@ private fun PlayerView(
                 NeonText("NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
                 Text("🎵${state.audioItems.size} аудио • 🎬${state.videoItems.size} видео", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
             }
+            
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onShuffle) {
+                    Icon(
+                        Icons.Default.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (state.isShuffle) NexusColors.NeonPink else NexusColors.Cyan.copy(alpha = 0.5f)
+                    )
+                }
+                FilterChip(
+                    selected = state.playbackSpeed != 1.0f,
+                    onClick = onSpeed,
+                    label = { Text("${state.playbackSpeed}x", fontSize = 11.sp, fontFamily = CyberpunkFontFamily) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.4f), selectedLabelColor = NexusColors.White)
+                )
+                IconButton(onClick = onRepeat) {
+                    Icon(
+                        when (state.repeatMode) {
+                            RepeatMode.ONE -> Icons.Default.RepeatOne
+                            else -> Icons.Default.Repeat
+                        },
+                        contentDescription = "Repeat",
+                        tint = if (state.repeatMode != RepeatMode.OFF) NexusColors.NeonPink else NexusColors.Cyan.copy(alpha = 0.5f)
+                    )
+                }
+            }
+
             if (state.currentTrack?.isVideo != true) {
-                Spacer(Modifier.height(24.dp))
-                SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { kotlin.random.Random.nextFloat() }, state.isPlaying)
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
+                SpectrumVisualizer(Modifier.fillMaxWidth().height(100.dp), FloatArray(64) { kotlin.random.Random.nextFloat() }, state.isPlaying)
+                Spacer(Modifier.height(12.dp))
                 Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     listOf("Flat", "Кибер", "Техно", "Акустика").forEach { preset ->
@@ -519,9 +684,10 @@ private fun FullScreenControls(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onExitFullScreen: () -> Unit,
-    onPiP: () -> Unit
+    onPiP: () -> Unit,
+    onSpeed: () -> Unit
 ) {
-    Box(Modifier.fillMaxWidth().padding(16.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(24.dp)).padding(12.dp)) {
+    Box(Modifier.fillMaxWidth().padding(16.dp).background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(24.dp)).border(1.dp, NexusColors.Cyan.copy(alpha = 0.4f), RoundedCornerShape(24.dp)).padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Default.SkipPrevious, "Prev", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp))
@@ -531,6 +697,9 @@ private fun FullScreenControls(
             }
             IconButton(onClick = onNext, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Default.SkipNext, "Next", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp))
+            }
+            IconButton(onClick = onSpeed, modifier = Modifier.size(44.dp)) {
+                Text("${state.playbackSpeed}x", color = NexusColors.White, fontFamily = CyberpunkFontFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             IconButton(onClick = onPiP, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Default.PictureInPicture, "PiP", tint = NexusColors.NeonGreen, modifier = Modifier.size(24.dp))
@@ -545,25 +714,53 @@ private fun FullScreenControls(
 @Composable
 private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem) -> Unit) {
     Card(
-        Modifier.fillMaxWidth().height(300.dp).padding(16.dp),
-        colors = CardDefaults.cardColors(containerColor = NexusColors.DarkGrey.copy(alpha = 0.95f)),
-        shape = RoundedCornerShape(20.dp)
+        Modifier.fillMaxWidth().height(320.dp).padding(16.dp).shadow(16.dp, RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = NexusColors.DarkGrey.copy(alpha = 0.98f)),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, NexusColors.NeonPink.copy(alpha = 0.5f))
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("📋 ОЧЕРЕДЬ", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("📋 ТЕКУЩАЯ ОЧЕРЕДЬ", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("ВЬЮЕР", color = NexusColors.NeonPink, fontFamily = CyberpunkFontFamily, fontSize = 10.sp)
+            }
+            Spacer(Modifier.height(10.dp))
             LazyColumn {
                 val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
-                items(items.take(20), key = { "${it.id}_${it.uri}" }) { item ->
-                    Text(
-                        text = "${item.name} • ${item.artist}",
-                        color = if (item.uri == state.currentTrack?.uri) NexusColors.NeonPink else NexusColors.White,
-                        fontFamily = CyberpunkFontFamily,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(vertical = 6.dp).clickable { onPlay(item) },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                items(items.take(30), key = { "queue_${it.id}_${it.uri}" }) { item ->
+                    val isCurrent = item.uri == state.currentTrack?.uri
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isCurrent) NexusColors.NeonPink.copy(alpha = 0.15f) else Color.Transparent)
+                            .clickable { onPlay(item) }
+                            .padding(vertical = 8.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isCurrent) Icons.Default.GraphicEq else Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = if (isCurrent) NexusColors.NeonPink else NexusColors.Cyan.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "${item.name} • ${item.artist}",
+                            color = if (isCurrent) NexusColors.NeonPink else NexusColors.White,
+                            fontFamily = CyberpunkFontFamily,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = item.formattedDuration,
+                            color = NexusColors.Cyan.copy(alpha = 0.7f),
+                            fontFamily = CyberpunkFontFamily,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
         }
@@ -574,12 +771,13 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem) -> Unit) {
 fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
-        colors = CardDefaults.cardColors(containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.2f) else NexusColors.GlassBlack),
-        shape = RoundedCornerShape(12.dp)
+        colors = CardDefaults.cardColors(containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.22f) else NexusColors.GlassBlack),
+        shape = RoundedCornerShape(14.dp),
+        border = if (isPlaying) androidx.compose.foundation.BorderStroke(1.dp, NexusColors.NeonPink) else null
     ) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(
+                Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(
                     Brush.linearGradient(if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed) else listOf(NexusColors.Purple, NexusColors.Cyan))
                 ),
                 contentAlignment = Alignment.Center
