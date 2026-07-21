@@ -18,11 +18,11 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.nexus.player.NexusApplication
 import com.nexus.player.R
 import com.nexus.player.data.local.PreferencesManager
 import com.nexus.player.di.AppModule
@@ -165,6 +165,7 @@ class CyberPlayerService : Service() {
                     }
                 })
             }
+        NexusApplication.instance.exoPlayer = player
         startPositionTracking()
         serviceScope.launch { preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) } }
     }
@@ -280,6 +281,7 @@ class CyberPlayerService : Service() {
     }
 
     override fun onDestroy() {
+        NexusApplication.instance.exoPlayer = null
         serviceScope.cancel()
         try { unregisterReceiver(notificationReceiver) } catch (_: Exception) {}
         player?.release(); player = null
