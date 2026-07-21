@@ -38,6 +38,7 @@ import com.nexus.player.ui.components.*
 import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
 import kotlinx.coroutines.*
+import kotlin.random.Random
 
 enum class MediaTab { AUDIO, VIDEO }
 
@@ -187,8 +188,7 @@ fun ScreenMain() {
     
     fun togglePlayPause() {
         if (currentTrack == null) {
-            val items = if (selectedTab == MediaTab.AUDIO) audioItems else videoItems
-            items.firstOrNull()?.let { startPlayback(it) }
+            (if (selectedTab == MediaTab.AUDIO) audioItems else videoItems).firstOrNull()?.let { startPlayback(it) }
             return
         }
         context.startService(
@@ -425,7 +425,11 @@ fun ScreenMain() {
                         )
                     }
                     Spacer(Modifier.height(24.dp))
-                    SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), isPlaying)
+                    SpectrumVisualizer(
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        frequencyData = FloatArray(64) { Random.nextFloat() },
+                        isPlaying = isPlaying
+                    )
                     Spacer(Modifier.height(16.dp))
                     Text(
                         "ЭКВАЛАЙЗЕР",
