@@ -91,7 +91,7 @@ class CyberPlayerService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
             when (intent.action) {
-                ACTION_PLAY -> player?.play()
+                ACTION_PLAY -> player?.playWhenReady = true
                 ACTION_PAUSE -> player?.pause()
                 ACTION_NEXT -> playNext()
                 ACTION_PREVIOUS -> playPrevious()
@@ -120,38 +120,30 @@ class CyberPlayerService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {}
 
     private fun startForegroundService() {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NEXUS PLAYER")
-            .setContentText("Готов к воспроизведению")
-            .setSmallIcon(R.drawable.ic_neon_skull)
-            .setColor(Color.parseColor("#FF007F"))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("NEXUS PLAYER").setContentText("Готов к воспроизведению")
+            .setSmallIcon(R.drawable.ic_neon_skull).setColor(Color.parseColor("#FF007F"))
+            .setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(true).build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        else startForeground(NOTIFICATION_ID, n)
     }
 
     private fun registerNotificationReceiver() {
-        val filter = IntentFilter().apply {
+        val f = IntentFilter().apply {
             addAction(ACTION_PLAY); addAction(ACTION_PAUSE); addAction(ACTION_NEXT)
             addAction(ACTION_PREVIOUS); addAction(ACTION_STOP); addAction(ACTION_SEEK_TO)
             addAction(ACTION_SET_EQUALIZER)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(notificationReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(notificationReceiver, filter)
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            registerReceiver(notificationReceiver, f, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(notificationReceiver, f)
     }
 
     private fun initializeMediaSession() {
         mediaSession = MediaSessionCompat(this, "NexusPlayer").apply {
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() { player?.play() }
+                override fun onPlay() { player?.playWhenReady = true }
                 override fun onPause() { player?.pause() }
                 override fun onSkipToNext() { playNext() }
                 override fun onSkipToPrevious() { playPrevious() }
@@ -171,23 +163,15 @@ class CyberPlayerService : Service() {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
                         Log.d("NEXUS_PLAYER", "PlaybackState: $state")
-                        if (state == Player.STATE_READY) {
-                            _isPlaying.value = this@apply.isPlaying
-                            updateNotification()
-                            broadcastPlaybackState()
-                        }
+                        if (state == Player.STATE_READY) { _isPlaying.value = this@apply.isPlaying; updateNotification(); broadcastPlaybackState() }
                         if (state == Player.STATE_ENDED) playNext()
                     }
-                    override fun onPlayerError(error: PlaybackException) {
-                        Log.e("NEXUS_PLAYER", "Player error: ${error.errorCodeName}", error)
-                        handlePlaybackError(error)
-                    }
+                    override fun onPlayerError(error: PlaybackException) { Log.e("NEXUS_PLAYER", "Player error: ${error.errorCodeName}", error); handlePlaybackError(error) }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         Log.d("NEXUS_PLAYER", "isPlayingChanged: $isPlaying")
-                        _isPlaying.value = isPlaying
-                        updateNotification()
-                        broadcastPlaybackState()
-                        if (isPlaying) { acquireAudioFocus(); wakeLock?.acquire(3600000) } else wakeLock?.release()
+                        _isPlaying.value = isPlaying; updateNotification(); broadcastPlaybackState()
+                        if (isPlaying) wakeLock?.acquire(3600000)
+                        else safeReleaseWakeLock()
                     }
                 })
             }
@@ -195,12 +179,17 @@ class CyberPlayerService : Service() {
         serviceScope.launch { preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) } }
     }
 
+    private fun safeReleaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (e: Exception) {
+            Log.e("NEXUS_PLAYER", "WakeLock release error", e)
+        }
+    }
+
     private fun startPositionTracking() {
         serviceScope.launch {
-            while (isActive) {
-                player?.let { if (it.isPlaying) { _currentPosition.value = it.currentPosition; broadcastPositionUpdate() } }
-                delay(250)
-            }
+            while (isActive) { player?.let { if (it.isPlaying) { _currentPosition.value = it.currentPosition; broadcastPositionUpdate() } }; delay(250) }
         }
     }
 
@@ -208,12 +197,9 @@ class CyberPlayerService : Service() {
         startForegroundService()
         when (intent?.action) {
             ACTION_PLAY -> {
-                val uriString = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
-                if (uriString != null) {
-                    serviceScope.launch { playFile(uriString, intent.getLongExtra(EXTRA_START_POSITION, 0L)) }
-                } else {
-                    player?.playWhenReady = true
-                }
+                val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
+                if (uri != null) serviceScope.launch { playFile(uri, intent.getLongExtra(EXTRA_START_POSITION, 0L)) }
+                else player?.playWhenReady = true
             }
             ACTION_PAUSE -> player?.pause()
             ACTION_NEXT -> playNext()
@@ -225,7 +211,6 @@ class CyberPlayerService : Service() {
 
     private suspend fun playFile(uriString: String, startPosition: Long = 0L) = withContext(Dispatchers.Main) {
         _playbackState.value = PlaybackResult.Success
-
         val mediaUri = when {
             uriString.startsWith("content://") -> Uri.parse(uriString)
             uriString.startsWith("/") -> Uri.parse("file://$uriString")
@@ -234,8 +219,7 @@ class CyberPlayerService : Service() {
         currentMediaUri = mediaUri
         Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
 
-        val isContentUri = uriString.startsWith("content://")
-        if (!isContentUri) {
+        if (!uriString.startsWith("content://")) {
             val damage = corruptedFileHandler.analyzeDamage(uriString)
             _playbackState.value = damage
             when (damage) {
@@ -249,32 +233,31 @@ class CyberPlayerService : Service() {
             }
         }
 
+        acquireAudioFocus()
         player?.apply {
+            stop()
             setMediaItem(MediaItem.fromUri(mediaUri))
             prepare()
             if (startPosition > 0) seekTo(startPosition)
             playWhenReady = true
         }
+        wakeLock?.acquire(3600000)
         _currentTrack.value = MediaItem.fromUri(mediaUri)
-        updateNotification()
-        broadcastTrackChanged()
+        updateNotification(); broadcastTrackChanged()
     }
 
     private suspend fun repairAndPlay(uriString: String, startPosition: Long) {
         _playbackState.value = PlaybackResult.RecoveryInProgress(0f); broadcastRecoveryProgress(0f)
-        val result = AppModule.provideMediaRepository().repairStream(uriString)
-        when (result) {
-            is PlaybackResult.RecoveryComplete -> {
-                if (result.success && result.recoveredPath != null) playFile(result.recoveredPath, startPosition)
-                else { _playbackState.value = PlaybackResult.FatalError(Exception("Recovery failed"), userMessage = "Не удалось восстановить"); broadcastError("Не удалось восстановить") }
-            }
+        when (val r = AppModule.provideMediaRepository().repairStream(uriString)) {
+            is PlaybackResult.RecoveryComplete -> if (r.success && r.recoveredPath != null) playFile(r.recoveredPath, startPosition)
+            else { _playbackState.value = PlaybackResult.FatalError(Exception("Recovery failed"), userMessage = "Не удалось восстановить"); broadcastError("Не удалось восстановить") }
             else -> {}
         }
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
         Log.e("NEXUS_PLAYER", "Playback error: ${error.errorCodeName}", error)
-        val result = when {
+        _playbackState.value = when {
             error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS || error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
                 PlaybackResult.FatalError(throwable = error, userMessage = "Файл не найден или поврежден")
             error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED || error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED -> {
@@ -283,8 +266,6 @@ class CyberPlayerService : Service() {
             }
             else -> PlaybackResult.FatalError(throwable = error, userMessage = "Неизвестная ошибка")
         }
-        _playbackState.value = result
-        if (result is PlaybackResult.FatalError) broadcastError(result.userMessage)
         updateNotification()
     }
 
@@ -292,25 +273,28 @@ class CyberPlayerService : Service() {
     private fun playPrevious() { player?.seekTo(0); player?.playWhenReady = true; broadcastTrackChanged() }
 
     private fun acquireAudioFocus() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(AudioAttributes.USAGE_MEDIA).build())
-                .setOnAudioFocusChangeListener {
-                    when (it) {
-                        AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
-                        AudioManager.AUDIOFOCUS_GAIN -> { player?.volume = 1.0f; player?.playWhenReady = true }
-                    }
-                }.build()
-            audioFocusRequest?.let { audioManager?.requestAudioFocus(it) }
-        } else {
-            @Suppress("DEPRECATION") audioManager?.requestAudioFocus({ if (it == AudioManager.AUDIOFOCUS_LOSS) player?.pause() else player?.playWhenReady = true }, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        audioManager?.let { am ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(AudioAttributes.USAGE_MEDIA).build())
+                    .setOnAudioFocusChangeListener {
+                        when (it) {
+                            AudioManager.AUDIOFOCUS_LOSS -> player?.pause()
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> player?.pause()
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.volume = 0.2f
+                            AudioManager.AUDIOFOCUS_GAIN -> { player?.volume = 1.0f; player?.playWhenReady = true }
+                        }
+                    }.build()
+                audioFocusRequest?.let { am.requestAudioFocus(it) }
+            } else {
+                @Suppress("DEPRECATION") am.requestAudioFocus({ if (it == AudioManager.AUDIOFOCUS_LOSS) player?.pause() }, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            }
         }
     }
 
     private fun updateNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
@@ -323,8 +307,7 @@ class CyberPlayerService : Service() {
         .addAction(if (player?.isPlaying == true) R.drawable.ic_pause else R.drawable.ic_play, "Play/Pause", createPI(if (player?.isPlaying == true) ACTION_PAUSE else ACTION_PLAY))
         .addAction(R.drawable.ic_next, "Next", createPI(ACTION_NEXT))
         .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession?.sessionToken).setShowActionsInCompactView(0, 1, 2))
-        .apply { player?.let { if (it.duration > 0) setProgress(it.duration.toInt(), it.currentPosition.toInt(), false) else setProgress(0, 0, true) } }
-        .build()
+        .apply { player?.let { if (it.duration > 0) setProgress(it.duration.toInt(), it.currentPosition.toInt(), false) else setProgress(0, 0, true) } }.build()
 
     private fun showErrorNotification(msg: String) = (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID + 1, NotificationCompat.Builder(this, ERROR_CHANNEL_ID).setContentTitle("Ошибка").setContentText(msg).setSmallIcon(R.drawable.ic_error).setColor(Color.RED).setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).build())
     private fun showDamageNotification(d: PlaybackResult.CorruptedButPlaying) = (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID + 2, NotificationCompat.Builder(this, ERROR_CHANNEL_ID).setContentTitle("Повреждённые данные").setContentText(d.message).setSmallIcon(R.drawable.ic_warning).setColor(Color.YELLOW).setPriority(NotificationCompat.PRIORITY_DEFAULT).setAutoCancel(true).setTimeoutAfter(5000).build())
@@ -351,7 +334,7 @@ class CyberPlayerService : Service() {
         player?.release(); player = null
         mediaSession?.release(); mediaSession = null
         audioFocusRequest?.let { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) audioManager?.abandonAudioFocusRequest(it) }
-        wakeLock?.let { if (it.isHeld) it.release() }
+        safeReleaseWakeLock()
         super.onDestroy()
     }
 
