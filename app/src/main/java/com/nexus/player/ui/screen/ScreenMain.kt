@@ -48,6 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -68,6 +71,13 @@ import kotlinx.coroutines.flow.*
 import kotlin.OptIn
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+// Вспомогательная функция для безопасного получения Activity из Context
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 enum class MediaTab { AUDIO, VIDEO }
 enum class RepeatMode { OFF, ALL, ONE }
@@ -220,6 +230,18 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
 
+    // Включение иммерсивного режима: скрытие системных шторки и панели навигации при старте
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(activity) {
+        activity?.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose { }
+    }
+
     // Состояние видимости панелей управления для автоскрытия через 5 секунд
     var showControls by remember { mutableStateOf(true) }
 
@@ -305,6 +327,8 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun startPlayback(item: MediaItem) {
         onUserInteraction()
         viewModel.setCurrentTrack(item)
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        viewModel.onPlaybackStateChanged(true, player?.currentPosition ?: 0L, player?.duration ?: item.duration)
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
@@ -318,20 +342,25 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it) }
             return
         }
-        // Мгновенное управление напрямую через ExoPlayer для 100% надежной паузы
+        
         val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        // Определяем будущее действие ДО изменения состояния плеера
+        val willPlay = if (player != null) !player.isPlaying else !state.isPlaying
+
         if (player != null) {
-            if (player.isPlaying) {
-                player.pause()
-                viewModel.onPlaybackStateChanged(false, player.currentPosition, player.duration)
-            } else {
+            if (willPlay) {
                 player.play()
-                viewModel.onPlaybackStateChanged(true, player.currentPosition, player.duration)
+            } else {
+                player.pause()
             }
+            viewModel.onPlaybackStateChanged(willPlay, player.currentPosition, player.duration)
+        } else {
+            viewModel.onPlaybackStateChanged(willPlay, state.currentPosition, state.duration)
         }
-        // Синхронизация с уведомлением в сервисе
+
+        // Отправляем строго синхронизированную команду сервису
         val intent = Intent(context, CyberPlayerService::class.java).apply {
-            action = if (state.isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY
+            action = if (willPlay) CyberPlayerService.ACTION_PLAY else CyberPlayerService.ACTION_PAUSE
         }
         try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
     }
@@ -389,11 +418,11 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     fun enterPiP() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val activity = context as? Activity ?: return
+            val act = context.findActivity() ?: return
             if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
                 try {
                     val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-                    activity.enterPictureInPictureMode(params)
+                    act.enterPictureInPictureMode(params)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -637,7 +666,7 @@ private fun PlayerView(
         detectDragGestures(
             onDragStart = {
                 onInteraction()
-                val act = context as? Activity
+                val act = context.findActivity()
                 val bright = act?.window?.attributes?.screenBrightness ?: -1f
                 brightnessAccumulator = if (bright < 0) 0.5f else bright
                 volumeAccumulator = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
@@ -664,7 +693,7 @@ private fun PlayerView(
                         change.position.x < w / 2 -> {
                             // Реальное управление аппаратной яркостью экрана
                             brightnessAccumulator = (brightnessAccumulator - dragAmount.y / h).coerceIn(0.01f, 1f)
-                            val act = context as? Activity
+                            val act = context.findActivity()
                             act?.let { activity ->
                                 val lp = activity.window.attributes
                                 lp.screenBrightness = brightnessAccumulator
