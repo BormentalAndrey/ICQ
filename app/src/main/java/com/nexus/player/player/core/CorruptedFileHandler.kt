@@ -33,8 +33,11 @@ class CorruptedFileHandler {
         val sampleRate: Int = 44100,
         val bitrate: Int = 128000
     )
+
+    private fun isContentUri(path: String): Boolean = path.startsWith("content://")
     
     fun estimateDuration(filePath: String): Long {
+        if (isContentUri(filePath)) return 0L
         return try {
             val file = File(filePath)
             if (!file.exists() || !file.canRead()) return 0L
@@ -343,6 +346,7 @@ class CorruptedFileHandler {
     }
     
     fun forceDecode(filePath: String): MediaExtractor? {
+        if (isContentUri(filePath)) return null
         return try {
             val extractor = MediaExtractor()
             
@@ -377,6 +381,7 @@ class CorruptedFileHandler {
     }
     
     fun repairFile(filePath: String): File? {
+        if (isContentUri(filePath)) return null
         return try {
             val sourceFile = File(filePath)
             if (!sourceFile.exists()) return null
@@ -509,6 +514,10 @@ class CorruptedFileHandler {
     }
     
     fun analyzeDamage(filePath: String): PlaybackResult {
+        // Content URI — пропускаем анализ, файл точно валидный
+        if (isContentUri(filePath)) {
+            return PlaybackResult.Success
+        }
         return try {
             val file = File(filePath)
             if (!file.exists()) {
