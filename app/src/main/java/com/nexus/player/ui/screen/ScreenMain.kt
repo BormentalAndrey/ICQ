@@ -71,7 +71,11 @@ class MainViewModel(
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
-    fun startMediaScan() {
+    fun startMediaScan(forceReload: Boolean = false) {
+        if (!forceReload && (_uiState.value.audioItems.isNotEmpty() || _uiState.value.videoItems.isNotEmpty())) {
+            _uiState.update { it.copy(isLoading = false, isScanning = false) }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, isScanning = true) }
             try {
@@ -174,7 +178,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
-        if (perms.values.all { it }) viewModel.startMediaScan()
+        if (perms.values.any { it }) viewModel.startMediaScan()
         else viewModel.setLoading(false)
     }
 
@@ -246,7 +250,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it) }
             return
         }
-        context.startService(Intent(context, CyberPlayerService::class.java).apply {
+        ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
             action = if (state.isPlaying) CyberPlayerService.ACTION_PAUSE else CyberPlayerService.ACTION_PLAY
         })
     }
@@ -267,8 +271,9 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     fun applyPreset(preset: String) {
         viewModel.setPreset(preset)
-        context.startService(Intent(context, CyberPlayerService::class.java).apply {
-            action = CyberPlayerService.ACTION_SET_EQUALIZER; putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
+        ContextCompat.startForegroundService(context, Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_SET_EQUALIZER
+            putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
         })
     }
 
@@ -278,8 +283,12 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 NeonGradientText("NEXUS", fontSize = 32.sp)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.startMediaScan() }) { Icon(Icons.Default.Refresh, "Refresh", tint = if (state.isScanning) NexusColors.NeonPink else NexusColors.Cyan) }
-                    IconButton(onClick = { viewModel.togglePlaylist() }) { Icon(if (state.showPlaylist) Icons.Default.GraphicEq else Icons.Default.QueueMusic, "Playlist", tint = if (state.showPlaylist) NexusColors.NeonPink else NexusColors.Cyan) }
+                    IconButton(onClick = { viewModel.startMediaScan(forceReload = true) }) {
+                        Icon(Icons.Default.Refresh, "Refresh", tint = if (state.isScanning) NexusColors.NeonPink else NexusColors.Cyan)
+                    }
+                    IconButton(onClick = { viewModel.togglePlaylist() }) {
+                        Icon(if (state.showPlaylist) Icons.Default.GraphicEq else Icons.Default.QueueMusic, "Playlist", tint = if (state.showPlaylist) NexusColors.NeonPink else NexusColors.Cyan)
+                    }
                 }
             }
             if (!state.showPlaylist) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -288,38 +297,62 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 Text("🎬 ${state.videoItems.size}", color = NexusColors.Purple, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
             }
             Spacer(Modifier.height(16.dp))
-            if (state.showPlaylist) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    FilterChip(state.selectedTab == MediaTab.AUDIO, { viewModel.selectTab(MediaTab.AUDIO) }, { Text("🎵 АУДИО (${state.audioItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
-                    Spacer(Modifier.width(8.dp))
-                    FilterChip(state.selectedTab == MediaTab.VIDEO, { viewModel.selectTab(MediaTab.VIDEO) }, { Text("🎬 ВИДЕО (${state.videoItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f)))
-                }
-                Spacer(Modifier.height(8.dp))
-                AnimatedVisibility(state.showPlaylist, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()) {
-                    if (state.isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = NexusColors.NeonPink) }
-                    else {
-                        val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
-                        if (items.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily) }
-                        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
-                            items(items, key = { "${it.id}_${it.isVideo}" }) { item ->
-                                MediaItemRow(item, state.currentTrack?.uri.toString() == item.uri.toString() && state.isPlaying) { startPlayback(item) }
+
+            // Fix 1: AnimatedContent вместо if/else для анимации перехода
+            AnimatedContent(
+                targetState = state.showPlaylist,
+                transitionSpec = {
+                    (fadeIn() + slideInVertically()).togetherWith(fadeOut() + slideOutVertically())
+                },
+                label = "PlaylistTransition"
+            ) { show ->
+                if (show) {
+                    // Playlist View
+                    Column {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            FilterChip(state.selectedTab == MediaTab.AUDIO, { viewModel.selectTab(MediaTab.AUDIO) }, { Text("🎵 АУДИО (${state.audioItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
+                            Spacer(Modifier.width(8.dp))
+                            FilterChip(state.selectedTab == MediaTab.VIDEO, { viewModel.selectTab(MediaTab.VIDEO) }, { Text("🎬 ВИДЕО (${state.videoItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f)))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (state.isLoading) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = NexusColors.NeonPink)
+                            }
+                        } else {
+                            val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+                            if (items.isEmpty()) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("НЕТ ФАЙЛОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
+                                }
+                            } else {
+                                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+                                    items(items, key = { "${it.id}_${it.isVideo}" }) { item ->
+                                        MediaItemRow(item, state.currentTrack?.uri.toString() == item.uri.toString() && state.isPlaying) { startPlayback(item) }
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            } else Column(Modifier.fillMaxSize().weight(1f), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
-                Spacer(Modifier.height(32.dp))
-                state.currentTrack?.let {
-                    NeonText(it.name, fontSize = 22.sp, color = NexusColors.Cyan)
-                    Text("${it.artist} — ${it.album}", color = NexusColors.NeonPink, fontSize = 14.sp, fontFamily = CyberpunkFontFamily)
-                } ?: NeonText("NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
-                Spacer(Modifier.height(24.dp))
-                SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { Random.nextFloat() }, state.isPlaying)
-                Spacer(Modifier.height(16.dp))
-                Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика").forEach { FilterChip(state.selectedPreset == it, { applyPreset(it) }, { Text(it, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f))) }
+                } else {
+                    // Player View
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                        GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
+                        Spacer(Modifier.height(32.dp))
+                        state.currentTrack?.let {
+                            NeonText(it.name, fontSize = 22.sp, color = NexusColors.Cyan)
+                            Text("${it.artist} — ${it.album}", color = NexusColors.NeonPink, fontSize = 14.sp, fontFamily = CyberpunkFontFamily)
+                        } ?: NeonText("NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
+                        Spacer(Modifier.height(24.dp))
+                        SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { Random.nextFloat() }, state.isPlaying)
+                        Spacer(Modifier.height(16.dp))
+                        Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика").forEach { preset ->
+                                FilterChip(state.selectedPreset == preset, { applyPreset(preset) }, { Text(preset, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
+                            }
+                        }
+                    }
                 }
             }
         }
