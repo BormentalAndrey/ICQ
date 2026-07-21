@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.nexus.player"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.nexus.player"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
@@ -50,7 +50,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.15"
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
 
     packaging {
