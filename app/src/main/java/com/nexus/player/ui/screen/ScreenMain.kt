@@ -29,13 +29,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.ui.PlayerView
+import com.nexus.player.NexusApplication
 import com.nexus.player.data.model.MediaItem
-import com.nexus.player.data.model.PlaybackResult
 import com.nexus.player.data.repository.MediaRepository
 import com.nexus.player.di.AppModule
 import com.nexus.player.player.service.CyberPlayerService
@@ -254,16 +256,30 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                     }
                 } else {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                        GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
+                        if (state.currentTrack?.isVideo == true) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        player = (ctx.applicationContext as NexusApplication).exoPlayer
+                                        useController = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            )
+                        } else {
+                            GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
+                        }
                         Spacer(Modifier.height(32.dp))
                         state.currentTrack?.let { NeonText(it.name, fontSize = 22.sp, color = NexusColors.Cyan); Text("${it.artist} — ${it.album}", color = NexusColors.NeonPink, fontSize = 14.sp, fontFamily = CyberpunkFontFamily) } ?: NeonText("NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
                         Spacer(Modifier.height(24.dp))
-                        SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { Random.nextFloat() }, state.isPlaying)
-                        Spacer(Modifier.height(16.dp))
-                        Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика").forEach { preset ->
-                                FilterChip(state.selectedPreset == preset, { applyPreset(preset) }, { Text(preset, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
+                        if (state.currentTrack?.isVideo != true) {
+                            SpectrumVisualizer(Modifier.fillMaxWidth().height(120.dp), FloatArray(64) { Random.nextFloat() }, state.isPlaying)
+                            Spacer(Modifier.height(16.dp))
+                            Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                listOf("Flat", "Киберпространство", "Техно-драйв", "Акустика").forEach { preset ->
+                                    FilterChip(state.selectedPreset == preset, { applyPreset(preset) }, { Text(preset, fontSize = 10.sp, fontFamily = CyberpunkFontFamily) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f)))
+                                }
                             }
                         }
                     }
