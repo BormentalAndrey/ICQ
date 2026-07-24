@@ -68,6 +68,7 @@ import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.UUID
 import kotlin.OptIn
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -87,8 +88,14 @@ fun formatMediaTime(millis: Long): String {
     return String.format("%02d:%02d", minutes, seconds)
 }
 
-enum class MediaTab { AUDIO, VIDEO }
+enum class MediaTab { AUDIO, VIDEO, PLAYLISTS }
 enum class RepeatMode { OFF, ALL, ONE }
+
+data class CustomPlaylist(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val trackUris: List<String> = emptyList()
+)
 
 data class PlayerUiState(
     val audioItems: List<MediaItem> = emptyList(),
@@ -110,7 +117,10 @@ data class PlayerUiState(
     val searchQuery: String = "",
     val playbackSpeed: Float = 1.0f,
     val isShuffle: Boolean = false,
-    val repeatMode: RepeatMode = RepeatMode.OFF
+    val repeatMode: RepeatMode = RepeatMode.OFF,
+    val customPlaylists: List<CustomPlaylist> = emptyList(),
+    val showCreatePlaylistDialog: Boolean = false,
+    val trackToAddUri: String? = null
 )
 
 class MainViewModel(
@@ -178,6 +188,52 @@ class MainViewModel(
     fun showGestureIndicator(text: String) { _uiState.update { it.copy(gestureIndicator = text) } }
     fun hideGestureIndicator() { _uiState.update { it.copy(gestureIndicator = null) } }
     fun updateSearchQuery(query: String) { _uiState.update { it.copy(searchQuery = query) } }
+
+    fun createPlaylist(name: String) {
+        if (name.isBlank()) return
+        _uiState.update { state ->
+            val newPlaylist = CustomPlaylist(name = name.trim())
+            state.copy(
+                customPlaylists = state.customPlaylists + newPlaylist,
+                showCreatePlaylistDialog = false
+            )
+        }
+    }
+
+    fun deletePlaylist(playlistId: String) {
+        _uiState.update { state ->
+            state.copy(customPlaylists = state.customPlaylists.filterNot { it.id == playlistId })
+        }
+    }
+
+    fun addTrackToPlaylist(playlistId: String, trackUri: String) {
+        _uiState.update { state ->
+            val updated = state.customPlaylists.map { pl ->
+                if (pl.id == playlistId && !pl.trackUris.contains(trackUri)) {
+                    pl.copy(trackUris = pl.trackUris + trackUri)
+                } else pl
+            }
+            state.copy(customPlaylists = updated, trackToAddUri = null)
+        }
+    }
+
+    fun removeTrackFromPlaylist(playlistId: String, trackUri: String) {
+        _uiState.update { state ->
+            val updated = state.customPlaylists.map { pl ->
+                if (pl.id == playlistId) pl.copy(trackUris = pl.trackUris.filterNot { it == trackUri })
+                else pl
+            }
+            state.copy(customPlaylists = updated)
+        }
+    }
+
+    fun showCreatePlaylistDialog(show: Boolean) {
+        _uiState.update { it.copy(showCreatePlaylistDialog = show) }
+    }
+
+    fun openAddToPlaylistMenu(trackUri: String?) {
+        _uiState.update { it.copy(trackToAddUri = trackUri) }
+    }
 
     fun toggleShuffle(context: Context) {
         _uiState.update { state ->
@@ -341,13 +397,27 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         onDispose { try { context.unregisterReceiver(receiver) } catch (_: Exception) {} }
     }
 
-    fun startPlayback(item: MediaItem) {
+    fun startPlayback(item: MediaItem, customQueue: List<MediaItem>? = null) {
         onUserInteraction()
         viewModel.setCurrentTrack(item)
-        // Автоматически переходим в экран плеера при выборе медиафайла!
         viewModel.showPlayer()
+        
         val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        viewModel.onPlaybackStateChanged(true, player?.currentPosition ?: 0L, player?.duration ?: item.duration)
+        val queue = customQueue ?: if (item.isVideo) state.videoItems else state.audioItems
+        
+        if (player != null && queue.isNotEmpty()) {
+            val media3Items = queue.map { 
+                androidx.media3.common.MediaItem.fromUri(it.uri) 
+            }
+            val startIndex = queue.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
+            
+            player.setMediaItems(media3Items, startIndex, 0L)
+            player.prepare()
+            player.play()
+            
+            viewModel.onPlaybackStateChanged(true, 0L, item.duration)
+        }
+
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
@@ -358,7 +428,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun togglePlayPause() {
         onUserInteraction()
         if (state.currentTrack == null) {
-            (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it) }
+            (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it, null) }
             return
         }
         
@@ -393,7 +463,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             idx < items.size - 1 -> idx + 1
             else -> 0
         }
-        startPlayback(items[nextIdx])
+        startPlayback(items[nextIdx], null)
     }
 
     fun playPrevious() {
@@ -407,7 +477,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             idx > 0 -> idx - 1
             else -> items.size - 1
         }
-        startPlayback(items[prevIdx])
+        startPlayback(items[prevIdx], null)
     }
 
     fun performSeek(position: Long) {
@@ -481,7 +551,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 label = "PlaylistTransition"
             ) { show ->
                 if (show) {
-                    // Выбор музыки и видео происходит только здесь — на главном экране!
                     PlaylistView(state, viewModel, ::startPlayback)
                 } else {
                     PlayerView(
@@ -543,7 +612,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             }
         }
 
-        // Всплывающее окно индикатора жестов (перемотка во времени, громкость, яркость)
         state.gestureIndicator?.let { text ->
             Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Card(
@@ -569,76 +637,229 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 QueuePanel(state, ::startPlayback)
             }
         }
+
+        // Диалог создания плейлиста
+        if (state.showCreatePlaylistDialog) {
+            var playlistName by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { viewModel.showCreatePlaylistDialog(false) },
+                containerColor = Color.Black.copy(alpha = 0.9f),
+                title = { Text("НОВЫЙ ПЛЕЙЛИСТ", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily) },
+                text = {
+                    OutlinedTextField(
+                        value = playlistName,
+                        onValueChange = { playlistName = it },
+                        placeholder = { Text("Имя (напр. CYBER RUN)", color = Color.Gray, fontFamily = CyberpunkFontFamily) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NexusColors.NeonPink, unfocusedBorderColor = NexusColors.Cyan, cursorColor = NexusColors.NeonPink),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White, fontFamily = CyberpunkFontFamily)
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.createPlaylist(playlistName) }) {
+                        Text("СОЗДАТЬ", color = NexusColors.NeonPink, fontFamily = CyberpunkFontFamily, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.showCreatePlaylistDialog(false) }) {
+                        Text("ОТМЕНА", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily)
+                    }
+                }
+            )
+        }
+
+        // Диалог добавления трека в существующие плейлисты
+        state.trackToAddUri?.let { uri ->
+            AlertDialog(
+                onDismissRequest = { viewModel.openAddToPlaylistMenu(null) },
+                containerColor = Color.Black.copy(alpha = 0.95f),
+                title = { Text("ДОБАВИТЬ В ПЛЕЙЛИСТ", color = NexusColors.NeonPink, fontFamily = CyberpunkFontFamily) },
+                text = {
+                    if (state.customPlaylists.isEmpty()) {
+                        Text("Сначала создайте плейлист во вкладке 'ПЛЕЙЛИСТЫ'", color = Color.White, fontFamily = CyberpunkFontFamily)
+                    } else {
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 250.dp)) {
+                            items(state.customPlaylists) { playlist ->
+                                val isAdded = playlist.trackUris.contains(uri)
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        if (isAdded) viewModel.removeTrackFromPlaylist(playlist.id, uri)
+                                        else viewModel.addTrackToPlaylist(playlist.id, uri)
+                                    }.padding(vertical = 12.dp, horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(playlist.name, color = Color.White, fontFamily = CyberpunkFontFamily, fontSize = 16.sp)
+                                    Icon(
+                                        if (isAdded) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
+                                        contentDescription = null,
+                                        tint = if (isAdded) NexusColors.NeonGreen else NexusColors.Cyan
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.openAddToPlaylistMenu(null) }) {
+                        Text("ГОТОВО", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay: (MediaItem) -> Unit) {
+private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay: (MediaItem, List<MediaItem>?) -> Unit) {
     val focusManager = LocalFocusManager.current
     Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             FilterChip(
                 selected = state.selectedTab == MediaTab.AUDIO,
                 onClick = { viewModel.selectTab(MediaTab.AUDIO) },
-                label = { Text("🎵 АУДИО (${state.audioItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) },
+                label = { Text("🎵 АУДИО (${state.audioItems.size})", fontSize = 11.sp, fontFamily = CyberpunkFontFamily) },
                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.NeonPink.copy(alpha = 0.3f), selectedLabelColor = NexusColors.NeonPink)
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             FilterChip(
                 selected = state.selectedTab == MediaTab.VIDEO,
                 onClick = { viewModel.selectTab(MediaTab.VIDEO) },
-                label = { Text("🎬 ВИДЕО (${state.videoItems.size})", fontSize = 12.sp, fontFamily = CyberpunkFontFamily) },
+                label = { Text("🎬 ВИДЕО (${state.videoItems.size})", fontSize = 11.sp, fontFamily = CyberpunkFontFamily) },
                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Purple.copy(alpha = 0.3f), selectedLabelColor = NexusColors.Purple)
+            )
+            Spacer(Modifier.width(6.dp))
+            FilterChip(
+                selected = state.selectedTab == MediaTab.PLAYLISTS,
+                onClick = { viewModel.selectTab(MediaTab.PLAYLISTS) },
+                label = { Text("📁 ПЛЕЙЛИСТЫ (${state.customPlaylists.size})", fontSize = 11.sp, fontFamily = CyberpunkFontFamily) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NexusColors.Cyan.copy(alpha = 0.3f), selectedLabelColor = NexusColors.Cyan)
             )
         }
         Spacer(Modifier.height(12.dp))
         
-        OutlinedTextField(
-            value = state.searchQuery,
-            onValueChange = { viewModel.updateSearchQuery(it) },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            placeholder = { Text("ПОИСК В БАЗЕ NEXUS...", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NexusColors.Cyan) },
-            trailingIcon = {
-                if (state.searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = NexusColors.NeonPink)
-                    }
-                }
-            },
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = NexusColors.White, fontFamily = CyberpunkFontFamily),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NexusColors.NeonPink,
-                unfocusedBorderColor = NexusColors.Cyan.copy(alpha = 0.5f),
-                cursorColor = NexusColors.NeonPink
-            )
-        )
-        Spacer(Modifier.height(12.dp))
-
-        if (state.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = NexusColors.NeonPink)
-            }
+        if (state.selectedTab == MediaTab.PLAYLISTS) {
+            PlaylistsTabView(state, viewModel, onPlay)
         } else {
-            val rawItems = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
-            val items = if (state.searchQuery.isBlank()) rawItems else rawItems.filter {
-                it.name.contains(state.searchQuery, ignoreCase = true) ||
-                it.artist.contains(state.searchQuery, ignoreCase = true) ||
-                it.album.contains(state.searchQuery, ignoreCase = true)
-            }
-            if (items.isEmpty()) {
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = { viewModel.updateSearchQuery(it) },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                placeholder = { Text("ПОИСК В БАЗЕ NEXUS...", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NexusColors.Cyan) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = NexusColors.NeonPink)
+                        }
+                    }
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = NexusColors.White, fontFamily = CyberpunkFontFamily),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NexusColors.NeonPink,
+                    unfocusedBorderColor = NexusColors.Cyan.copy(alpha = 0.5f),
+                    cursorColor = NexusColors.NeonPink
+                )
+            )
+            Spacer(Modifier.height(12.dp))
+
+            if (state.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("НИЧЕГО НЕ НАЙДЕНО", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
+                    CircularProgressIndicator(color = NexusColors.NeonPink)
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
-                    items(items, key = { "${it.id}_${it.isVideo}_${it.uri}" }) { item ->
-                        MediaItemRow(item, state.currentTrack?.uri == item.uri && state.isPlaying) { onPlay(item) }
+                val rawItems = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+                val items = if (state.searchQuery.isBlank()) rawItems else rawItems.filter {
+                    it.name.contains(state.searchQuery, ignoreCase = true) ||
+                    it.artist.contains(state.searchQuery, ignoreCase = true) ||
+                    it.album.contains(state.searchQuery, ignoreCase = true)
+                }
+                if (items.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("НИЧЕГО НЕ НАЙДЕНО", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+                        items(items, key = { "${it.id}_${it.isVideo}_${it.uri}" }) { item ->
+                            MediaItemRow(
+                                item = item, 
+                                isPlaying = state.currentTrack?.uri == item.uri && state.isPlaying,
+                                onClick = { onPlay(item, null) },
+                                onAddToPlaylist = { viewModel.openAddToPlaylistMenu(item.uri.toString()) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlaylistsTabView(
+    state: PlayerUiState,
+    viewModel: MainViewModel,
+    onPlay: (MediaItem, List<MediaItem>?) -> Unit
+) {
+    val allMedia = remember(state.audioItems, state.videoItems) {
+        state.audioItems + state.videoItems
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Button(
+            onClick = { viewModel.showCreatePlaylistDialog(true) },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = NexusColors.NeonPink.copy(alpha = 0.8f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(8.dp))
+            Text("СОЗДАТЬ КИБЕР-ПЛЕЙЛИСТ", fontFamily = CyberpunkFontFamily, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        Spacer(Modifier.height(16.dp))
+
+        if (state.customPlaylists.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("НЕТ СОЗДАННЫХ ПЛЕЙЛИСТОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+                items(state.customPlaylists, key = { it.id }) { playlist ->
+                    val playlistTracks = remember(playlist.trackUris, allMedia) {
+                        allMedia.filter { playlist.trackUris.contains(it.uri.toString()) }
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        colors = CardDefaults.cardColors(containerColor = NexusColors.GlassBlack),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NexusColors.Cyan.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(playlist.name, style = MaterialTheme.typography.titleLarge, color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontWeight = FontWeight.Bold)
+                                    Text("ТРЕКОВ: ${playlistTracks.size}", style = MaterialTheme.typography.bodySmall, color = NexusColors.White.copy(alpha = 0.6f), fontFamily = CyberpunkFontFamily)
+                                }
+                                Row {
+                                    if (playlistTracks.isNotEmpty()) {
+                                        IconButton(onClick = { 
+                                            onPlay(playlistTracks.first(), playlistTracks) 
+                                        }) {
+                                            Icon(Icons.Default.PlayCircleOutline, "Play Playlist", tint = NexusColors.NeonGreen, modifier = Modifier.size(32.dp))
+                                        }
+                                    }
+                                    IconButton(onClick = { viewModel.deletePlaylist(playlist.id) }) {
+                                        Icon(Icons.Default.DeleteOutline, "Delete", tint = NexusColors.BloodRed)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -654,7 +875,7 @@ private fun PlayerView(
     showControls: Boolean,
     onInteraction: () -> Unit,
     onToggleControls: () -> Unit,
-    onPlay: (MediaItem) -> Unit,
+    onPlay: (MediaItem, List<MediaItem>?) -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -712,7 +933,6 @@ private fun PlayerView(
                 volumeAccumulator = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
             },
             onDragEnd = {
-                // Реальная перемотка в плеере происходит строго 1 раз — при отпускании пальца!
                 if (dragMode == "SEEK" && currentState.duration > 0) {
                     currentOnSeek(seekTargetPosition)
                 }
@@ -740,7 +960,6 @@ private fun PlayerView(
                     when (dragMode) {
                         "SEEK" -> {
                             if (currentState.duration > 0) {
-                                // Рассчитываем смещение относительно ширины экрана и прибавляем к точке старта
                                 accumulatedSeekMillis += (dragAmount.x / w) * currentState.duration.toFloat()
                                 seekTargetPosition = (seekStartPosition + accumulatedSeekMillis.toLong()).coerceIn(0L, currentState.duration)
                                 
@@ -750,9 +969,7 @@ private fun PlayerView(
                                 val targetStr = formatMediaTime(seekTargetPosition)
                                 val durationStr = formatMediaTime(currentState.duration)
                                 
-                                // Показываем точное время и смещение на экране
                                 viewModel.showGestureIndicator("$arrow $targetStr / $durationStr ($sign${diffSeconds}с)")
-                                // Плавный сдвиг ползунка в UI без дергания декодера плеера
                                 viewModel.onPositionUpdated(seekTargetPosition, currentState.duration)
                             }
                         }
@@ -811,7 +1028,6 @@ private fun PlayerView(
             Box(Modifier.fillMaxWidth().then(if (state.isFullScreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))) {
                 AndroidView(
                     factory = { ctx ->
-                        // Явное указание полного пути устраняет коллизию с Composable-функцией PlayerView
                         androidx.media3.ui.PlayerView(ctx).apply {
                             player = (ctx.applicationContext as? NexusApplication)?.exoPlayer
                             useController = false
@@ -944,7 +1160,7 @@ private fun FullScreenControls(
 }
 
 @Composable
-private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem) -> Unit) {
+private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem, List<MediaItem>?) -> Unit) {
     Card(
         Modifier.fillMaxWidth().height(320.dp).padding(16.dp).shadow(16.dp, RoundedCornerShape(20.dp)),
         colors = CardDefaults.cardColors(containerColor = NexusColors.DarkGrey.copy(alpha = 0.98f)),
@@ -966,7 +1182,7 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem) -> Unit) {
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isCurrent) NexusColors.NeonPink.copy(alpha = 0.15f) else Color.Transparent)
-                            .clickable { onPlay(item) }
+                            .clickable { onPlay(item, null) }
                             .padding(vertical = 8.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1000,7 +1216,7 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem) -> Unit) {
 }
 
 @Composable
-fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
+fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit, onAddToPlaylist: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.22f) else NexusColors.GlassBlack),
@@ -1027,6 +1243,10 @@ fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit) {
                 Text(item.artist, style = MaterialTheme.typography.bodySmall, color = NexusColors.White.copy(alpha = 0.6f), fontFamily = CyberpunkFontFamily)
             }
             Text(item.formattedDuration, style = MaterialTheme.typography.bodySmall, color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily)
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.PlaylistAdd, contentDescription = "Add to playlist", tint = NexusColors.NeonPink)
+            }
         }
     }
 }
