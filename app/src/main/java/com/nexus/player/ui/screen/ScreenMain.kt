@@ -242,14 +242,24 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     // Включение иммерсивного режима: скрытие системных шторок и панели навигации
     val activity = remember(context) { context.findActivity() }
-    DisposableEffect(activity) {
+    DisposableEffect(activity, state.isFullScreen) {
         activity?.window?.let { window ->
             WindowCompat.setDecorFitsSystemWindows(window, false)
             val controller = WindowCompat.getInsetsController(window, window.decorView)
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (state.isFullScreen) {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
         }
-        onDispose { }
+        onDispose {
+            activity?.window?.let { window ->
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+        }
     }
 
     var showControls by remember { mutableStateOf(true) }
@@ -342,7 +352,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             action = CyberPlayerService.ACTION_PLAY
             putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
         }
-        ContextCompat.startForegroundService(context, intent)
+        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
     }
 
     fun togglePlayPause() {
@@ -659,6 +669,12 @@ private fun PlayerView(
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
+    // Захват актуального состояния для жестов без перезапуска pointerInput
+    val currentState by rememberUpdatedState(state)
+    val currentOnSeek by rememberUpdatedState(onSeek)
+    val currentOnInteraction by rememberUpdatedState(onInteraction)
+    val currentOnToggleControls by rememberUpdatedState(onToggleControls)
+
     // Переменные для точной фиксации жестов без сброса позиции плеера
     var dragMode by remember { mutableStateOf<String?>(null) } // "SEEK", "BRIGHTNESS", "VOLUME"
     var seekStartPosition by remember { mutableLongStateOf(0L) }
@@ -668,15 +684,27 @@ private fun PlayerView(
     var brightnessAccumulator by remember { mutableFloatStateOf(0.5f) }
     var volumeAccumulator by remember { mutableFloatStateOf(0.5f) }
 
+    // Реактивная анимация спектра визуализатора при воспроизведении
+    var spectrumData by remember { mutableStateOf(FloatArray(64) { 0.1f }) }
+    LaunchedEffect(state.isPlaying) {
+        while (state.isPlaying) {
+            spectrumData = FloatArray(64) { (kotlin.random.Random.nextFloat() * 0.85f + 0.15f).coerceIn(0.05f, 1f) }
+            delay(80)
+        }
+        if (!state.isPlaying) {
+            spectrumData = FloatArray(64) { 0.05f }
+        }
+    }
+
     val gestureModifier = Modifier.pointerInput(Unit) {
         detectDragGestures(
             onDragStart = {
-                onInteraction()
+                currentOnInteraction()
                 dragMode = null
                 accumulatedSeekMillis = 0f
-                // Запоминаем точную точку старта свайпа!
-                seekStartPosition = state.currentPosition
-                seekTargetPosition = state.currentPosition
+                // Запоминаем точную точку старта свайпа из актуального состояния!
+                seekStartPosition = currentState.currentPosition
+                seekTargetPosition = currentState.currentPosition
                 
                 val act = context.findActivity()
                 val bright = act?.window?.attributes?.screenBrightness ?: -1f
@@ -685,20 +713,20 @@ private fun PlayerView(
             },
             onDragEnd = {
                 // Реальная перемотка в плеере происходит строго 1 раз — при отпускании пальца!
-                if (dragMode == "SEEK" && state.duration > 0) {
-                    onSeek(seekTargetPosition)
+                if (dragMode == "SEEK" && currentState.duration > 0) {
+                    currentOnSeek(seekTargetPosition)
                 }
                 dragMode = null
             },
             onDragCancel = {
-                if (dragMode == "SEEK" && state.duration > 0) {
-                    onSeek(seekTargetPosition)
+                if (dragMode == "SEEK" && currentState.duration > 0) {
+                    currentOnSeek(seekTargetPosition)
                 }
                 dragMode = null
             },
             onDrag = { change, dragAmount ->
                 change.consume()
-                onInteraction()
+                currentOnInteraction()
                 val w = size.width.toFloat()
                 val h = size.height.toFloat()
                 if (w > 0 && h > 0) {
@@ -711,21 +739,21 @@ private fun PlayerView(
                     }
                     when (dragMode) {
                         "SEEK" -> {
-                            if (state.duration > 0) {
+                            if (currentState.duration > 0) {
                                 // Рассчитываем смещение относительно ширины экрана и прибавляем к точке старта
-                                accumulatedSeekMillis += (dragAmount.x / w) * state.duration.toFloat()
-                                seekTargetPosition = (seekStartPosition + accumulatedSeekMillis.toLong()).coerceIn(0L, state.duration)
+                                accumulatedSeekMillis += (dragAmount.x / w) * currentState.duration.toFloat()
+                                seekTargetPosition = (seekStartPosition + accumulatedSeekMillis.toLong()).coerceIn(0L, currentState.duration)
                                 
                                 val diffSeconds = (seekTargetPosition - seekStartPosition) / 1000L
                                 val sign = if (diffSeconds >= 0) "+" else ""
                                 val arrow = if (diffSeconds >= 0) "⏩" else "⏪"
                                 val targetStr = formatMediaTime(seekTargetPosition)
-                                val durationStr = formatMediaTime(state.duration)
+                                val durationStr = formatMediaTime(currentState.duration)
                                 
                                 // Показываем точное время и смещение на экране
                                 viewModel.showGestureIndicator("$arrow $targetStr / $durationStr ($sign${diffSeconds}с)")
                                 // Плавный сдвиг ползунка в UI без дергания декодера плеера
-                                viewModel.onPositionUpdated(seekTargetPosition, state.duration)
+                                viewModel.onPositionUpdated(seekTargetPosition, currentState.duration)
                             }
                         }
                         "BRIGHTNESS" -> {
@@ -753,17 +781,17 @@ private fun PlayerView(
 
     val tapModifier = Modifier.pointerInput(Unit) {
         detectTapGestures(
-            onTap = { onToggleControls() },
+            onTap = { currentOnToggleControls() },
             onDoubleTap = { offset ->
-                onInteraction()
+                currentOnInteraction()
                 val w = size.width
                 if (offset.x < w / 2) {
-                    val newPos = (state.currentPosition - 10000L).coerceAtLeast(0L)
-                    onSeek(newPos)
+                    val newPos = (currentState.currentPosition - 10000L).coerceAtLeast(0L)
+                    currentOnSeek(newPos)
                     viewModel.showGestureIndicator("⏪ -10с (${formatMediaTime(newPos)})")
                 } else {
-                    val newPos = (state.currentPosition + 10000L).coerceAtMost(if (state.duration > 0) state.duration else Long.MAX_VALUE)
-                    onSeek(newPos)
+                    val newPos = (currentState.currentPosition + 10000L).coerceAtMost(if (currentState.duration > 0) currentState.duration else Long.MAX_VALUE)
+                    currentOnSeek(newPos)
                     viewModel.showGestureIndicator("⏩ +10с (${formatMediaTime(newPos)})")
                 }
             }
@@ -783,13 +811,14 @@ private fun PlayerView(
             Box(Modifier.fillMaxWidth().then(if (state.isFullScreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))) {
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            player = (ctx.applicationContext as NexusApplication).exoPlayer
+                        // Явное указание полного пути устраняет коллизию с Composable-функцией PlayerView
+                        androidx.media3.ui.PlayerView(ctx).apply {
+                            player = (ctx.applicationContext as? NexusApplication)?.exoPlayer
                             useController = false
                         }
                     },
                     update = { view ->
-                        view.player = (view.context.applicationContext as NexusApplication).exoPlayer
+                        view.player = (view.context.applicationContext as? NexusApplication)?.exoPlayer
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -860,7 +889,7 @@ private fun PlayerView(
 
                     if (state.currentTrack?.isVideo != true) {
                         Spacer(Modifier.height(12.dp))
-                        SpectrumVisualizer(Modifier.fillMaxWidth().height(100.dp), FloatArray(64) { kotlin.random.Random.nextFloat() }, state.isPlaying)
+                        SpectrumVisualizer(Modifier.fillMaxWidth().height(100.dp), spectrumData, state.isPlaying)
                         Spacer(Modifier.height(12.dp))
                         Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
