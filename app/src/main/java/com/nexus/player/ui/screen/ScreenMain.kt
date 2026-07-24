@@ -79,6 +79,14 @@ tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+// Форматирование времени в мм:сс для индикатора перемотки
+fun formatMediaTime(millis: Long): String {
+    val totalSeconds = (millis / 1000).coerceAtLeast(0)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
+}
+
 enum class MediaTab { AUDIO, VIDEO }
 enum class RepeatMode { OFF, ALL, ONE }
 
@@ -89,7 +97,8 @@ data class PlayerUiState(
     val currentTrack: MediaItem? = null,
     val currentPosition: Long = 0L,
     val duration: Long = 0L,
-    val showPlaylist: Boolean = false,
+    // По умолчанию открываем главный экран библиотеки (выбор музыки и видео)
+    val showPlaylist: Boolean = true,
     val selectedTab: MediaTab = MediaTab.AUDIO,
     val selectedPreset: String = "Flat",
     val isLoading: Boolean = true,
@@ -160,6 +169,7 @@ class MainViewModel(
 
     fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track) } }
     fun togglePlaylist() { _uiState.update { it.copy(showPlaylist = !it.showPlaylist) } }
+    fun showPlayer() { _uiState.update { it.copy(showPlaylist = false) } }
     fun toggleQueue() { _uiState.update { it.copy(showQueue = !it.showQueue) } }
     fun selectTab(tab: MediaTab) { _uiState.update { it.copy(selectedTab = tab) } }
     fun setPreset(preset: String) { _uiState.update { it.copy(selectedPreset = preset) } }
@@ -230,7 +240,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
 
-    // Включение иммерсивного режима: скрытие системных шторки и панели навигации при старте
+    // Включение иммерсивного режима: скрытие системных шторок и панели навигации
     val activity = remember(context) { context.findActivity() }
     DisposableEffect(activity) {
         activity?.window?.let { window ->
@@ -242,10 +252,8 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         onDispose { }
     }
 
-    // Состояние видимости панелей управления для автоскрытия через 5 секунд
     var showControls by remember { mutableStateOf(true) }
 
-    // Автоматическое скрытие значка жеста (громкость/яркость/перемотка) через 1.2 секунды
     LaunchedEffect(state.gestureIndicator) {
         if (state.gestureIndicator != null) {
             delay(1200)
@@ -253,7 +261,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         }
     }
 
-    // Автоматическое скрытие панелей управления через 5 секунд воспроизведения
     LaunchedEffect(showControls, state.isPlaying, state.showPlaylist) {
         if (showControls && state.isPlaying && !state.showPlaylist) {
             delay(5000)
@@ -327,6 +334,8 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     fun startPlayback(item: MediaItem) {
         onUserInteraction()
         viewModel.setCurrentTrack(item)
+        // Автоматически переходим в экран плеера при выборе медиафайла!
+        viewModel.showPlayer()
         val player = (context.applicationContext as? NexusApplication)?.exoPlayer
         viewModel.onPlaybackStateChanged(true, player?.currentPosition ?: 0L, player?.duration ?: item.duration)
         val intent = Intent(context, CyberPlayerService::class.java).apply {
@@ -344,7 +353,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         }
         
         val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        // Определяем будущее действие ДО изменения состояния плеера
         val willPlay = if (player != null) !player.isPlaying else !state.isPlaying
 
         if (player != null) {
@@ -358,7 +366,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             viewModel.onPlaybackStateChanged(willPlay, state.currentPosition, state.duration)
         }
 
-        // Отправляем строго синхронизированную команду сервису
         val intent = Intent(context, CyberPlayerService::class.java).apply {
             action = if (willPlay) CyberPlayerService.ACTION_PLAY else CyberPlayerService.ACTION_PAUSE
         }
@@ -451,13 +458,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                             }
                         }
                     }
-                    if (!state.showPlaylist) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                            Text("🎵 ${state.audioItems.size}", color = NexusColors.Cyan, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
-                            Spacer(Modifier.width(16.dp))
-                            Text("🎬 ${state.videoItems.size}", color = NexusColors.Purple, fontFamily = CyberpunkFontFamily, fontSize = 14.sp)
-                        }
-                    }
                     Spacer(Modifier.height(16.dp))
                 }
             }
@@ -471,6 +471,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 label = "PlaylistTransition"
             ) { show ->
                 if (show) {
+                    // Выбор музыки и видео происходит только здесь — на главном экране!
                     PlaylistView(state, viewModel, ::startPlayback)
                 } else {
                     PlayerView(
@@ -532,21 +533,21 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             }
         }
 
-        // Всплывающее окно индикатора жестов (громкость, яркость, перемотка)
+        // Всплывающее окно индикатора жестов (перемотка во времени, громкость, яркость)
         state.gestureIndicator?.let { text ->
             Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.85f)),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.88f)),
                     shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.border(2.dp, NexusColors.Cyan, RoundedCornerShape(24.dp))
                 ) {
                     Text(
                         text = text,
                         color = NexusColors.Cyan,
-                        fontSize = 32.sp,
+                        fontSize = 26.sp,
                         fontFamily = CyberpunkFontFamily,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 20.dp),
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 18.dp),
                         textAlign = TextAlign.Center
                     )
                 }
@@ -658,7 +659,12 @@ private fun PlayerView(
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    var seekAccumulator by remember { mutableFloatStateOf(0f) }
+    // Переменные для точной фиксации жестов без сброса позиции плеера
+    var dragMode by remember { mutableStateOf<String?>(null) } // "SEEK", "BRIGHTNESS", "VOLUME"
+    var seekStartPosition by remember { mutableLongStateOf(0L) }
+    var seekTargetPosition by remember { mutableLongStateOf(0L) }
+    var accumulatedSeekMillis by remember { mutableFloatStateOf(0f) }
+    
     var brightnessAccumulator by remember { mutableFloatStateOf(0.5f) }
     var volumeAccumulator by remember { mutableFloatStateOf(0.5f) }
 
@@ -666,10 +672,29 @@ private fun PlayerView(
         detectDragGestures(
             onDragStart = {
                 onInteraction()
+                dragMode = null
+                accumulatedSeekMillis = 0f
+                // Запоминаем точную точку старта свайпа!
+                seekStartPosition = state.currentPosition
+                seekTargetPosition = state.currentPosition
+                
                 val act = context.findActivity()
                 val bright = act?.window?.attributes?.screenBrightness ?: -1f
                 brightnessAccumulator = if (bright < 0) 0.5f else bright
                 volumeAccumulator = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
+            },
+            onDragEnd = {
+                // Реальная перемотка в плеере происходит строго 1 раз — при отпускании пальца!
+                if (dragMode == "SEEK" && state.duration > 0) {
+                    onSeek(seekTargetPosition)
+                }
+                dragMode = null
+            },
+            onDragCancel = {
+                if (dragMode == "SEEK" && state.duration > 0) {
+                    onSeek(seekTargetPosition)
+                }
+                dragMode = null
             },
             onDrag = { change, dragAmount ->
                 change.consume()
@@ -677,21 +702,33 @@ private fun PlayerView(
                 val w = size.width.toFloat()
                 val h = size.height.toFloat()
                 if (w > 0 && h > 0) {
-                    when {
-                        abs(dragAmount.x) > abs(dragAmount.y) -> {
-                            // Перемотка (Seek)
+                    if (dragMode == null) {
+                        dragMode = when {
+                            abs(dragAmount.x) > abs(dragAmount.y) -> "SEEK"
+                            change.position.x < w / 2 -> "BRIGHTNESS"
+                            else -> "VOLUME"
+                        }
+                    }
+                    when (dragMode) {
+                        "SEEK" -> {
                             if (state.duration > 0) {
-                                seekAccumulator += (dragAmount.x / w) * (state.duration / 1000f)
-                                val s = seekAccumulator.roundToInt()
-                                if (abs(s) > 0) {
-                                    onSeek((state.currentPosition + s * 1000L).coerceIn(0, state.duration))
-                                    viewModel.showGestureIndicator(if (s > 0) "⏩ +${s}с" else "⏪ ${s}с")
-                                    seekAccumulator = 0f
-                                }
+                                // Рассчитываем смещение относительно ширины экрана и прибавляем к точке старта
+                                accumulatedSeekMillis += (dragAmount.x / w) * state.duration.toFloat()
+                                seekTargetPosition = (seekStartPosition + accumulatedSeekMillis.toLong()).coerceIn(0L, state.duration)
+                                
+                                val diffSeconds = (seekTargetPosition - seekStartPosition) / 1000L
+                                val sign = if (diffSeconds >= 0) "+" else ""
+                                val arrow = if (diffSeconds >= 0) "⏩" else "⏪"
+                                val targetStr = formatMediaTime(seekTargetPosition)
+                                val durationStr = formatMediaTime(state.duration)
+                                
+                                // Показываем точное время и смещение на экране
+                                viewModel.showGestureIndicator("$arrow $targetStr / $durationStr ($sign${diffSeconds}с)")
+                                // Плавный сдвиг ползунка в UI без дергания декодера плеера
+                                viewModel.onPositionUpdated(seekTargetPosition, state.duration)
                             }
                         }
-                        change.position.x < w / 2 -> {
-                            // Реальное управление аппаратной яркостью экрана
+                        "BRIGHTNESS" -> {
                             brightnessAccumulator = (brightnessAccumulator - dragAmount.y / h).coerceIn(0.01f, 1f)
                             val act = context.findActivity()
                             act?.let { activity ->
@@ -701,8 +738,7 @@ private fun PlayerView(
                             }
                             viewModel.showGestureIndicator("☀ ${(brightnessAccumulator * 100).toInt()}%")
                         }
-                        else -> {
-                            // Реальное управление системной громкостью Android
+                        "VOLUME" -> {
                             volumeAccumulator = (volumeAccumulator - (dragAmount.y / h) * maxVolume).coerceIn(0f, maxVolume.toFloat())
                             val newVol = volumeAccumulator.roundToInt()
                             try { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0) } catch (_: Exception) {}
@@ -722,11 +758,13 @@ private fun PlayerView(
                 onInteraction()
                 val w = size.width
                 if (offset.x < w / 2) {
-                    onSeek((state.currentPosition - 10000L).coerceAtLeast(0L))
-                    viewModel.showGestureIndicator("⏪ -10с")
+                    val newPos = (state.currentPosition - 10000L).coerceAtLeast(0L)
+                    onSeek(newPos)
+                    viewModel.showGestureIndicator("⏪ -10с (${formatMediaTime(newPos)})")
                 } else {
-                    onSeek((state.currentPosition + 10000L).coerceAtMost(if (state.duration > 0) state.duration else Long.MAX_VALUE))
-                    viewModel.showGestureIndicator("⏩ +10с")
+                    val newPos = (state.currentPosition + 10000L).coerceAtMost(if (state.duration > 0) state.duration else Long.MAX_VALUE)
+                    onSeek(newPos)
+                    viewModel.showGestureIndicator("⏩ +10с (${formatMediaTime(newPos)})")
                 }
             }
         )
@@ -791,7 +829,6 @@ private fun PlayerView(
                         )
                     } ?: run {
                         NeonText("NEXUS PLAYER", fontSize = 28.sp, color = NexusColors.Cyan)
-                        Text("🎵${state.audioItems.size} аудио • 🎬${state.videoItems.size} видео", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
                     }
                     
                     Spacer(Modifier.height(16.dp))
