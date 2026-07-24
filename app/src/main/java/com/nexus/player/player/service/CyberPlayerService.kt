@@ -112,7 +112,14 @@ class CyberPlayerService : Service() {
                 ACTION_NEXT -> playNext()
                 ACTION_PREVIOUS -> playPrevious()
                 ACTION_STOP -> stopSelf()
-                ACTION_SEEK_TO -> player?.seekTo(intent.getLongExtra(EXTRA_CURRENT_POSITION, 0L))
+                ACTION_SEEK_TO -> {
+                    val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, -1L)
+                    if (pos >= 0L) {
+                        player?.seekTo(pos)
+                        _currentPosition.value = pos
+                        broadcastPositionUpdate()
+                    }
+                }
                 ACTION_SET_EQUALIZER -> {
                     intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
                     intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
@@ -186,7 +193,11 @@ class CyberPlayerService : Service() {
                 override fun onSkipToNext() { playNext() }
                 override fun onSkipToPrevious() { playPrevious() }
                 override fun onStop() { stopSelf() }
-                override fun onSeekTo(pos: Long) { player?.seekTo(pos) }
+                override fun onSeekTo(pos: Long) {
+                    player?.seekTo(pos)
+                    _currentPosition.value = pos
+                    broadcastPositionUpdate()
+                }
             })
             isActive = true
         }
@@ -321,8 +332,8 @@ class CyberPlayerService : Service() {
                 }
             }
             ACTION_PLAY_LIST -> {
-                val uriList = intent?.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
-                val startIndex = intent?.getIntExtra(EXTRA_START_INDEX, 0) ?: 0
+                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
                 if (!uriList.isNullOrEmpty()) {
                     serviceScope.launch { playPlaylist(uriList, startIndex) }
                 }
@@ -331,13 +342,20 @@ class CyberPlayerService : Service() {
             ACTION_NEXT -> playNext()
             ACTION_PREVIOUS -> playPrevious()
             ACTION_STOP -> stopSelf()
-            ACTION_SEEK_TO -> intent?.getLongExtra(EXTRA_CURRENT_POSITION, 0L)?.let { player?.seekTo(it) }
+            ACTION_SEEK_TO -> {
+                val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, -1L)
+                if (pos >= 0L) {
+                    player?.seekTo(pos)
+                    _currentPosition.value = pos
+                    broadcastPositionUpdate()
+                }
+            }
             ACTION_SET_EQUALIZER -> {
-                intent?.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
-                intent?.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
+                intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
+                intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
             }
             ACTION_SET_REPEAT_MODE -> {
-                val mode = intent?.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF) ?: Player.REPEAT_MODE_OFF
+                val mode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
                 player?.repeatMode = mode
             }
         }
@@ -360,7 +378,7 @@ class CyberPlayerService : Service() {
         broadcastTrackChanged()
     }
 
-    // Добавленный метод для загрузки целого плейлиста в очередь ExoPlayer (бесшовный автопереход)
+    // Загрузка целого плейлиста в очередь ExoPlayer (бесшовный автопереход)
     private suspend fun playPlaylist(uriStrings: List<String>, startIndex: Int = 0) = withContext(Dispatchers.Main) {
         if (uriStrings.isEmpty()) return@withContext
         val validIndex = startIndex.coerceIn(0, uriStrings.size - 1)
