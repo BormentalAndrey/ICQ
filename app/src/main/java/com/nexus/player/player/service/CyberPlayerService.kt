@@ -1,6 +1,10 @@
 package com.nexus.player.player.service
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,6 +23,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -30,8 +35,15 @@ import com.nexus.player.R
 import com.nexus.player.data.local.PreferencesManager
 import com.nexus.player.di.AppModule
 import com.nexus.player.player.audio.EqualizerEngine
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @UnstableApi
 class CyberPlayerService : Service() {
@@ -71,6 +83,8 @@ class CyberPlayerService : Service() {
         const val EXTRA_START_INDEX = "START_INDEX"
         const val EXTRA_REPEAT_MODE = "REPEAT_MODE"
         const val EXTRA_IS_NEXT = "IS_NEXT"
+
+        private const val WAKELOCK_TIMEOUT_MS = 3600000L // 1 час
     }
 
     private var player: ExoPlayer? = null
@@ -87,6 +101,10 @@ class CyberPlayerService : Service() {
     private val _currentPosition = MutableStateFlow(0L)
     private var currentMediaUri: Uri? = null
     private var resumeOnFocusGain = false
+
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        handleAudioFocusChange(focusChange)
+    }
 
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -140,13 +158,15 @@ class CyberPlayerService : Service() {
         super.onCreate()
         Log.d("NEXUS_SERVICE", "onCreate")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        // Отключаем подсчет ссылок для WakeLock: это предотвращает поддедлоки при множественных вызовах acquire()
+        
+        // Отключаем подсчет ссылок для WakeLock: это предотвращает дедлоки при множественных вызовах acquire()
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "Nexus:WakeLock"
         ).apply {
             setReferenceCounted(false)
         }
+        
         createNotificationChannels()
         registerNotificationReceiver()
         initializePlayer()
@@ -155,7 +175,20 @@ class CyberPlayerService : Service() {
     }
 
     private fun startForegroundService() {
-        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+        try {
+            val notification = buildInitialNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("NEXUS_SERVICE", "Error starting foreground service", e)
+        }
+    }
+
+    private fun buildInitialNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NEXUS PLAYER")
             .setContentText("Готов к воспроизведению")
             .setSmallIcon(R.drawable.ic_neon_skull)
@@ -163,15 +196,10 @@ class CyberPlayerService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        } else {
-            startForeground(NOTIFICATION_ID, n)
-        }
     }
 
     private fun registerNotificationReceiver() {
-        val f = IntentFilter().apply {
+        val filter = IntentFilter().apply {
             addAction(ACTION_PLAY)
             addAction(ACTION_PLAY_LIST)
             addAction(ACTION_PAUSE)
@@ -182,10 +210,14 @@ class CyberPlayerService : Service() {
             addAction(ACTION_SET_EQUALIZER)
             addAction(ACTION_SET_REPEAT_MODE)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(notificationReceiver, f, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(notificationReceiver, f)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(notificationReceiver, filter, RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(notificationReceiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.e("NEXUS_SERVICE", "Failed to register receiver", e)
         }
     }
 
@@ -213,11 +245,11 @@ class CyberPlayerService : Service() {
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(
                 androidx.media3.common.AudioAttributes.Builder()
-                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(C.USAGE_MEDIA)
                     .build(), true
             )
-            .setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true) // Автопауза при отключении наушников/Bluetooth
             .setMediaSourceFactory(DefaultMediaSourceFactory(this))
             .build().apply {
@@ -252,7 +284,7 @@ class CyberPlayerService : Service() {
                         updateNotification()
                         broadcastPlaybackState()
                         if (isPlaying) {
-                            wakeLock?.acquire(3600000)
+                            safeAcquireWakeLock()
                         } else {
                             safeReleaseWakeLock()
                         }
@@ -268,11 +300,15 @@ class CyberPlayerService : Service() {
                     }
                 })
             }
+        
         NexusApplication.instance.exoPlayer = player
         startPositionTracking()
+        
         serviceScope.launch {
             try {
-                preferencesManager.equalizerBands.collect { equalizerEngine.applyBands(it) }
+                preferencesManager.equalizerBands.collect { bands ->
+                    equalizerEngine.applyBands(bands)
+                }
             } catch (e: Exception) {
                 Log.e("NEXUS_PLAYER", "Error applying equalizer bands", e)
             }
@@ -288,6 +324,7 @@ class CyberPlayerService : Service() {
             Player.STATE_IDLE -> PlaybackStateCompat.STATE_NONE
             else -> PlaybackStateCompat.STATE_NONE
         }
+        
         val actions = PlaybackStateCompat.ACTION_PLAY or
                 PlaybackStateCompat.ACTION_PAUSE or
                 PlaybackStateCompat.ACTION_PLAY_PAUSE or
@@ -310,7 +347,12 @@ class CyberPlayerService : Service() {
             ?: currentMediaUri?.lastPathSegment ?: "NEXUS PLAYER"
         val artist = mediaMetadata?.artist?.takeIf { it.isNotBlank() }?.toString() ?: "Cyber Player"
         val album = mediaMetadata?.albumTitle?.takeIf { it.isNotBlank() }?.toString() ?: "Nexus Audio"
-        val duration = if (exoPlayer.duration > 0) exoPlayer.duration else 0L
+        
+        val duration = if (exoPlayer.duration != C.TIME_UNSET && exoPlayer.duration > 0) {
+            exoPlayer.duration
+        } else {
+            0L
+        }
 
         val metadataBuilder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
@@ -350,6 +392,14 @@ class CyberPlayerService : Service() {
         }
     }
 
+    private fun safeAcquireWakeLock() {
+        try {
+            wakeLock?.acquire(WAKELOCK_TIMEOUT_MS)
+        } catch (e: Exception) {
+            Log.e("NEXUS_PLAYER", "WakeLock acquire error", e)
+        }
+    }
+
     private fun safeReleaseWakeLock() {
         try {
             if (wakeLock?.isHeld == true) {
@@ -363,9 +413,9 @@ class CyberPlayerService : Service() {
     private fun startPositionTracking() {
         serviceScope.launch {
             while (isActive) {
-                player?.let {
-                    if (it.isPlaying) {
-                        _currentPosition.value = it.currentPosition
+                player?.let { p ->
+                    if (p.isPlaying) {
+                        _currentPosition.value = p.currentPosition
                         broadcastPositionUpdate()
                         updateMediaSessionState()
                     }
@@ -434,7 +484,7 @@ class CyberPlayerService : Service() {
                 prepare()
                 playWhenReady = true
             }
-            wakeLock?.acquire(3600000)
+            safeAcquireWakeLock()
             updateMediaSessionMetadata()
             updateNotification()
             broadcastTrackChanged()
@@ -458,7 +508,7 @@ class CyberPlayerService : Service() {
                 prepare()
                 playWhenReady = true
             }
-            wakeLock?.acquire(3600000)
+            safeAcquireWakeLock()
             updateMediaSessionMetadata()
             updateNotification()
             broadcastTrackChanged()
@@ -522,14 +572,13 @@ class CyberPlayerService : Service() {
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .build()
                     )
-                    .setOnAudioFocusChangeListener { focusChange ->
-                        handleAudioFocusChange(focusChange)
-                    }.build()
+                    .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                    .build()
                 audioFocusRequest?.let { am.requestAudioFocus(it) }
             } else {
                 @Suppress("DEPRECATION")
                 am.requestAudioFocus(
-                    { focusChange -> handleAudioFocusChange(focusChange) },
+                    audioFocusChangeListener,
                     AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN
                 )
@@ -566,7 +615,7 @@ class CyberPlayerService : Service() {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(NOTIFICATION_ID, notification)
             if (player?.isPlaying == true) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
@@ -617,30 +666,38 @@ class CyberPlayerService : Service() {
     }
 
     private fun broadcastPlaybackState() {
-        val intent = Intent(ACTION_PLAYBACK_STATE_CHANGED)
-        intent.putExtra(EXTRA_IS_PLAYING, _isPlaying.value)
-        intent.putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
-        player?.let { intent.putExtra(EXTRA_DURATION, it.duration) }
+        val intent = Intent(ACTION_PLAYBACK_STATE_CHANGED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_IS_PLAYING, _isPlaying.value)
+            putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
+            player?.let { putExtra(EXTRA_DURATION, it.duration) }
+        }
         sendBroadcast(intent)
     }
 
     private fun broadcastPositionUpdate() {
-        val intent = Intent(ACTION_POSITION_UPDATED)
-        intent.putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
-        player?.let { intent.putExtra(EXTRA_DURATION, it.duration) }
+        val intent = Intent(ACTION_POSITION_UPDATED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_CURRENT_POSITION, _currentPosition.value)
+            player?.let { putExtra(EXTRA_DURATION, it.duration) }
+        }
         sendBroadcast(intent)
     }
 
     private fun broadcastTrackChanged() {
-        val intent = Intent(ACTION_TRACK_CHANGED)
-        currentMediaUri?.toString()?.let { intent.putExtra(EXTRA_FILE_PATH, it) }
+        val intent = Intent(ACTION_TRACK_CHANGED).apply {
+            setPackage(packageName)
+            currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) }
+        }
         sendBroadcast(intent)
     }
 
     private fun broadcastTrackEnded(isNext: Boolean) {
-        val intent = Intent(ACTION_TRACK_ENDED)
-        intent.putExtra(EXTRA_IS_NEXT, isNext)
-        currentMediaUri?.toString()?.let { intent.putExtra(EXTRA_FILE_PATH, it) }
+        val intent = Intent(ACTION_TRACK_ENDED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_IS_NEXT, isNext)
+            currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) }
+        }
         sendBroadcast(intent)
     }
 
@@ -661,11 +718,17 @@ class CyberPlayerService : Service() {
         NexusApplication.instance.exoPlayer = null
         mediaSession?.release()
         mediaSession = null
-        audioFocusRequest?.let {
+        
+        audioManager?.let { am ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                audioManager?.abandonAudioFocusRequest(it)
+                audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(audioFocusChangeListener)
             }
         }
+        audioFocusRequest = null
+        
         safeReleaseWakeLock()
         super.onDestroy()
     }
