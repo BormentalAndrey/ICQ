@@ -69,6 +69,7 @@ import com.nexus.player.ui.theme.CyberpunkFontFamily
 import com.nexus.player.ui.theme.NexusColors
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.ArrayList
 import java.util.UUID
 import kotlin.OptIn
 import kotlin.math.abs
@@ -99,6 +100,7 @@ data class CustomPlaylist(
 data class PlayerUiState(
     val audioItems: List<MediaItem> = emptyList(),
     val videoItems: List<MediaItem> = emptyList(),
+    val currentQueue: List<MediaItem> = emptyList(),
     val isPlaying: Boolean = false,
     val currentTrack: MediaItem? = null,
     val currentPosition: Long = 0L,
@@ -179,6 +181,7 @@ class MainViewModel(
     }
 
     fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track) } }
+    fun setCurrentQueue(queue: List<MediaItem>) { _uiState.update { it.copy(currentQueue = queue) } }
     fun togglePlaylist() { _uiState.update { it.copy(showPlaylist = !it.showPlaylist) } }
     fun showPlayer() { _uiState.update { it.copy(showPlaylist = false) } }
     fun toggleQueue() { _uiState.update { it.copy(showQueue = !it.showQueue) } }
@@ -320,6 +323,202 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     var showControls by remember { mutableStateOf(true) }
 
+    fun onUserInteraction() {
+        showControls = true
+    }
+
+    fun startPlayback(item: MediaItem, customQueue: List<MediaItem>? = null) {
+        onUserInteraction()
+        viewModel.setCurrentTrack(item)
+        viewModel.showPlayer()
+        
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        val queue = customQueue ?: if (item.isVideo) state.videoItems else state.audioItems
+        viewModel.setCurrentQueue(queue)
+        
+        if (player != null && queue.isNotEmpty()) {
+            val media3Items = queue.map { 
+                androidx.media3.common.MediaItem.fromUri(it.uri) 
+            }
+            val startIndex = queue.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
+            
+            // СИНХРОНИЗАЦИЯ РЕЖИМОВ: гарантирует, что разброс и повтор применяются до запуска
+            player.shuffleModeEnabled = state.isShuffle
+            player.repeatMode = when (state.repeatMode) {
+                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+                RepeatMode.ONE -> Player.REPEAT_MODE_ONE
+            }
+
+            val currentMediaId = player.currentMediaItem?.localConfiguration?.uri?.toString()
+            if (currentMediaId != item.uri.toString() || player.mediaItemCount == 0) {
+                player.setMediaItems(media3Items, startIndex, 0L)
+                player.prepare()
+            }
+            player.play()
+            
+            viewModel.onPlaybackStateChanged(true, player.currentPosition, if (player.duration > 0) player.duration else item.duration)
+        } else {
+            viewModel.onPlaybackStateChanged(true, 0L, item.duration)
+        }
+
+        val intent = Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_PLAY
+            putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
+            putStringArrayListExtra("EXTRA_FILE_URI_LIST", ArrayList(queue.map { it.uri.toString() }))
+        }
+        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+    }
+
+    fun togglePlayPause() {
+        onUserInteraction()
+        if (state.currentTrack == null) {
+            val items = if (state.currentQueue.isNotEmpty()) state.currentQueue else if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+            items.firstOrNull()?.let { startPlayback(it, null) }
+            return
+        }
+        
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        val willPlay = if (player != null) !player.isPlaying else !state.isPlaying
+
+        if (player != null) {
+            if (willPlay) {
+                player.play()
+            } else {
+                player.pause()
+            }
+            viewModel.onPlaybackStateChanged(willPlay, player.currentPosition, if (player.duration > 0) player.duration else state.duration)
+        } else {
+            viewModel.onPlaybackStateChanged(willPlay, state.currentPosition, state.duration)
+        }
+
+        val intent = Intent(context, CyberPlayerService::class.java).apply {
+            action = if (willPlay) CyberPlayerService.ACTION_PLAY else CyberPlayerService.ACTION_PAUSE
+        }
+        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+    }
+
+    fun playNext(autoTriggered: Boolean = false) {
+        onUserInteraction()
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        val items = if (state.currentQueue.isNotEmpty()) state.currentQueue else if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+        if (items.isEmpty()) return
+        val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
+
+        if (autoTriggered && state.repeatMode == RepeatMode.OFF && !state.isShuffle && idx >= items.size - 1) {
+            player?.pause()
+            player?.seekTo(0)
+            viewModel.onPlaybackStateChanged(false, 0L, state.duration)
+            val intent = Intent(context, CyberPlayerService::class.java).apply {
+                action = CyberPlayerService.ACTION_PAUSE
+            }
+            try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+            return
+        }
+
+        if (player != null && player.hasNextMediaItem()) {
+            player.seekToNextMediaItem()
+            player.play()
+            val currentMedia = player.currentMediaItem?.localConfiguration?.uri?.toString()
+            if (currentMedia != null) {
+                viewModel.onTrackChanged(currentMedia)
+                val nextItem = items.find { it.uri.toString() == currentMedia }
+                if (nextItem != null) {
+                    val intent = Intent(context, CyberPlayerService::class.java).apply {
+                        action = CyberPlayerService.ACTION_PLAY
+                        putExtra(CyberPlayerService.EXTRA_FILE_URI, nextItem.uri.toString())
+                        putStringArrayListExtra("EXTRA_FILE_URI_LIST", ArrayList(items.map { it.uri.toString() }))
+                    }
+                    try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+                }
+            }
+            return
+        }
+
+        val nextIdx = when {
+            state.isShuffle -> items.indices.random()
+            state.repeatMode == RepeatMode.ONE -> idx
+            idx < items.size - 1 -> idx + 1
+            else -> 0
+        }
+        startPlayback(items[nextIdx], if (state.currentQueue.isNotEmpty()) state.currentQueue else null)
+    }
+
+    fun playPrevious() {
+        onUserInteraction()
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        val items = if (state.currentQueue.isNotEmpty()) state.currentQueue else if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+        if (items.isEmpty()) return
+        val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
+
+        if (player != null && player.hasPreviousMediaItem() && player.currentPosition < 3000L) {
+            player.seekToPreviousMediaItem()
+            player.play()
+            val currentMedia = player.currentMediaItem?.localConfiguration?.uri?.toString()
+            if (currentMedia != null) {
+                viewModel.onTrackChanged(currentMedia)
+                val prevItem = items.find { it.uri.toString() == currentMedia }
+                if (prevItem != null) {
+                    val intent = Intent(context, CyberPlayerService::class.java).apply {
+                        action = CyberPlayerService.ACTION_PLAY
+                        putExtra(CyberPlayerService.EXTRA_FILE_URI, prevItem.uri.toString())
+                        putStringArrayListExtra("EXTRA_FILE_URI_LIST", ArrayList(items.map { it.uri.toString() }))
+                    }
+                    try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+                }
+            }
+            return
+        } else if (player != null && player.currentPosition >= 3000L) {
+            player.seekTo(0)
+            return
+        }
+
+        val prevIdx = when {
+            state.isShuffle -> items.indices.random()
+            state.repeatMode == RepeatMode.ONE -> idx
+            idx > 0 -> idx - 1
+            else -> items.size - 1
+        }
+        startPlayback(items[prevIdx], if (state.currentQueue.isNotEmpty()) state.currentQueue else null)
+    }
+
+    fun performSeek(position: Long) {
+        onUserInteraction()
+        val safePos = position.coerceIn(0L, if (state.duration > 0) state.duration else Long.MAX_VALUE)
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        player?.seekTo(safePos)
+        viewModel.onPositionUpdated(safePos, state.duration)
+        val intent = Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_SEEK_TO
+            putExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, safePos)
+        }
+        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+    }
+
+    fun applyPreset(preset: String) {
+        onUserInteraction()
+        viewModel.setPreset(preset)
+        val intent = Intent(context, CyberPlayerService::class.java).apply {
+            action = CyberPlayerService.ACTION_SET_EQUALIZER
+            putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
+        }
+        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
+    }
+
+    fun enterPiP() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val act = context.findActivity() ?: return
+            if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+                try {
+                    val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
+                    act.enterPictureInPictureMode(params)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
     // ПРЯМОЙ СЛУШАТЕЛЬ EXOPLAYER: гарантирует автоматический переход треков по очереди и вразброс
     val exoPlayer = remember(context) { (context.applicationContext as? NexusApplication)?.exoPlayer }
     DisposableEffect(exoPlayer) {
@@ -328,24 +527,49 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                 val uri = mediaItem?.localConfiguration?.uri?.toString()
                 if (uri != null) {
                     viewModel.onTrackChanged(uri)
+                    val dur = exoPlayer?.duration?.takeIf { it > 0 } ?: state.duration
+                    viewModel.onPlaybackStateChanged(exoPlayer?.isPlaying == true, exoPlayer?.currentPosition ?: 0L, dur)
+                    
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                        val intent = Intent(context, CyberPlayerService::class.java).apply {
+                            action = CyberPlayerService.ACTION_TRACK_CHANGED
+                            putExtra(CyberPlayerService.EXTRA_FILE_URI, uri)
+                        }
+                        try { context.startService(intent) } catch (_: Exception) {}
+                    }
                 }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     viewModel.onPlaybackStateChanged(false, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+                    playNext(autoTriggered = true)
                 } else if (playbackState == Player.STATE_READY) {
-                    viewModel.onPlaybackStateChanged(exoPlayer?.isPlaying == true, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+                    val dur = exoPlayer?.duration?.takeIf { it > 0 } ?: state.duration
+                    viewModel.onPlaybackStateChanged(exoPlayer?.isPlaying == true, exoPlayer?.currentPosition ?: 0L, dur)
                 }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                viewModel.onPlaybackStateChanged(isPlaying, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+                val dur = exoPlayer?.duration?.takeIf { it > 0 } ?: state.duration
+                viewModel.onPlaybackStateChanged(isPlaying, exoPlayer?.currentPosition ?: 0L, dur)
             }
         }
         exoPlayer?.addListener(listener)
         onDispose {
             exoPlayer?.removeListener(listener)
+        }
+    }
+
+    // ПЛАВНОЕ ОБНОВЛЕНИЕ ПОЛЬЗУНКА: синхронизация с ExoPlayer в реальном времени
+    LaunchedEffect(state.isPlaying, exoPlayer) {
+        while (state.isPlaying && exoPlayer != null) {
+            val currentPos = exoPlayer.currentPosition
+            val duration = exoPlayer.duration
+            if (duration > 0 && abs(currentPos - state.currentPosition) > 250) {
+                viewModel.onPositionUpdated(currentPos, duration)
+            }
+            delay(250)
         }
     }
 
@@ -361,10 +585,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             delay(5000)
             showControls = false
         }
-    }
-
-    fun onUserInteraction() {
-        showControls = true
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
@@ -426,146 +646,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         onDispose { try { context.unregisterReceiver(receiver) } catch (_: Exception) {} }
     }
 
-    fun startPlayback(item: MediaItem, customQueue: List<MediaItem>? = null) {
-        onUserInteraction()
-        viewModel.setCurrentTrack(item)
-        viewModel.showPlayer()
-        
-        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        val queue = customQueue ?: if (item.isVideo) state.videoItems else state.audioItems
-        
-        if (player != null && queue.isNotEmpty()) {
-            val media3Items = queue.map { 
-                androidx.media3.common.MediaItem.fromUri(it.uri) 
-            }
-            val startIndex = queue.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
-            
-            // СИНХРОНИЗАЦИЯ РЕЖИМОВ: гарантирует, что разброс и повтор применяются до запуска
-            player.shuffleModeEnabled = state.isShuffle
-            player.repeatMode = when (state.repeatMode) {
-                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
-                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
-                RepeatMode.ONE -> Player.REPEAT_MODE_ONE
-            }
-
-            player.setMediaItems(media3Items, startIndex, 0L)
-            player.prepare()
-            player.play()
-            
-            viewModel.onPlaybackStateChanged(true, 0L, item.duration)
-        }
-
-        val intent = Intent(context, CyberPlayerService::class.java).apply {
-            action = CyberPlayerService.ACTION_PLAY
-            putExtra(CyberPlayerService.EXTRA_FILE_URI, item.uri.toString())
-        }
-        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
-    }
-
-    fun togglePlayPause() {
-        onUserInteraction()
-        if (state.currentTrack == null) {
-            (if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems).firstOrNull()?.let { startPlayback(it, null) }
-            return
-        }
-        
-        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        val willPlay = if (player != null) !player.isPlaying else !state.isPlaying
-
-        if (player != null) {
-            if (willPlay) {
-                player.play()
-            } else {
-                player.pause()
-            }
-            viewModel.onPlaybackStateChanged(willPlay, player.currentPosition, player.duration)
-        } else {
-            viewModel.onPlaybackStateChanged(willPlay, state.currentPosition, state.duration)
-        }
-
-        val intent = Intent(context, CyberPlayerService::class.java).apply {
-            action = if (willPlay) CyberPlayerService.ACTION_PLAY else CyberPlayerService.ACTION_PAUSE
-        }
-        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
-    }
-
-    fun playNext() {
-        onUserInteraction()
-        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        if (player != null && player.hasNextMediaItem()) {
-            player.seekToNextMediaItem()
-            player.play()
-            return
-        }
-        val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
-        if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
-        val nextIdx = when {
-            state.isShuffle -> items.indices.random()
-            state.repeatMode == RepeatMode.ONE -> idx
-            idx < items.size - 1 -> idx + 1
-            else -> 0
-        }
-        startPlayback(items[nextIdx], null)
-    }
-
-    fun playPrevious() {
-        onUserInteraction()
-        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        if (player != null && player.hasPreviousMediaItem()) {
-            player.seekToPreviousMediaItem()
-            player.play()
-            return
-        }
-        val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
-        if (items.isEmpty()) return
-        val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
-        val prevIdx = when {
-            state.isShuffle -> items.indices.random()
-            state.repeatMode == RepeatMode.ONE -> idx
-            idx > 0 -> idx - 1
-            else -> items.size - 1
-        }
-        startPlayback(items[prevIdx], null)
-    }
-
-    fun performSeek(position: Long) {
-        onUserInteraction()
-        val safePos = position.coerceIn(0L, if (state.duration > 0) state.duration else Long.MAX_VALUE)
-        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
-        player?.seekTo(safePos)
-        viewModel.onPositionUpdated(safePos, state.duration)
-        val intent = Intent(context, CyberPlayerService::class.java).apply {
-            action = CyberPlayerService.ACTION_SEEK_TO
-            putExtra(CyberPlayerService.EXTRA_CURRENT_POSITION, safePos)
-        }
-        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
-    }
-
-    fun applyPreset(preset: String) {
-        onUserInteraction()
-        viewModel.setPreset(preset)
-        val intent = Intent(context, CyberPlayerService::class.java).apply {
-            action = CyberPlayerService.ACTION_SET_EQUALIZER
-            putExtra(CyberPlayerService.EXTRA_EQUALIZER_PRESET, preset)
-        }
-        try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) {}
-    }
-
-    fun enterPiP() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val act = context.findActivity() ?: return
-            if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
-                try {
-                    val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-                    act.enterPictureInPictureMode(params)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         if (!state.isFullScreen) ParticleBackground()
 
@@ -618,7 +698,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                         onToggleControls = { showControls = !showControls },
                         onPlay = ::startPlayback,
                         onTogglePlayPause = ::togglePlayPause,
-                        onNext = ::playNext,
+                        onNext = { playNext() },
                         onPrevious = ::playPrevious,
                         onPreset = ::applyPreset,
                         onSeek = { pos -> performSeek(pos) },
@@ -845,7 +925,7 @@ private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay:
                             MediaItemRow(
                                 item = item, 
                                 isPlaying = state.currentTrack?.uri == item.uri && state.isPlaying,
-                                onClick = { onPlay(item, null) },
+                                onClick = { onPlay(item, rawItems) },
                                 onAddToPlaylist = { viewModel.openAddToPlaylistMenu(item.uri.toString()) }
                             )
                         }
@@ -1231,7 +1311,7 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem, List<MediaItem>
             }
             Spacer(Modifier.height(10.dp))
             LazyColumn {
-                val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
+                val items = if (state.currentQueue.isNotEmpty()) state.currentQueue else if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
                 items(items.take(30), key = { "queue_${it.id}_${it.uri}" }) { item ->
                     val isCurrent = item.uri == state.currentTrack?.uri
                     Row(
@@ -1239,7 +1319,7 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem, List<MediaItem>
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (isCurrent) NexusColors.NeonPink.copy(alpha = 0.15f) else Color.Transparent)
-                            .clickable { onPlay(item, null) }
+                            .clickable { onPlay(item, items) }
                             .padding(vertical = 8.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
