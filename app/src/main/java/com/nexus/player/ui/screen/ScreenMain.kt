@@ -23,10 +23,12 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -57,7 +59,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.PlayerView
 import com.nexus.player.NexusApplication
 import com.nexus.player.data.model.MediaItem
 import com.nexus.player.data.repository.MediaRepository
@@ -73,14 +74,12 @@ import kotlin.OptIn
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// Вспомогательная функция для безопасного получения Activity из Context
 tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is android.content.ContextWrapper -> baseContext.findActivity()
     else -> null
 }
 
-// Форматирование времени в мм:сс для индикатора перемотки
 fun formatMediaTime(millis: Long): String {
     val totalSeconds = (millis / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
@@ -104,7 +103,6 @@ data class PlayerUiState(
     val currentTrack: MediaItem? = null,
     val currentPosition: Long = 0L,
     val duration: Long = 0L,
-    // По умолчанию открываем главный экран библиотеки (выбор музыки и видео)
     val showPlaylist: Boolean = true,
     val selectedTab: MediaTab = MediaTab.AUDIO,
     val selectedPreset: String = "Flat",
@@ -173,8 +171,11 @@ class MainViewModel(
         if (trackUri == null) return
         val state = _uiState.value
         val found = (state.audioItems + state.videoItems).find { it.uri.toString() == trackUri || it.path == trackUri }
-        if (found != null) _uiState.update { it.copy(currentTrack = found, pendingTrackUri = null) }
-        else _uiState.update { it.copy(pendingTrackUri = trackUri) }
+        if (found != null) {
+            _uiState.update { it.copy(currentTrack = found, pendingTrackUri = null) }
+        } else {
+            _uiState.update { it.copy(pendingTrackUri = trackUri) }
+        }
     }
 
     fun setCurrentTrack(track: MediaItem) { _uiState.update { it.copy(currentTrack = track) } }
@@ -296,7 +297,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
 
-    // Включение иммерсивного режима: скрытие системных шторок и панели навигации
     val activity = remember(context) { context.findActivity() }
     DisposableEffect(activity, state.isFullScreen) {
         activity?.window?.let { window ->
@@ -319,6 +319,35 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     }
 
     var showControls by remember { mutableStateOf(true) }
+
+    // ПРЯМОЙ СЛУШАТЕЛЬ EXOPLAYER: гарантирует автоматический переход треков по очереди и вразброс
+    val exoPlayer = remember(context) { (context.applicationContext as? NexusApplication)?.exoPlayer }
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                val uri = mediaItem?.localConfiguration?.uri?.toString()
+                if (uri != null) {
+                    viewModel.onTrackChanged(uri)
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    viewModel.onPlaybackStateChanged(false, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+                } else if (playbackState == Player.STATE_READY) {
+                    viewModel.onPlaybackStateChanged(exoPlayer?.isPlaying == true, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                viewModel.onPlaybackStateChanged(isPlaying, exoPlayer?.currentPosition ?: 0L, exoPlayer?.duration ?: 0L)
+            }
+        }
+        exoPlayer?.addListener(listener)
+        onDispose {
+            exoPlayer?.removeListener(listener)
+        }
+    }
 
     LaunchedEffect(state.gestureIndicator) {
         if (state.gestureIndicator != null) {
@@ -411,6 +440,14 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             }
             val startIndex = queue.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0)
             
+            // СИНХРОНИЗАЦИЯ РЕЖИМОВ: гарантирует, что разброс и повтор применяются до запуска
+            player.shuffleModeEnabled = state.isShuffle
+            player.repeatMode = when (state.repeatMode) {
+                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+                RepeatMode.ONE -> Player.REPEAT_MODE_ONE
+            }
+
             player.setMediaItems(media3Items, startIndex, 0L)
             player.prepare()
             player.play()
@@ -454,6 +491,12 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     fun playNext() {
         onUserInteraction()
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        if (player != null && player.hasNextMediaItem()) {
+            player.seekToNextMediaItem()
+            player.play()
+            return
+        }
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
         val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
@@ -468,6 +511,12 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 
     fun playPrevious() {
         onUserInteraction()
+        val player = (context.applicationContext as? NexusApplication)?.exoPlayer
+        if (player != null && player.hasPreviousMediaItem()) {
+            player.seekToPreviousMediaItem()
+            player.play()
+            return
+        }
         val items = if (state.selectedTab == MediaTab.AUDIO) state.audioItems else state.videoItems
         if (items.isEmpty()) return
         val idx = items.indexOfFirst { it.uri == state.currentTrack?.uri }
@@ -520,7 +569,14 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
     Box(modifier = Modifier.fillMaxSize()) {
         if (!state.isFullScreen) ParticleBackground()
 
-        Column(Modifier.fillMaxSize().padding(if (state.isFullScreen) 0.dp else 16.dp).systemBarsPadding()) {
+        // КРИТИЧЕСКИЙ ФИКС ПЕРЕКРЫТИЯ: Отступ снизу (padding(bottom = 130.dp)), чтобы GlassMorphicPanel никогда не закрывал контент
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(if (state.isFullScreen) 0.dp else 16.dp)
+                .padding(bottom = if (!state.isFullScreen && (showControls || !state.isPlaying || state.showPlaylist)) 130.dp else 0.dp)
+                .systemBarsPadding()
+        ) {
             androidx.compose.animation.AnimatedVisibility(
                 visible = !state.isFullScreen && (showControls || !state.isPlaying || state.showPlaylist),
                 enter = fadeIn() + expandVertically(),
@@ -548,7 +604,8 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
                     (fadeIn(tween(300)) + slideInVertically(tween(300)) { it / 2 })
                         .togetherWith(fadeOut(tween(300)) + slideOutVertically(tween(300)) { it / 2 })
                 },
-                label = "PlaylistTransition"
+                label = "PlaylistTransition",
+                modifier = Modifier.weight(1f)
             ) { show ->
                 if (show) {
                     PlaylistView(state, viewModel, ::startPlayback)
@@ -583,6 +640,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             }
         }
 
+        // НИЖНЯЯ ПАНЕЛЬ: зафиксирована строго внизу без перекрытия рабочих зон
         if (!state.isFullScreen) {
             androidx.compose.animation.AnimatedVisibility(
                 visible = showControls || !state.isPlaying || state.showPlaylist,
@@ -633,12 +691,11 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
         }
 
         if (state.showQueue) {
-            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp)) {
+            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 135.dp)) {
                 QueuePanel(state, ::startPlayback)
             }
         }
 
-        // Диалог создания плейлиста
         if (state.showCreatePlaylistDialog) {
             var playlistName by remember { mutableStateOf("") }
             AlertDialog(
@@ -668,7 +725,6 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
             )
         }
 
-        // Диалог добавления трека в существующие плейлисты
         state.trackToAddUri?.let { uri ->
             AlertDialog(
                 onDismissRequest = { viewModel.openAddToPlaylistMenu(null) },
@@ -714,7 +770,7 @@ fun ScreenMain(viewModel: MainViewModel = viewModel(factory = viewModelFactory()
 @Composable
 private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay: (MediaItem, List<MediaItem>?) -> Unit) {
     val focusManager = LocalFocusManager.current
-    Column {
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             FilterChip(
                 selected = state.selectedTab == MediaTab.AUDIO,
@@ -784,7 +840,7 @@ private fun PlaylistView(state: PlayerUiState, viewModel: MainViewModel, onPlay:
                         Text("НИЧЕГО НЕ НАЙДЕНО", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
                     }
                 } else {
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+                    LazyColumn(Modifier.fillMaxSize()) {
                         items(items, key = { "${it.id}_${it.isVideo}_${it.uri}" }) { item ->
                             MediaItemRow(
                                 item = item, 
@@ -828,7 +884,7 @@ fun PlaylistsTabView(
                 Text("НЕТ СОЗДАННЫХ ПЛЕЙЛИСТОВ", color = NexusColors.Cyan.copy(alpha = 0.5f), fontFamily = CyberpunkFontFamily)
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
+            LazyColumn(Modifier.fillMaxSize()) {
                 items(state.customPlaylists, key = { it.id }) { playlist ->
                     val playlistTracks = remember(playlist.trackUris, allMedia) {
                         allMedia.filter { playlist.trackUris.contains(it.uri.toString()) }
@@ -890,14 +946,12 @@ private fun PlayerView(
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
 
-    // Захват актуального состояния для жестов без перезапуска pointerInput
     val currentState by rememberUpdatedState(state)
     val currentOnSeek by rememberUpdatedState(onSeek)
     val currentOnInteraction by rememberUpdatedState(onInteraction)
     val currentOnToggleControls by rememberUpdatedState(onToggleControls)
 
-    // Переменные для точной фиксации жестов без сброса позиции плеера
-    var dragMode by remember { mutableStateOf<String?>(null) } // "SEEK", "BRIGHTNESS", "VOLUME"
+    var dragMode by remember { mutableStateOf<String?>(null) }
     var seekStartPosition by remember { mutableLongStateOf(0L) }
     var seekTargetPosition by remember { mutableLongStateOf(0L) }
     var accumulatedSeekMillis by remember { mutableFloatStateOf(0f) }
@@ -905,7 +959,6 @@ private fun PlayerView(
     var brightnessAccumulator by remember { mutableFloatStateOf(0.5f) }
     var volumeAccumulator by remember { mutableFloatStateOf(0.5f) }
 
-    // Реактивная анимация спектра визуализатора при воспроизведении
     var spectrumData by remember { mutableStateOf(FloatArray(64) { 0.1f }) }
     LaunchedEffect(state.isPlaying) {
         while (state.isPlaying) {
@@ -923,7 +976,6 @@ private fun PlayerView(
                 currentOnInteraction()
                 dragMode = null
                 accumulatedSeekMillis = 0f
-                // Запоминаем точную точку старта свайпа из актуального состояния!
                 seekStartPosition = currentState.currentPosition
                 seekTargetPosition = currentState.currentPosition
                 
@@ -1015,10 +1067,13 @@ private fun PlayerView(
         )
     }
 
+    // ВЕРТИКАЛЬНЫЙ СКРОЛЛ: гарантирует доступ ко всем кнопкам на любых экранах без перекрытия
+    val scrollState = rememberScrollState()
+
     Column(
         Modifier
             .fillMaxSize()
-            .then(if (state.isFullScreen) Modifier.background(Color.Black) else Modifier)
+            .then(if (state.isFullScreen) Modifier.background(Color.Black) else Modifier.verticalScroll(scrollState))
             .then(gestureModifier)
             .then(tapModifier),
         verticalArrangement = Arrangement.Center,
@@ -1043,14 +1098,15 @@ private fun PlayerView(
                         visible = showControls || !state.isPlaying,
                         enter = fadeIn(),
                         exit = fadeOut(),
-                        modifier = Modifier.align(Alignment.TopCenter)
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
                     ) {
                         FullScreenControls(state, onTogglePlayPause, onNext, onPrevious, { viewModel.toggleFullScreen() }, onPiP, onSpeed)
                     }
                 }
             }
         } else {
-            GlitchArtWork(Modifier.size(280.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
+            Spacer(Modifier.height(12.dp))
+            GlitchArtWork(Modifier.size(260.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
         }
 
         if (!state.isFullScreen) {
@@ -1060,7 +1116,7 @@ private fun PlayerView(
                 exit = fadeOut() + shrinkVertically()
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(16.dp))
                     state.currentTrack?.let {
                         NeonText(it.name, fontSize = 22.sp, color = NexusColors.Cyan)
                         Spacer(Modifier.height(4.dp))
@@ -1105,7 +1161,7 @@ private fun PlayerView(
 
                     if (state.currentTrack?.isVideo != true) {
                         Spacer(Modifier.height(12.dp))
-                        SpectrumVisualizer(Modifier.fillMaxWidth().height(100.dp), spectrumData, state.isPlaying)
+                        SpectrumVisualizer(Modifier.fillMaxWidth().height(80.dp), spectrumData, state.isPlaying)
                         Spacer(Modifier.height(12.dp))
                         Text("ЭКВАЛАЙЗЕР", color = NexusColors.Cyan.copy(alpha = 0.7f), fontFamily = CyberpunkFontFamily, fontSize = 12.sp)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -1118,6 +1174,7 @@ private fun PlayerView(
                                 )
                             }
                         }
+                        Spacer(Modifier.height(12.dp))
                     }
                 }
             }
@@ -1135,7 +1192,7 @@ private fun FullScreenControls(
     onPiP: () -> Unit,
     onSpeed: () -> Unit
 ) {
-    Box(Modifier.fillMaxWidth().padding(16.dp).background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(24.dp)).border(1.dp, NexusColors.Cyan.copy(alpha = 0.4f), RoundedCornerShape(24.dp)).padding(12.dp)) {
+    Box(Modifier.fillMaxWidth().padding(16.dp).background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(24.dp)).border(1.dp, NexusColors.Cyan.copy(alpha = 0.4f), RoundedCornerShape(24.dp)).padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Default.SkipPrevious, "Prev", tint = NexusColors.Cyan, modifier = Modifier.size(28.dp))
@@ -1162,7 +1219,7 @@ private fun FullScreenControls(
 @Composable
 private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem, List<MediaItem>?) -> Unit) {
     Card(
-        Modifier.fillMaxWidth().height(320.dp).padding(16.dp).shadow(16.dp, RoundedCornerShape(20.dp)),
+        Modifier.fillMaxWidth().height(280.dp).padding(horizontal = 16.dp).shadow(16.dp, RoundedCornerShape(20.dp)),
         colors = CardDefaults.cardColors(containerColor = NexusColors.DarkGrey.copy(alpha = 0.98f)),
         shape = RoundedCornerShape(20.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, NexusColors.NeonPink.copy(alpha = 0.5f))
