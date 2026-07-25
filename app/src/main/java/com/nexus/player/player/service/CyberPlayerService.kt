@@ -119,7 +119,10 @@ class CyberPlayerService : Service() {
                     } else if (uri != null) {
                         serviceScope.launch { playFile(uri) }
                     } else {
-                        player?.playWhenReady = true
+                        player?.apply {
+                            playWhenReady = true
+                            play()
+                        }
                     }
                 }
                 ACTION_PLAY_LIST -> {
@@ -224,7 +227,12 @@ class CyberPlayerService : Service() {
     private fun initializeMediaSession() {
         mediaSession = MediaSessionCompat(this, "NexusPlayer").apply {
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() { player?.playWhenReady = true }
+                override fun onPlay() { 
+                    player?.apply {
+                        playWhenReady = true
+                        play()
+                    }
+                }
                 override fun onPause() { player?.pause() }
                 override fun onSkipToNext() { playNext() }
                 override fun onSkipToPrevious() { playPrevious() }
@@ -272,6 +280,10 @@ class CyberPlayerService : Service() {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         Log.d("NEXUS_PLAYER", "onMediaItemTransition: reason=$reason")
                         updateCurrentMediaInfo(mediaItem)
+                        // Гарантируем автопродолжение воспроизведения при любом переходе трека
+                        if (this@apply.playWhenReady) {
+                            this@apply.play()
+                        }
                         updateMediaSessionMetadata()
                         updateNotification()
                         broadcastTrackChanged()
@@ -366,11 +378,17 @@ class CyberPlayerService : Service() {
     private fun handlePlaybackEnded() {
         player?.let { p ->
             if (p.hasNextMediaItem()) {
+                acquireAudioFocus()
                 p.seekToNextMediaItem()
                 p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
             } else if (p.repeatMode == Player.REPEAT_MODE_ALL) {
+                acquireAudioFocus()
                 p.seekToDefaultPosition(0)
                 p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
             } else {
                 _isPlaying.value = false
                 safeReleaseWakeLock()
@@ -437,7 +455,10 @@ class CyberPlayerService : Service() {
                 } else if (uri != null) {
                     serviceScope.launch { playFile(uri) }
                 } else {
-                    player?.playWhenReady = true
+                    player?.apply {
+                        playWhenReady = true
+                        play()
+                    }
                 }
             }
             ACTION_PLAY_LIST -> {
@@ -483,6 +504,7 @@ class CyberPlayerService : Service() {
                 setMediaItem(MediaItem.fromUri(mediaUri))
                 prepare()
                 playWhenReady = true
+                play()
             }
             safeAcquireWakeLock()
             updateMediaSessionMetadata()
@@ -507,6 +529,7 @@ class CyberPlayerService : Service() {
                 setMediaItems(mediaItems, validIndex, 0L)
                 prepare()
                 playWhenReady = true
+                play()
             }
             safeAcquireWakeLock()
             updateMediaSessionMetadata()
@@ -519,9 +542,12 @@ class CyberPlayerService : Service() {
 
     private fun playNext() {
         player?.let { p ->
+            acquireAudioFocus()
             if (p.hasNextMediaItem()) {
                 p.seekToNextMediaItem()
                 p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
                 updateCurrentMediaInfo(p.currentMediaItem)
                 updateMediaSessionMetadata()
                 updateNotification()
@@ -531,6 +557,8 @@ class CyberPlayerService : Service() {
                 if (p.repeatMode == Player.REPEAT_MODE_ALL) {
                     p.seekToDefaultPosition(0)
                     p.playWhenReady = true
+                    p.play()
+                    safeAcquireWakeLock()
                     updateCurrentMediaInfo(p.currentMediaItem)
                     updateMediaSessionMetadata()
                     updateNotification()
@@ -544,9 +572,12 @@ class CyberPlayerService : Service() {
 
     private fun playPrevious() {
         player?.let { p ->
+            acquireAudioFocus()
             if (p.hasPreviousMediaItem()) {
                 p.seekToPreviousMediaItem()
                 p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
                 updateCurrentMediaInfo(p.currentMediaItem)
                 updateMediaSessionMetadata()
                 updateNotification()
@@ -555,6 +586,8 @@ class CyberPlayerService : Service() {
                 // Если предыдущего нет, перематываем текущий в начало или сообщаем UI
                 p.seekTo(0)
                 p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
                 broadcastPositionUpdate()
                 updateMediaSessionState()
                 broadcastTrackEnded(isNext = false)
@@ -603,7 +636,10 @@ class CyberPlayerService : Service() {
                 player?.volume = 1.0f
                 if (resumeOnFocusGain) {
                     resumeOnFocusGain = false
-                    player?.playWhenReady = true
+                    player?.apply {
+                        playWhenReady = true
+                        play()
+                    }
                 }
             }
         }
