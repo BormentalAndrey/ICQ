@@ -59,15 +59,20 @@ class MediaRepository(private val context: Context) {
                         val albumId = cursor.getLong(albumIdCol)
                         val mimeType = cursor.getString(mimeCol) ?: "audio/*"
                         val contentUri = ContentUris.withAppendedId(uri, id)
+                        
+                        // Стандартный системный путь к обложке альбома.
+                        // Если его нет в системе, Coil попытается извлечь встроенный арт прямо из файла.
                         val albumArtUri = if (albumId > 0) ContentUris.withAppendedId(
                             Uri.parse("content://media/external/audio/albumart"), albumId
                         ) else null
 
                         items.add(MediaItem(
-                            id = id, name = name,
+                            id = id, 
+                            name = name,
                             path = contentUri.toString(),
                             duration = duration.coerceAtLeast(0),
-                            artist = artist, album = album,
+                            artist = artist, 
+                            album = album,
                             albumArtUri = albumArtUri,
                             mimeType = mimeType,
                             format = MediaFormat.fromMimeType(mimeType),
@@ -107,9 +112,13 @@ class MediaRepository(private val context: Context) {
                         val contentUri = ContentUris.withAppendedId(uri, id)
 
                         items.add(MediaItem(
-                            id = id, name = name,
+                            id = id, 
+                            name = name,
                             path = contentUri.toString(),
                             duration = duration.coerceAtLeast(0),
+                            // Передаем сам contentUri в albumArtUri, чтобы Coil (через VideoFrameDecoder) 
+                            // сгенерировал превью-кадр для видео в списке
+                            albumArtUri = contentUri,
                             mimeType = mimeType,
                             format = MediaFormat.fromMimeType(mimeType),
                             uri = contentUri
