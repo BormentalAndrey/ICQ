@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +60,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.nexus.player.NexusApplication
 import com.nexus.player.data.model.MediaItem
 import com.nexus.player.data.repository.MediaRepository
@@ -1186,7 +1189,8 @@ private fun PlayerView(
             }
         } else {
             Spacer(Modifier.height(12.dp))
-            GlitchArtWork(Modifier.size(260.dp), state.currentTrack?.albumArtUri, state.isPlaying, false)
+            // Используем умное свойство previewUri вместо старого albumArtUri
+            GlitchArtWork(Modifier.size(260.dp), state.currentTrack?.previewUri, state.isPlaying, false)
         }
 
         if (!state.isFullScreen) {
@@ -1354,6 +1358,7 @@ private fun QueuePanel(state: PlayerUiState, onPlay: (MediaItem, List<MediaItem>
 
 @Composable
 fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit, onAddToPlaylist: () -> Unit) {
+    val context = LocalContext.current
     Card(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = if (isPlaying) NexusColors.NeonPink.copy(alpha = 0.22f) else NexusColors.GlassBlack),
@@ -1361,18 +1366,37 @@ fun MediaItemRow(item: MediaItem, isPlaying: Boolean, onClick: () -> Unit, onAdd
         border = if (isPlaying) androidx.compose.foundation.BorderStroke(1.dp, NexusColors.NeonPink) else null
     ) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            // КОМПОНЕНТ ПРЕВЬЮ: Загрузка с помощью Coil через AsyncImage
             Box(
                 Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(
                     Brush.linearGradient(if (item.isVideo) listOf(NexusColors.Purple, NexusColors.BloodRed) else listOf(NexusColors.Purple, NexusColors.Cyan))
                 ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (item.isVideo) Icons.Default.VideoFile else if (isPlaying) Icons.Default.Equalizer else Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
+                var isImageLoadFailed by remember { mutableStateOf(false) }
+
+                if (!isImageLoadFailed) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(item.previewUri) // Передаем умный геттер previewUri
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        onError = { isImageLoadFailed = true }
+                    )
+                }
+
+                // Если изображение ещё не прогрузилось, отсутствует или файл пустой — рисуем атмосферную кибер-заглушку
+                if (isImageLoadFailed) {
+                    Icon(
+                        imageVector = if (item.isVideo) Icons.Default.VideoFile else if (isPlaying) Icons.Default.Equalizer else Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
