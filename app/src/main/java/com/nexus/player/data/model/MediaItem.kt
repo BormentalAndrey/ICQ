@@ -17,6 +17,11 @@ data class MediaItem(
     val isVideo: Boolean get() = mimeType.startsWith("video/")
     val isAudio: Boolean get() = mimeType.startsWith("audio/")
 
+    // Умный геттер для отображения превью в списках UI через Coil.
+    // Если обложки альбома нет (или это видеофайл), возвращает сам URI файла,
+    // откуда Coil автоматически извлечет кадр (для видео) или ID3-тег (для аудио).
+    val previewUri: Uri get() = albumArtUri ?: uri
+
     val formattedDuration: String get() {
         if (duration <= 0) return "--:--"
         val totalSeconds = duration / 1000
