@@ -1,16 +1,12 @@
 package com.nexus.player.player.service
 
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -22,7 +18,6 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -31,7 +26,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.nexus.player.NexusApplication
-import com.nexus.player.R
 import com.nexus.player.data.local.PreferencesManager
 import com.nexus.player.di.AppModule
 import com.nexus.player.player.audio.EqualizerEngine
@@ -48,50 +42,12 @@ import kotlinx.coroutines.withContext
 @UnstableApi
 class CyberPlayerService : Service() {
 
-    companion object {
-        const val CHANNEL_ID = "nexus_player_channel"
-        const val ERROR_CHANNEL_ID = "nexus_player_errors"
-        const val NOTIFICATION_ID = 1337
-
-        const val ACTION_PLAY = "com.nexus.player.ACTION_PLAY"
-        const val ACTION_PAUSE = "com.nexus.player.ACTION_PAUSE"
-        const val ACTION_NEXT = "com.nexus.player.ACTION_NEXT"
-        const val ACTION_PREVIOUS = "com.nexus.player.ACTION_PREVIOUS"
-        const val ACTION_STOP = "com.nexus.player.ACTION_STOP"
-        const val ACTION_SEEK_TO = "com.nexus.player.ACTION_SEEK_TO"
-        const val ACTION_SET_EQUALIZER = "com.nexus.player.ACTION_SET_EQUALIZER"
-
-        // Новые экшены для полноценной поддержки плейлистов и контроля завершения
-        const val ACTION_PLAY_LIST = "com.nexus.player.ACTION_PLAY_LIST"
-        const val ACTION_SET_REPEAT_MODE = "com.nexus.player.ACTION_SET_REPEAT_MODE"
-        const val ACTION_TRACK_ENDED = "com.nexus.player.TRACK_ENDED"
-
-        const val ACTION_PLAYBACK_STATE_CHANGED = "com.nexus.player.PLAYBACK_STATE_CHANGED"
-        const val ACTION_POSITION_UPDATED = "com.nexus.player.POSITION_UPDATED"
-        const val ACTION_TRACK_CHANGED = "com.nexus.player.TRACK_CHANGED"
-
-        const val EXTRA_FILE_URI = "FILE_URI"
-        const val EXTRA_FILE_PATH = "FILE_PATH"
-        const val EXTRA_IS_PLAYING = "IS_PLAYING"
-        const val EXTRA_CURRENT_POSITION = "CURRENT_POSITION"
-        const val EXTRA_DURATION = "DURATION"
-        const val EXTRA_EQUALIZER_PRESET = "EQUALIZER_PRESET"
-        const val EXTRA_EQUALIZER_BANDS = "EQUALIZER_BANDS"
-
-        // Дополнительные ключи
-        const val EXTRA_FILE_URI_LIST = "FILE_URI_LIST"
-        const val EXTRA_START_INDEX = "START_INDEX"
-        const val EXTRA_REPEAT_MODE = "REPEAT_MODE"
-        const val EXTRA_IS_NEXT = "IS_NEXT"
-
-        private const val WAKELOCK_TIMEOUT_MS = 3600000L // 1 час
-    }
-
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSessionCompat? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var notificationHelper: CyberPlayerNotificationHelper
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val preferencesManager: PreferencesManager by lazy { AppModule.providePreferencesManager() }
@@ -108,52 +64,7 @@ class CyberPlayerService : Service() {
 
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent == null) return
-            when (intent.action) {
-                ACTION_PLAY -> {
-                    val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
-                    val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
-                    val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
-                    if (!uriList.isNullOrEmpty()) {
-                        serviceScope.launch { playPlaylist(uriList, startIndex) }
-                    } else if (uri != null) {
-                        serviceScope.launch { playFile(uri) }
-                    } else {
-                        player?.apply {
-                            playWhenReady = true
-                            play()
-                        }
-                    }
-                }
-                ACTION_PLAY_LIST -> {
-                    val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
-                    val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
-                    if (!uriList.isNullOrEmpty()) {
-                        serviceScope.launch { playPlaylist(uriList, startIndex) }
-                    }
-                }
-                ACTION_PAUSE -> player?.pause()
-                ACTION_NEXT -> playNext()
-                ACTION_PREVIOUS -> playPrevious()
-                ACTION_STOP -> stopSelf()
-                ACTION_SEEK_TO -> {
-                    val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, -1L)
-                    if (pos >= 0L) {
-                        player?.seekTo(pos)
-                        _currentPosition.value = pos
-                        broadcastPositionUpdate()
-                        updateMediaSessionState()
-                    }
-                }
-                ACTION_SET_EQUALIZER -> {
-                    intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
-                    intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
-                }
-                ACTION_SET_REPEAT_MODE -> {
-                    val mode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
-                    player?.repeatMode = mode
-                }
-            }
+            intent?.let { handleIntentAction(it) }
         }
     }
 
@@ -161,8 +72,8 @@ class CyberPlayerService : Service() {
         super.onCreate()
         Log.d("NEXUS_SERVICE", "onCreate")
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        notificationHelper = CyberPlayerNotificationHelper(this)
         
-        // Отключаем подсчет ссылок для WakeLock: это предотвращает дедлоки при множественных вызовах acquire()
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "Nexus:WakeLock"
@@ -170,7 +81,7 @@ class CyberPlayerService : Service() {
             setReferenceCounted(false)
         }
         
-        createNotificationChannels()
+        notificationHelper.createNotificationChannels()
         registerNotificationReceiver()
         initializePlayer()
         initializeMediaSession()
@@ -179,7 +90,7 @@ class CyberPlayerService : Service() {
 
     private fun startForegroundService() {
         try {
-            val notification = buildInitialNotification()
+            val notification = notificationHelper.buildInitialNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             } else {
@@ -188,17 +99,6 @@ class CyberPlayerService : Service() {
         } catch (e: Exception) {
             Log.e("NEXUS_SERVICE", "Error starting foreground service", e)
         }
-    }
-
-    private fun buildInitialNotification(): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NEXUS PLAYER")
-            .setContentText("Готов к воспроизведению")
-            .setSmallIcon(R.drawable.ic_neon_skull)
-            .setColor(Color.parseColor("#FF007F"))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .build()
     }
 
     private fun registerNotificationReceiver() {
@@ -258,7 +158,7 @@ class CyberPlayerService : Service() {
                     .build(), true
             )
             .setWakeMode(C.WAKE_MODE_NETWORK)
-            .setHandleAudioBecomingNoisy(true) // Автопауза при отключении наушников/Bluetooth
+            .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this))
             .build().apply {
                 addListener(object : Player.Listener {
@@ -272,7 +172,6 @@ class CyberPlayerService : Service() {
                             broadcastPlaybackState()
                         }
                         if (state == Player.STATE_ENDED) {
-                            // Окончание воспроизведения текущей очереди или единственного файла
                             handlePlaybackEnded()
                         }
                     }
@@ -280,7 +179,6 @@ class CyberPlayerService : Service() {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         Log.d("NEXUS_PLAYER", "onMediaItemTransition: reason=$reason")
                         updateCurrentMediaInfo(mediaItem)
-                        // Гарантируем автопродолжение воспроизведения при любом переходе трека
                         if (this@apply.playWhenReady) {
                             this@apply.play()
                         }
@@ -323,6 +221,159 @@ class CyberPlayerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e("NEXUS_PLAYER", "Error applying equalizer bands", e)
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundService()
+        intent?.let { handleIntentAction(it) }
+        return START_STICKY
+    }
+
+    private fun handleIntentAction(intent: Intent) {
+        when (intent.action) {
+            ACTION_PLAY -> {
+                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
+                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
+                if (!uriList.isNullOrEmpty()) {
+                    serviceScope.launch { playPlaylist(uriList, startIndex) }
+                } else if (uri != null) {
+                    serviceScope.launch { playFile(uri) }
+                } else {
+                    player?.apply {
+                        playWhenReady = true
+                        play()
+                    }
+                }
+            }
+            ACTION_PLAY_LIST -> {
+                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
+                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
+                if (!uriList.isNullOrEmpty()) {
+                    serviceScope.launch { playPlaylist(uriList, startIndex) }
+                }
+            }
+            ACTION_PAUSE -> player?.pause()
+            ACTION_NEXT -> playNext()
+            ACTION_PREVIOUS -> playPrevious()
+            ACTION_STOP -> stopSelf()
+            ACTION_SEEK_TO -> {
+                val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, -1L)
+                if (pos >= 0L) {
+                    player?.seekTo(pos)
+                    _currentPosition.value = pos
+                    broadcastPositionUpdate()
+                    updateMediaSessionState()
+                }
+            }
+            ACTION_SET_EQUALIZER -> {
+                intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
+                intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
+            }
+            ACTION_SET_REPEAT_MODE -> {
+                val mode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
+                player?.repeatMode = mode
+            }
+        }
+    }
+
+    private suspend fun playFile(uriString: String) = withContext(Dispatchers.Main) {
+        try {
+            val mediaUri = Uri.parse(uriString)
+            currentMediaUri = mediaUri
+            Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
+            acquireAudioFocus()
+            player?.apply {
+                stop()
+                setMediaItem(MediaItem.fromUri(mediaUri))
+                prepare()
+                playWhenReady = true
+                play()
+            }
+            safeAcquireWakeLock()
+            updateMediaSessionMetadata()
+            updateNotification()
+            broadcastTrackChanged()
+        } catch (e: Exception) {
+            Log.e("NEXUS_PLAYER", "Error playing file: $uriString", e)
+        }
+    }
+
+    private suspend fun playPlaylist(uriStrings: List<String>, startIndex: Int = 0) = withContext(Dispatchers.Main) {
+        if (uriStrings.isEmpty()) return@withContext
+        try {
+            val validIndex = startIndex.coerceIn(0, uriStrings.size - 1)
+            val mediaItems = uriStrings.map { MediaItem.fromUri(Uri.parse(it)) }
+            currentMediaUri = Uri.parse(uriStrings[validIndex])
+            Log.d("NEXUS_PLAYER", "Playing playlist: ${uriStrings.size} items, starting at $validIndex")
+            acquireAudioFocus()
+            player?.apply {
+                stop()
+                setMediaItems(mediaItems, validIndex, 0L)
+                prepare()
+                playWhenReady = true
+                play()
+            }
+            safeAcquireWakeLock()
+            updateMediaSessionMetadata()
+            updateNotification()
+            broadcastTrackChanged()
+        } catch (e: Exception) {
+            Log.e("NEXUS_PLAYER", "Error playing playlist", e)
+        }
+    }
+
+    private fun playNext() {
+        player?.let { p ->
+            acquireAudioFocus()
+            if (p.hasNextMediaItem()) {
+                p.seekToNextMediaItem()
+                p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
+                updateCurrentMediaInfo(p.currentMediaItem)
+                updateMediaSessionMetadata()
+                updateNotification()
+                broadcastTrackChanged()
+            } else {
+                if (p.repeatMode == Player.REPEAT_MODE_ALL) {
+                    p.seekToDefaultPosition(0)
+                    p.playWhenReady = true
+                    p.play()
+                    safeAcquireWakeLock()
+                    updateCurrentMediaInfo(p.currentMediaItem)
+                    updateMediaSessionMetadata()
+                    updateNotification()
+                    broadcastTrackChanged()
+                } else {
+                    broadcastTrackEnded(isNext = true)
+                }
+            }
+        }
+    }
+
+    private fun playPrevious() {
+        player?.let { p ->
+            acquireAudioFocus()
+            if (p.hasPreviousMediaItem()) {
+                p.seekToPreviousMediaItem()
+                p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
+                updateCurrentMediaInfo(p.currentMediaItem)
+                updateMediaSessionMetadata()
+                updateNotification()
+                broadcastTrackChanged()
+            } else {
+                p.seekTo(0)
+                p.playWhenReady = true
+                p.play()
+                safeAcquireWakeLock()
+                broadcastPositionUpdate()
+                updateMediaSessionState()
+                broadcastTrackEnded(isNext = false)
             }
         }
     }
@@ -395,8 +446,6 @@ class CyberPlayerService : Service() {
                 updateMediaSessionState()
                 updateNotification()
                 broadcastPlaybackState()
-                // Оповещаем UI/ViewModel о том, что трек или плейлист завершился,
-                // чтобы приложение могло передать следующий файл, если очередь управляется извне
                 broadcastTrackEnded(isNext = true)
             }
         }
@@ -439,158 +488,6 @@ class CyberPlayerService : Service() {
                     }
                 }
                 delay(250)
-            }
-        }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundService()
-        when (intent?.action) {
-            ACTION_PLAY -> {
-                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
-                val uri = intent.getStringExtra(EXTRA_FILE_URI) ?: intent.getStringExtra(EXTRA_FILE_PATH)
-                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
-                if (!uriList.isNullOrEmpty()) {
-                    serviceScope.launch { playPlaylist(uriList, startIndex) }
-                } else if (uri != null) {
-                    serviceScope.launch { playFile(uri) }
-                } else {
-                    player?.apply {
-                        playWhenReady = true
-                        play()
-                    }
-                }
-            }
-            ACTION_PLAY_LIST -> {
-                val uriList = intent.getStringArrayListExtra(EXTRA_FILE_URI_LIST)
-                val startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
-                if (!uriList.isNullOrEmpty()) {
-                    serviceScope.launch { playPlaylist(uriList, startIndex) }
-                }
-            }
-            ACTION_PAUSE -> player?.pause()
-            ACTION_NEXT -> playNext()
-            ACTION_PREVIOUS -> playPrevious()
-            ACTION_STOP -> stopSelf()
-            ACTION_SEEK_TO -> {
-                val pos = intent.getLongExtra(EXTRA_CURRENT_POSITION, -1L)
-                if (pos >= 0L) {
-                    player?.seekTo(pos)
-                    _currentPosition.value = pos
-                    broadcastPositionUpdate()
-                    updateMediaSessionState()
-                }
-            }
-            ACTION_SET_EQUALIZER -> {
-                intent.getStringExtra(EXTRA_EQUALIZER_PRESET)?.let { equalizerEngine.applyPreset(it) }
-                intent.getFloatArrayExtra(EXTRA_EQUALIZER_BANDS)?.let { equalizerEngine.applyBands(it.toList()) }
-            }
-            ACTION_SET_REPEAT_MODE -> {
-                val mode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
-                player?.repeatMode = mode
-            }
-        }
-        return START_STICKY
-    }
-
-    private suspend fun playFile(uriString: String) = withContext(Dispatchers.Main) {
-        try {
-            val mediaUri = Uri.parse(uriString)
-            currentMediaUri = mediaUri
-            Log.d("NEXUS_PLAYER", "Playing: $mediaUri")
-            acquireAudioFocus()
-            player?.apply {
-                stop()
-                setMediaItem(MediaItem.fromUri(mediaUri))
-                prepare()
-                playWhenReady = true
-                play()
-            }
-            safeAcquireWakeLock()
-            updateMediaSessionMetadata()
-            updateNotification()
-            broadcastTrackChanged()
-        } catch (e: Exception) {
-            Log.e("NEXUS_PLAYER", "Error playing file: $uriString", e)
-        }
-    }
-
-    // Загрузка целого плейлиста в очередь ExoPlayer (бесшовный автопереход)
-    private suspend fun playPlaylist(uriStrings: List<String>, startIndex: Int = 0) = withContext(Dispatchers.Main) {
-        if (uriStrings.isEmpty()) return@withContext
-        try {
-            val validIndex = startIndex.coerceIn(0, uriStrings.size - 1)
-            val mediaItems = uriStrings.map { MediaItem.fromUri(Uri.parse(it)) }
-            currentMediaUri = Uri.parse(uriStrings[validIndex])
-            Log.d("NEXUS_PLAYER", "Playing playlist: ${uriStrings.size} items, starting at $validIndex")
-            acquireAudioFocus()
-            player?.apply {
-                stop()
-                setMediaItems(mediaItems, validIndex, 0L)
-                prepare()
-                playWhenReady = true
-                play()
-            }
-            safeAcquireWakeLock()
-            updateMediaSessionMetadata()
-            updateNotification()
-            broadcastTrackChanged()
-        } catch (e: Exception) {
-            Log.e("NEXUS_PLAYER", "Error playing playlist", e)
-        }
-    }
-
-    private fun playNext() {
-        player?.let { p ->
-            acquireAudioFocus()
-            if (p.hasNextMediaItem()) {
-                p.seekToNextMediaItem()
-                p.playWhenReady = true
-                p.play()
-                safeAcquireWakeLock()
-                updateCurrentMediaInfo(p.currentMediaItem)
-                updateMediaSessionMetadata()
-                updateNotification()
-                broadcastTrackChanged()
-            } else {
-                // Если мы в конце списка, проверяем режим повтора или запрашиваем следующий трек у UI
-                if (p.repeatMode == Player.REPEAT_MODE_ALL) {
-                    p.seekToDefaultPosition(0)
-                    p.playWhenReady = true
-                    p.play()
-                    safeAcquireWakeLock()
-                    updateCurrentMediaInfo(p.currentMediaItem)
-                    updateMediaSessionMetadata()
-                    updateNotification()
-                    broadcastTrackChanged()
-                } else {
-                    broadcastTrackEnded(isNext = true)
-                }
-            }
-        }
-    }
-
-    private fun playPrevious() {
-        player?.let { p ->
-            acquireAudioFocus()
-            if (p.hasPreviousMediaItem()) {
-                p.seekToPreviousMediaItem()
-                p.playWhenReady = true
-                p.play()
-                safeAcquireWakeLock()
-                updateCurrentMediaInfo(p.currentMediaItem)
-                updateMediaSessionMetadata()
-                updateNotification()
-                broadcastTrackChanged()
-            } else {
-                // Если предыдущего нет, перематываем текущий в начало или сообщаем UI
-                p.seekTo(0)
-                p.playWhenReady = true
-                p.play()
-                safeAcquireWakeLock()
-                broadcastPositionUpdate()
-                updateMediaSessionState()
-                broadcastTrackEnded(isNext = false)
             }
         }
     }
@@ -647,10 +544,23 @@ class CyberPlayerService : Service() {
 
     private fun updateNotification() {
         try {
-            val notification = buildNotification()
+            val isPlaying = player?.isPlaying == true
+            val title = player?.currentMediaItem?.mediaMetadata?.title?.takeIf { it.isNotBlank() }?.toString()
+                ?: currentMediaUri?.lastPathSegment ?: "NEXUS PLAYER"
+            val artist = player?.currentMediaItem?.mediaMetadata?.artist?.takeIf { it.isNotBlank() }?.toString()
+                ?: "Воспроизведение"
+
+            val notification = notificationHelper.buildNotification(
+                isPlaying = isPlaying,
+                title = title,
+                artist = artist,
+                sessionToken = mediaSession?.sessionToken
+            )
+            
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(NOTIFICATION_ID, notification)
-            if (player?.isPlaying == true) {
+            
+            if (isPlaying) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
                 } else {
@@ -660,45 +570,6 @@ class CyberPlayerService : Service() {
         } catch (e: Exception) {
             Log.e("NEXUS_PLAYER", "Failed to update notification", e)
         }
-    }
-
-    private fun buildNotification(): Notification {
-        val isPlaying = player?.isPlaying == true
-        val title = player?.currentMediaItem?.mediaMetadata?.title?.takeIf { it.isNotBlank() }?.toString()
-            ?: currentMediaUri?.lastPathSegment ?: "NEXUS PLAYER"
-        val text = player?.currentMediaItem?.mediaMetadata?.artist?.takeIf { it.isNotBlank() }?.toString()
-            ?: "Воспроизведение"
-        val playPauseIcon = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play
-        val playPauseTitle = if (isPlaying) "Pause" else "Play"
-        val playPauseAction = if (isPlaying) ACTION_PAUSE else ACTION_PLAY
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setSmallIcon(R.drawable.ic_neon_skull)
-            .setColor(Color.parseColor("#FF007F"))
-            .setOngoing(isPlaying)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(R.drawable.ic_previous, "Prev", createPI(ACTION_PREVIOUS))
-            .addAction(playPauseIcon, playPauseTitle, createPI(playPauseAction))
-            .addAction(R.drawable.ic_next, "Next", createPI(ACTION_NEXT))
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
-            .build()
-    }
-
-    private fun createPI(action: String): PendingIntent {
-        val intent = Intent(this, CyberPlayerService::class.java).setAction(action)
-        return PendingIntent.getService(
-            this,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
     }
 
     private fun broadcastPlaybackState() {
@@ -735,14 +606,6 @@ class CyberPlayerService : Service() {
             currentMediaUri?.toString()?.let { putExtra(EXTRA_FILE_PATH, it) }
         }
         sendBroadcast(intent)
-    }
-
-    private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW))
-            nm.createNotificationChannel(NotificationChannel(ERROR_CHANNEL_ID, "Errors", NotificationManager.IMPORTANCE_HIGH))
-        }
     }
 
     override fun onDestroy() {
